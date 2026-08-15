@@ -1,0 +1,32 @@
+import pytest
+
+from media_finder.config import EnvReference, SettingsRepository, redact, resolve_env_reference
+
+
+def test_only_valid_environment_references_are_persistable(monkeypatch) -> None:
+    reference = EnvReference(value="env:MEDIA_FINDER_TOKEN")
+    monkeypatch.setenv("MEDIA_FINDER_TOKEN", "top-secret")
+    assert resolve_env_reference(reference).get_secret_value() == "top-secret"
+    with pytest.raises(ValueError):
+        EnvReference(value="top-secret")
+    with pytest.raises(ValueError):
+        EnvReference(value="env:path/to/value")
+
+
+def test_redaction_removes_secrets_and_sensitive_urls() -> None:
+    value = "failed https://user:pass@example.test/a?api_key=secret#fragment top-secret"
+    result = redact(value, secrets=["top-secret", "secret"])
+    assert "pass" not in result
+    assert "secret" not in result
+    assert "api_key" not in result
+    assert result == "failed https://example.test/a [REDACTED]"
+
+
+def test_settings_repository_persists_only_secret_reference(database) -> None:
+    settings = SettingsRepository(database)
+    settings.set_secret_reference("integration.token", "env:MEDIA_FINDER_TOKEN")
+    assert settings.get_reference("integration.token") == EnvReference(
+        value="env:MEDIA_FINDER_TOKEN"
+    )
+    with pytest.raises(ValueError):
+        settings.set_secret_reference("integration.token", "resolved-secret")

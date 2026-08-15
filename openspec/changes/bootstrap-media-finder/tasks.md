@@ -1,19 +1,19 @@
 ## 1. Python and persistence foundation
 
-- [ ] 1.1 Create the Python 3.13 `uv` project, local asset build, formatting, linting, typing, and test configuration.
-- [ ] 1.2 Add application configuration with environment-only secret resolution and safe redaction.
-- [ ] 1.3 Add SQLAlchemy models and Alembic migrations for collections, media items, immutable metadata revisions, acquisitions, download-client instances, and settings.
-- [ ] 1.4 Configure SQLite WAL, foreign keys, uniqueness, archive semantics, and migration-aware readiness.
-- [ ] 1.5 Add deterministic tests for provider identity, Manual UUIDv4 allocation/import preservation, duplicate warnings, archive behavior, immutable revisions, and idempotency constraints.
+- [x] 1.1 Create the Python 3.13 `uv` project, local asset build, formatting, linting, typing, and test configuration.
+- [x] 1.2 Add application configuration with environment-only secret resolution and safe redaction.
+- [x] 1.3 Add SQLAlchemy models and Alembic migrations for collections, media items, immutable metadata revisions, acquisitions, download-client instances, and settings.
+- [x] 1.4 Configure SQLite WAL, foreign keys, uniqueness, archive semantics, and migration-aware readiness.
+- [x] 1.5 Add deterministic tests for provider identity, Manual UUIDv4 allocation/import preservation, duplicate warnings, archive behavior, immutable revisions, and idempotency constraints.
 
 ## 2. Module SDK and metadata providers
 
-- [ ] 2.1 Define versioned public manifests, Pydantic types, standardized errors, and metadata-provider/download-client protocols.
-- [ ] 2.2 Build fixture-driven conformance suites proving modules require no database or UI-template access.
-- [ ] 2.3 Build generic module settings forms from typed schemas and environment references without module HTML or JavaScript.
-- [ ] 2.4 Implement Manual movie/series editing, schema-v1 JSON import, and atomic episode CSV import with immutable revisions.
-- [ ] 2.5 Implement TMDB search, fetch, normalization, attribution, provenance, and locale behavior.
-- [ ] 2.6 Implement provider-owned retention hooks, generic startup/daily maintenance, fake-clock refresh/purge tests, and core checks that exclude provider-specific policy.
+- [x] 2.1 Define versioned public manifests, Pydantic types, standardized errors, and metadata-provider/download-client protocols.
+- [x] 2.2 Build fixture-driven conformance suites proving modules require no database or UI-template access.
+- [x] 2.3 Build generic module settings forms from typed schemas and environment references without module HTML or JavaScript.
+- [x] 2.4 Implement Manual movie/series editing, schema-v1 JSON import, and atomic episode CSV import with immutable revisions.
+- [x] 2.5 Implement TMDB search, fetch, normalization, attribution, provenance, and locale behavior.
+- [x] 2.6 Implement provider-owned retention hooks, generic startup/daily maintenance, fake-clock refresh/purge tests, and core checks that exclude provider-specific policy.
 
 ## 3. Torrent acquisition
 

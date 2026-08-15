@@ -1,0 +1,7 @@
+{
+  "schema_version": "1",
+  "kind": "movie",
+  "locale": "en",
+  "titles": {"en": "Fixture Movie"},
+  "year": 2024
+}

@@ -4,6 +4,11 @@
   "version": "0.0.0",
   "packageManager": "pnpm@11.19.0",
   "scripts": {
+    "assets:build": "node scripts/build-assets.mjs",
+    "py:format": "uv run ruff format --check .",
+    "py:lint": "uv run ruff check .",
+    "py:type": "uv run mypy",
+    "py:test": "uv run pytest",
     "spec:validate": "openspec validate bootstrap-media-finder --strict",
     "spec:list": "openspec list"
   },

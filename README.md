@@ -2,7 +2,7 @@
 
 Media Finder is a self-hosted catalog and torrent-acquisition control plane for manually curated movie and series libraries. It preserves selected metadata revisions, delegates downloads to pluggable clients, and gives external processors stable metadata, naming, and NFO APIs.
 
-The project is currently in its spec-first bootstrap stage. Application code will follow the approved [`bootstrap-media-finder`](openspec/changes/bootstrap-media-finder/) OpenSpec change.
+The project is being implemented from the approved [`bootstrap-media-finder`](openspec/changes/bootstrap-media-finder/) OpenSpec change.
 
 ## Product boundary
 
@@ -10,10 +10,15 @@ Media Finder owns catalog metadata, user collections, manual release selection, 
 
 ## Development bootstrap
 
-Prerequisites: Node.js 20.19 or newer and pnpm 11.19.
+Prerequisites: CPython 3.13, [uv](https://docs.astral.sh/uv/), Node.js 20.19 or newer, and pnpm 11.19.
 
 ```console
 pnpm install --frozen-lockfile
+uv sync --frozen --all-groups
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy
+uv run pytest
 pnpm spec:validate
 pnpm spec:list
 ```

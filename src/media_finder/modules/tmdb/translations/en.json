@@ -1,0 +1,5 @@
+{
+  "module.tmdb.name": "TMDB",
+  "module.tmdb.settings.api_token": "API token environment reference",
+  "module.tmdb.settings.base_url": "API base URL"
+}
