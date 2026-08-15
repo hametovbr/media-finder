@@ -14,8 +14,15 @@ def _project(path: Path) -> dict[str, object]:
 def test_workspace_declares_independently_buildable_packages() -> None:
     root_config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
-    assert root_config["tool"]["uv"]["workspace"]["members"] == ["packages/*"]
+    assert root_config["tool"]["uv"]["workspace"]["members"] == [
+        "apps/*",
+        "packages/*",
+        "packages/modules/*",
+    ]
     assert root_config["tool"]["uv"]["sources"] == {
+        "media-finder": {"workspace": True},
+        "media-finder-core": {"workspace": True},
+        "media-finder-module-sdk": {"workspace": True},
         "media-finder-control-contracts": {"workspace": True},
         "media-finder-builtin-ui": {"workspace": True},
     }

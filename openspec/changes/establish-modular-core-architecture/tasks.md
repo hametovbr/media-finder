@@ -7,8 +7,8 @@
 
 ## 2. Create the Workspace and Public Module SDK
 
-- [ ] 2.1 Add RED package-build tests for a virtual root workspace plus independently installable `media-finder`, `media-finder-core`, and `media-finder-module-sdk` wheels with `py.typed`, explicit `__all__`, and no undeclared source-tree imports.
-- [ ] 2.2 Convert the root to a virtual uv workspace, add `apps/server`, `packages/core`, and `packages/module-sdk` source-layout distributions, preserve the existing control/UI distributions, and make the focused wheel tests GREEN without moving live behavior yet.
+- [x] 2.1 Add RED package-build tests for a virtual root workspace plus independently installable `media-finder`, `media-finder-core`, and `media-finder-module-sdk` wheels with `py.typed`, explicit `__all__`, and no undeclared source-tree imports.
+- [x] 2.2 Convert the root to a virtual uv workspace, add `apps/server`, `packages/core`, and `packages/module-sdk` source-layout distributions, preserve the existing control/UI distributions, and make the focused wheel tests GREEN without moving live behavior yet.
 - [ ] 2.3 Add RED SDK tests for value-free `module.toml` loading, stable module identity, specialized kinds, semantic versions, SDK ranges, contract versions, capabilities, attribution, translation keys, exact environment declarations, duplicate/conflict rejection, and redacted immutable resolved values.
 - [ ] 2.4 Implement the manifest, environment, registration, stable error, lifecycle, and immutable DTO foundations in `media-finder-module-sdk`; keep FastAPI, SQLAlchemy, Jinja, httpx, core, and control contracts out of its dependency graph and make the focused tests GREEN.
 - [ ] 2.5 Add RED capability tests for `MetadataProvider`, configuration-free metadata retention, `ReleaseProvider`, and `DownloadClient`, including unsupported capability/kind combinations, standardized failures, lifecycle cleanup, and the absence of universal hooks or module lookup.
