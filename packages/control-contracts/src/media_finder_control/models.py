@@ -12,7 +12,13 @@ from .common import (
     MediaKind,
     ReadinessStatus,
 )
-from .manual import ManualDocumentV1, SeasonDocument
+from .manual import (
+    ArtworkDocument,
+    ManualDocumentV1,
+    PersonDocument,
+    RatingDocument,
+    SeasonDocument,
+)
 
 
 class BrowserSession(ControlModel):
@@ -53,10 +59,13 @@ class MetadataView(ControlModel):
     release_date: date | None = None
     runtime_minutes: int | None = None
     provider_ids: dict[str, str] = Field(default_factory=dict)
+    ratings: tuple[RatingDocument, ...] = ()
     genres: tuple[str, ...] = ()
     tags: tuple[str, ...] = ()
     countries: tuple[str, ...] = ()
     studios: tuple[str, ...] = ()
+    people: tuple[PersonDocument, ...] = ()
+    artwork: tuple[ArtworkDocument, ...] = ()
     seasons: tuple[SeasonDocument, ...] = ()
 
 

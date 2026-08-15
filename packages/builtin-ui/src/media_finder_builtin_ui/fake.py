@@ -34,6 +34,10 @@ from media_finder_control.models import (
     ReleaseSearchResult,
 )
 
+RU_EXAMPLE = "\u041f\u0440\u0438\u043c\u0435\u0440"
+RU_MOVIE = f"{RU_EXAMPLE} \u0444\u0438\u043b\u044c\u043c\u0430"
+RU_SERIES = f"{RU_EXAMPLE} \u0441\u0435\u0440\u0438\u0430\u043b\u0430"
+
 
 class FakeControlGateway:
     """Stable fixture implementation with no persistence or network access."""
@@ -68,10 +72,7 @@ class FakeControlGateway:
         del page, collection_id, uncategorized
         titles = {
             Locale.EN: ("Example Movie", "Example Series"),
-            Locale.RU: (
-                "\u041f\u0440\u0438\u043c\u0435\u0440 \u0444\u0438\u043b\u044c\u043c\u0430",
-                "\u041f\u0440\u0438\u043c\u0435\u0440 \u0441\u0435\u0440\u0438\u0430\u043b\u0430",
-            ),
+            Locale.RU: (RU_MOVIE, RU_SERIES),
         }
         movie, series = titles[locale]
         return Page(
@@ -101,7 +102,7 @@ class FakeControlGateway:
         if item_id == "series-1":
             titles = {
                 "en": "Example Series",
-                "ru": "\u041f\u0440\u0438\u043c\u0435\u0440 \u0441\u0435\u0440\u0438\u0430\u043b\u0430",
+                "ru": RU_SERIES,
             }
             metadata = MetadataView(
                 kind=MediaKind.SERIES,
@@ -125,7 +126,7 @@ class FakeControlGateway:
         else:
             titles = {
                 "en": "Example Movie",
-                "ru": "\u041f\u0440\u0438\u043c\u0435\u0440 \u0444\u0438\u043b\u044c\u043c\u0430",
+                "ru": RU_MOVIE,
             }
             metadata = MetadataView(kind=MediaKind.MOVIE, titles=titles, year=2024)
             provider = "manual"
@@ -187,11 +188,7 @@ class FakeControlGateway:
                 provider_key="tmdb",
                 external_id="100",
                 kind=MediaKind.SERIES,
-                title=(
-                    "Example Series"
-                    if request.locale is Locale.EN
-                    else "\u041f\u0440\u0438\u043c\u0435\u0440 \u0441\u0435\u0440\u0438\u0430\u043b\u0430"
-                ),
+                title=("Example Series" if request.locale is Locale.EN else RU_SERIES),
                 year=2025,
                 locale=request.locale,
             ),

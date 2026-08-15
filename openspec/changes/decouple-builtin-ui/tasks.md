@@ -7,12 +7,12 @@
 
 ## 2. Backend gateway and bounded state
 
-- [ ] 2.1 Add focused failing tests for HMAC cursor signing, endpoint/filter binding, stable continuation, default 50, maximum 100, and tampering; implement the backend cursor codec and paged catalog/collection gateway operations to GREEN.
-- [ ] 2.2 Add focused failing gateway tests for provider search, exact duplicates, cross-provider similarity confirmation, immutable revisions, metadata locale, and one-use metadata selections; move the selection cache behind the gateway and make them GREEN.
-- [ ] 2.3 Add focused failing gateway tests for complete Manual create/edit/import, canonical existing-identity confirmation, lossless rich metadata, and atomic bounded CSV import; implement the Manual gateway operations and confirmation cache to GREEN.
-- [ ] 2.4 Add focused failing gateway tests for release search, live system qBittorrent destinations, one-use release tokens, idempotent submission, timeout behavior, and reconcile without Prowlarr; implement acquisition gateway operations to GREEN.
-- [ ] 2.5 Add focused failing gateway tests for safe environment diagnostics and attributions with set, missing, ready, and unavailable integrations; implement the diagnostic gateway operations without values or upstream bodies.
-- [ ] 2.6 Run the gateway contract suite against real backend composition and confirm every expected domain/module failure becomes a stable `ControlFailure` without duplicating domain validation.
+- [x] 2.1 Add focused failing tests for HMAC cursor signing, endpoint/filter binding, stable continuation, default 50, maximum 100, and tampering; implement the backend cursor codec and paged catalog/collection gateway operations to GREEN.
+- [x] 2.2 Add focused failing gateway tests for provider search, exact duplicates, cross-provider similarity confirmation, immutable revisions, metadata locale, and one-use metadata selections; move the selection cache behind the gateway and make them GREEN.
+- [x] 2.3 Add focused failing gateway tests for complete Manual create/edit/import, canonical existing-identity confirmation, lossless rich metadata, and atomic bounded CSV import; implement the Manual gateway operations and confirmation cache to GREEN.
+- [x] 2.4 Add focused failing gateway tests for release search, live system qBittorrent destinations, one-use release tokens, idempotent submission, timeout behavior, and reconcile without Prowlarr; implement acquisition gateway operations to GREEN.
+- [x] 2.5 Add focused failing gateway tests for safe environment diagnostics and attributions with set, missing, ready, and unavailable integrations; implement the diagnostic gateway operations without values or upstream bodies.
+- [x] 2.6 Run the gateway contract suite against real backend composition and confirm every expected domain/module failure becomes a stable `ControlFailure` without duplicating domain validation.
 
 ## 3. Browser security and HTTP control adapter
 
