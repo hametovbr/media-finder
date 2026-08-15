@@ -1,0 +1,13 @@
+{
+  "name": "media-finder-tooling",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "spec:validate": "openspec validate bootstrap-media-finder --strict",
+    "spec:list": "openspec list"
+  },
+  "devDependencies": {
+    "@fission-ai/openspec": "1.9.0"
+  }
+}

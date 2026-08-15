@@ -1,0 +1,4 @@
+interface:
+  display_name: "Add Download Client"
+  short_description: "Add a conforming torrent client module"
+  default_prompt: "Use $adding-download-client to add a download client with exact correlation and contract tests."

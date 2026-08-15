@@ -1,0 +1,30 @@
+schema: spec-driven
+context: |
+  Media Finder is a self-hosted catalog and torrent-acquisition control plane.
+  Repository documentation and developer-facing prose are English-only.
+  The MVP uses Python 3.13, FastAPI, Jinja2/HTMX, SQLAlchemy/Alembic, SQLite WAL, and one container.
+  It does not scan, mux, move, or monitor media files and does not invoke Jellyfin.
+  Provider-specific retention belongs exclusively to metadata-provider modules.
+  Naming and exports must not assume a media-container extension.
+  Secrets come from environment variables; persistence stores only env:NAME references.
+rules:
+  proposal:
+    - State product-boundary additions and removals explicitly.
+    - Identify every new or modified public capability.
+  specs:
+    - Make security, retention ownership, and extension independence testable.
+    - Keep implementation-library choices in design rather than requirements.
+  design:
+    - Perform a subtraction pass and justify every new runtime component.
+    - Record module ownership and secret-handling boundaries.
+  tasks:
+    - Put failing behavior or contract tests before production implementation.
+    - Include strict OpenSpec and repository validation.
+operations:
+  apply:
+    guidance:
+      - Preserve the catalog-and-acquisition boundary.
+      - Update module contracts, fixtures, and conformance tests together.
+  archive:
+    guidance:
+      - Run strict validation before and after synchronization.

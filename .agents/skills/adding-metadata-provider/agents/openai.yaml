@@ -1,0 +1,4 @@
+interface:
+  display_name: "Add Metadata Provider"
+  short_description: "Add a conforming metadata source module"
+  default_prompt: "Use $adding-metadata-provider to add a metadata provider with complete contracts and tests."

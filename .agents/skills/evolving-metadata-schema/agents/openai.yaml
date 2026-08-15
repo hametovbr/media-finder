@@ -1,0 +1,4 @@
+interface:
+  display_name: "Evolve Metadata Schema"
+  short_description: "Change normalized metadata without drift"
+  default_prompt: "Use $evolving-metadata-schema to evolve normalized metadata across every producer and consumer."
