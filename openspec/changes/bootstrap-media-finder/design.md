@@ -51,7 +51,7 @@ Alternatives rejected:
 
 ### 3. Publish narrow typed module contracts
 
-Define versioned Pydantic public types and protocols in a core SDK package. A metadata provider exposes its manifest, capabilities, config validation, search, fetch, normalization, attribution, standardized errors, and retention planning/execution hooks. A download client exposes its manifest, config validation, live destinations, artifact submission, and exact-correlation lookup.
+Define versioned Pydantic public types and protocols in a core SDK package. A metadata provider exposes its manifest, capabilities, config validation, search, fetch, normalization, attribution, standardized errors, retention planning, and provider-owned policy calculation. Core applies a planned refresh through the same public fetch, normalize, and policy operations and applies a planned purge generically; no raw provider payload is added to a public response model. A download client exposes its manifest, config validation, live destinations, artifact submission, and exact-correlation lookup.
 
 Core owns orchestration and persistence through service interfaces. Modules receive data and narrowly scoped HTTP/runtime services, never database sessions or template directories. Manifests reference typed config fields and translation keys; core renders generic forms. Shared conformance suites run against fixture-backed module factories.
 
@@ -64,7 +64,7 @@ Alternatives rejected:
 
 ### 4. Put retention decisions entirely in metadata providers
 
-The revision envelope carries optional provider-supplied maintenance timestamps and status. Core runs a provider-agnostic maintenance coordinator at startup and once per day. It enumerates every installed registered provider type owning persisted revisions, including providers without current active configuration, passes due revision references through their public hook, and applies generic returned actions transactionally.
+The revision envelope carries optional provider-supplied maintenance timestamps and status. Core runs a provider-agnostic maintenance coordinator at startup and once per day. It enumerates every installed registered provider type owning persisted revisions, including providers without current active configuration, asks each provider to plan due work, and applies the returned action transactionally. For refresh, core uses the provider's existing public fetch, normalize, and policy operations and persists the raw payload only as local orchestration material; for purge, core clears the derived payload generically.
 
 The TMDB package alone computes five-calendar-month refresh and six-calendar-month expiry using calendar arithmetic and defines refresh plus mandatory-at-expiry purge actions. The Manual package returns no due work. Core code and configuration contain no TMDB name, duration, or special-case branch. Export authorization checks module-computed expiry synchronously so delayed maintenance never serves expired derived data.
 
