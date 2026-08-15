@@ -29,14 +29,18 @@ Search results SHALL live only in a bounded in-memory TTL cache, and the browser
 - **THEN** the system rejects it with a stable safe code without persisting or logging sensitive content and a selected release token remains one-use
 
 ### Requirement: Live destination selection
-The system SHALL support named download-client instances and SHALL reload destinations from the selected client immediately before submission. The user SHALL explicitly select a current destination.
+The system SHALL use one environment-owned qBittorrent instance for new acquisitions and SHALL reload its categories immediately before submission. The user SHALL explicitly select a current destination but SHALL NOT select, create, edit, archive, or restore a download-client instance.
 
 #### Scenario: Destination disappears
 - **WHEN** a destination chosen from an older UI view no longer exists during the live reload
-- **THEN** submission is rejected safely and the user receives the current destination list
+- **THEN** submission is rejected safely and the user receives the current destination list from the environment-owned qBittorrent instance
+
+#### Scenario: qBittorrent environment is incomplete
+- **WHEN** one or more required qBittorrent variables are absent
+- **THEN** release submission is unavailable without affecting catalog or metadata operations
 
 ### Requirement: Idempotent acquisition creation
-Before submitting, the system SHALL create a `pending` Acquisition with a UUID, idempotency key, pinned metadata revision, selected download-client instance, destination, release snapshot, and naming-profile identifier. Reusing the same idempotency key SHALL return the same Acquisition.
+Before submitting, the system SHALL create a `pending` Acquisition with a UUID, idempotency key, pinned metadata revision, the stable environment-owned qBittorrent client record, destination, release snapshot, and naming-profile identifier. Reusing the same idempotency key SHALL return the same Acquisition.
 
 #### Scenario: Duplicate form submission
 - **WHEN** the same idempotency key is submitted twice
@@ -64,15 +68,22 @@ A source-page URL SHALL be accepted only from a dedicated public-page field with
 - **THEN** the snapshot may persist both normalized identifiers without persisting the release artifact or resolution URL
 
 ### Requirement: Exact client correlation
-The system SHALL submit the exact correlation token `mf-acq-<acquisition-uuid>`. The qBittorrent module SHALL store the chosen destination as category and the exact correlation token as a tag. Authenticated HTTP sessions SHALL be isolated between TMDB, Prowlarr, and every qBittorrent instance so a cookie from one service or port cannot reach another.
+The system SHALL submit the exact correlation token `mf-acq-<acquisition-uuid>`. The environment-owned qBittorrent module SHALL store the chosen destination as category and the exact correlation token as a tag. Authenticated HTTP sessions SHALL be isolated between TMDB, Prowlarr, and qBittorrent so a cookie from one service or port cannot reach another.
 
 #### Scenario: Submit to qBittorrent
 - **WHEN** qBittorrent accepts a selected artifact
 - **THEN** the torrent uses the selected category and an exact `mf-acq-<uuid>` tag, and the Acquisition becomes `submitted`
 
 #### Scenario: Live integration construction fails
-- **WHEN** Prowlarr validation or a metadata-provider or download-client builder fails after creating one or more HTTP clients
+- **WHEN** Prowlarr validation or a metadata-provider or qBittorrent builder fails after creating one or more HTTP clients
 - **THEN** the runtime validates before caching, immediately closes and forgets every client created by that failed attempt, including across repeated failures, and leaves unrelated successful cached integrations open
+
+### Requirement: Preserve historical client references
+The system SHALL retain download-client rows referenced by existing Acquisitions while preventing legacy persisted configurations from being used for new discovery, submission, or reconciliation. It SHALL maintain one stable system-owned qBittorrent client identity for new Acquisitions.
+
+#### Scenario: Upgrade a database with client history
+- **WHEN** an existing deployment containing named client instances is upgraded
+- **THEN** historical Acquisition records remain readable and new Acquisitions reference only the system-owned qBittorrent identity
 
 ### Requirement: Bounded acquisition states
 The MVP SHALL expose only `pending`, `submitted`, and `failed` acquisition states and SHALL NOT track progress after successful submission.
@@ -99,4 +110,3 @@ On submission timeout, the system SHALL immediately query the selected client by
 #### Scenario: Retry a failed release
 - **WHEN** a user retries after a failed Acquisition
 - **THEN** the user performs a fresh search and the system creates a new Acquisition UUID
-
