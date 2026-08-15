@@ -1,0 +1,5 @@
+{
+  "module.tmdb.name": "TMDB",
+  "module.tmdb.notice": "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+  "module.tmdb.environment.token": "TMDB API read access token"
+}

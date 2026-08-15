@@ -1,0 +1,14 @@
+{
+  "id": 900,
+  "name": "Fixture Series",
+  "original_name": "Fixture Series Original",
+  "overview": "A fixture series with a special.",
+  "first_air_date": "2020-01-01",
+  "vote_average": 7.25,
+  "genres": [{"name": "Animation"}],
+  "production_countries": [{"name": "United Kingdom"}],
+  "production_companies": [{"name": "Fixture Studio"}],
+  "poster_path": "/series-poster.jpg",
+  "backdrop_path": "/series-backdrop.jpg",
+  "seasons": [{"id": 9010, "season_number": 0, "name": "Specials"}]
+}

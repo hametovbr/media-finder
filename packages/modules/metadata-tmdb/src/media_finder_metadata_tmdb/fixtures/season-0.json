@@ -1,20 +1,16 @@
 {
-  "_id": "fixture-specials",
-  "id": 9000,
+  "id": 9010,
   "season_number": 0,
   "name": "Specials",
-  "overview": "Special presentations.",
-  "poster_path": "/specials-poster.jpg",
   "episodes": [
     {
       "id": 901,
       "episode_number": 1,
-      "season_number": 0,
-      "name": "A Special",
+      "name": "The Special",
       "overview": "A special episode.",
       "air_date": "2020-02-01",
       "runtime": 24,
-      "show_id": 900
+      "order": 1
     }
   ]
 }

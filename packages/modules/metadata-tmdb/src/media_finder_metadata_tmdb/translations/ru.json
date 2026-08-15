@@ -1,0 +1,5 @@
+{
+  "module.tmdb.name": "TMDB",
+  "module.tmdb.notice": "Этот продукт использует TMDB API, но не поддерживается и не сертифицирован TMDB.",
+  "module.tmdb.environment.token": "Токен доступа на чтение TMDB API"
+}

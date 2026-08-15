@@ -513,6 +513,28 @@ def test_tmdb_failures_are_standardized_and_redact_secrets_and_sensitive_urls() 
     assert all(client.is_closed for client in clients.clients)
 
 
+def test_tmdb_malformed_search_results_raise_a_standardized_safe_failure() -> None:
+    def malformed(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/3/configuration":
+            return httpx.Response(200, json={})
+        return httpx.Response(
+            200,
+            json={"results": [{"id": 129, "title": "Broken date", "release_date": "not-a-date"}]},
+        )
+
+    module = _module(RecordingClientFactory(malformed))
+    provider = module.build(resolve_module_environment(module.manifest, {"TMDB_TOKEN": TOKEN}))
+
+    try:
+        with pytest.raises(ModuleError) as captured:
+            provider.search(MetadataSearchQuery(query="Broken", locale="en-US"))
+    finally:
+        provider.close()
+
+    assert captured.value.code == "metadata_provider_unavailable"
+    assert str(captured.value) == "metadata_provider_unavailable"
+
+
 def test_tmdb_retention_is_configuration_free_and_uses_calendar_month_boundaries() -> None:
     clients = RecordingClientFactory()
     retention = _module(clients).retention()

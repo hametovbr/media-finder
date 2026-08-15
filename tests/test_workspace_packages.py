@@ -26,6 +26,7 @@ def test_workspace_declares_independently_buildable_packages() -> None:
         "media-finder-control-contracts": {"workspace": True},
         "media-finder-builtin-ui": {"workspace": True},
         "media-finder-metadata-manual": {"workspace": True},
+        "media-finder-metadata-tmdb": {"workspace": True},
     }
 
     contracts = _project(CONTRACTS_ROOT / "pyproject.toml")

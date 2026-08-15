@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 from media_finder import sdk
 from media_finder.modules import registry as module_registry
-from media_finder.modules.tmdb import TmdbConfig, TmdbProvider
 from media_finder.sdk import conformance
 from media_finder.sdk.conformance import (
     ClientConformanceFixture,
@@ -85,34 +84,6 @@ def test_fixture_modules_conform(fake_provider, fake_client) -> None:
     )
 
 
-class RealProviderTransport:
-    def get_json(self, path: str, params: dict[str, str]) -> dict:
-        if path == "/search/movie":
-            return {"results": [{"id": 1, "title": "Fixture", "release_date": "2024-01-01"}]}
-        if path == "/search/tv":
-            return {"results": []}
-        return {"id": 1, "title": "Fixture", "release_date": "2024-01-01"}
-
-
-def test_real_tmdb_provider_conforms_without_application_dependencies() -> None:
-    created = datetime(2026, 1, 1, tzinfo=UTC)
-    assert_provider_conforms(
-        TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), RealProviderTransport()),
-        ProviderConformanceFixture(
-            query="Fixture",
-            locale="en-US",
-            kind=MediaKind.MOVIE,
-            external_id="1",
-            raw_payload={"id": 1, "title": "Fixture", "release_date": "2024-01-01"},
-            expected_title="Fixture",
-            created_at=created,
-            retention_check_at=created,
-            expected_retention_action=RetentionActionKind.NONE,
-            expected_error_code="metadata_identity_invalid",
-        ),
-    )
-
-
 def test_public_models_never_contain_raw_provider_payload_fields() -> None:
     pending = list(PublicModel.__subclasses__())
     seen: set[type[PublicModel]] = set()
@@ -158,7 +129,7 @@ def test_provider_protocol_and_first_party_modules_use_only_public_sdk() -> None
 
     for module_path in (
         Path("packages/modules/metadata-manual/src/media_finder_metadata_manual/registration.py"),
-        Path("src/media_finder/modules/tmdb/__init__.py"),
+        Path("packages/modules/metadata-tmdb/src/media_finder_metadata_tmdb/registration.py"),
         Path("src/media_finder/modules/qbittorrent/__init__.py"),
     ):
         tree = ast.parse(module_path.read_text(encoding="utf-8"))

@@ -9,6 +9,7 @@ members = [
     "media-finder-control-contracts",
     "media-finder-core",
     "media-finder-metadata-manual",
+    "media-finder-metadata-tmdb",
     "media-finder-module-sdk",
 ]
 
@@ -326,6 +327,7 @@ dependencies = [
     { name = "media-finder-control-contracts" },
     { name = "media-finder-core" },
     { name = "media-finder-metadata-manual" },
+    { name = "media-finder-metadata-tmdb" },
     { name = "pydantic-settings" },
     { name = "uvicorn" },
 ]
@@ -337,6 +339,7 @@ requires-dist = [
     { name = "media-finder-control-contracts", editable = "packages/control-contracts" },
     { name = "media-finder-core", editable = "packages/core" },
     { name = "media-finder-metadata-manual", editable = "packages/modules/metadata-manual" },
+    { name = "media-finder-metadata-tmdb", editable = "packages/modules/metadata-tmdb" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "uvicorn", specifier = ">=0.35,<1" },
 ]
@@ -411,6 +414,25 @@ dependencies = [
 requires-dist = [
     { name = "media-finder-module-sdk", editable = "packages/module-sdk" },
     { name = "pydantic", specifier = ">=2.11,<3" },
+]
+
+[[package]]
+name = "media-finder-metadata-tmdb"
+version = "0.1.0"
+source = { editable = "packages/modules/metadata-tmdb" }
+dependencies = [
+    { name = "httpx" },
+    { name = "media-finder-module-sdk" },
+    { name = "pydantic" },
+    { name = "python-dateutil" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28,<1" },
+    { name = "media-finder-module-sdk", editable = "packages/module-sdk" },
+    { name = "pydantic", specifier = ">=2.11,<3" },
+    { name = "python-dateutil", specifier = ">=2.9,<3" },
 ]
 
 [[package]]
