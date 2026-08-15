@@ -27,7 +27,7 @@
 - [x] 3.6 Move Prowlarr into `media-finder-release-prowlarr`, implement the public ReleaseProvider registration and fixtures, make focused tests GREEN, update acquisition consumers to the specialized contract, and delete the core-special Prowlarr adapter.
 - [x] 3.7 Add RED isolated-wheel and download-client conformance tests for qBittorrent covering exact environment declarations, URL/auth validation, isolated cookies, live categories, magnet/torrent capabilities, exact correlation, ambiguous timeouts, lookup, redaction, and lifecycle cleanup.
 - [x] 3.8 Move qBittorrent into `media-finder-download-qbittorrent`, add its `module.toml` and public `registration()`, make focused tests GREEN, update consumers, and remove the old qBittorrent module source without a compatibility import.
-- [ ] 3.9 Add RED registry tests proving Manual, TMDB, Prowlarr, and qBittorrent use one host-supplied immutable typed registry, reject duplicate/conflicting manifests, receive only declared environment values, and close failed-attempt resources without affecting successful siblings.
+- [x] 3.9 Add RED registry tests proving Manual, TMDB, Prowlarr, and qBittorrent use one host-supplied immutable typed registry, reject duplicate/conflicting manifests, receive only declared environment values, and close failed-attempt resources without affecting successful siblings.
 - [ ] 3.10 Implement the host registry assembly and core module-runtime lifecycle to make the registry tests GREEN; ensure core contains no concrete integration names or imports and every first-party wheel passes its public conformance suite independently.
 
 ## 4. Establish Core Bounded Contexts
