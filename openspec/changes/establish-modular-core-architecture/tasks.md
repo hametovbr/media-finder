@@ -1,9 +1,9 @@
 ## 1. Freeze Behavior and Establish Architecture Gates
 
-- [ ] 1.1 Reconfirm before production edits that no persistent deployment data must survive; record the disposable-database reset in operator/developer guidance, and stop for `openspec-update-change` if that assumption is false.
-- [ ] 1.2 Run and record the current locked install, full pytest/Playwright suite, control OpenAPI snapshot, processor API behavior, asset build, fresh Alembic migration, and composed-app smoke as the characterization baseline.
-- [ ] 1.3 Add focused architecture tests for the approved distribution graph, prohibited imports, explicit public exports, source-layout isolation, absence of runtime module discovery, and one composition owner; run them to RED against the current combined backend.
-- [ ] 1.4 Add behavior-preservation tests for control and processor routes, HTML paths, UI modes, error envelopes, CSRF/cookies, localization, and integration diagnostics that would catch accidental changes during file movement; prove they are GREEN before restructuring.
+- [x] 1.1 Reconfirm before production edits that no persistent deployment data must survive; record the disposable-database reset in operator/developer guidance, and stop for `openspec-update-change` if that assumption is false.
+- [x] 1.2 Run and record the current locked install, full pytest/Playwright suite, control OpenAPI snapshot, processor API behavior, asset build, fresh Alembic migration, and composed-app smoke as the characterization baseline.
+- [x] 1.3 Add focused architecture tests for the approved distribution graph, prohibited imports, explicit public exports, source-layout isolation, absence of runtime module discovery, and one composition owner; run them to RED against the current combined backend.
+- [x] 1.4 Add behavior-preservation tests for control and processor routes, HTML paths, UI modes, error envelopes, CSRF/cookies, localization, and integration diagnostics that would catch accidental changes during file movement; prove they are GREEN before restructuring.
 
 ## 2. Create the Workspace and Public Module SDK
 
