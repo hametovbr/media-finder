@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}<h2>{{ _('Settings') }}</h2>
+<section data-testid="readiness-checklist"><h3>{{ _('First-run readiness') }}</h3>
+  <p>Ready: Manual metadata</p><p>{% if prowlarr_ready %}Ready{% else %}Needs configuration{% endif %}: Prowlarr</p>
+  <p>{% if tmdb_ready %}Ready{% else %}Needs configuration{% endif %}: TMDB</p>
+  {% for client in clients %}<p>Ready: {{ client.name }}</p>{% else %}<p>Needs configuration: download clients</p>{% endfor %}
+  <p>Manual-only catalog use remains available.</p>
+</section>
+{% for provider, fields in provider_fields.items() %}<section data-testid="module-settings-{{ provider }}"><h3>{{ provider }}</h3><form method="post" action="/ui/settings/providers/{{ provider }}"><input type="hidden" name="csrf" value="{{ csrf }}">{% for field in fields %}<label>{{ field.title_key }} <input name="{{ field.name }}" type="{{ field.input_type }}"{% if field.required %} required{% endif %}></label>{% endfor %}<button>Save</button></form></section>{% endfor %}
+<section><h3>Prowlarr</h3><form method="post" action="/ui/settings/prowlarr"><input type="hidden" name="csrf" value="{{ csrf }}"><label>Base URL <input name="base_url" type="url" required></label><label>API key environment reference <input name="api_key_ref" required placeholder="env:PROWLARR_API_KEY"></label><button>Save</button></form></section>
+<section><h3>qBittorrent</h3><form method="post" action="/ui/settings/clients"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="module_key" value="qbittorrent"><label>Instance name <input name="name" required></label><label>Base URL <input name="base_url" type="url" required></label><label>Username environment reference <input name="username_ref" required></label><label>Password environment reference <input name="password_ref" required></label><button>Save</button></form></section>
+{% endblock %}

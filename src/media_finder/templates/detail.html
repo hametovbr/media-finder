@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+{% set titles = metadata.get('titles', {}) %}
+<article>
+  <h2>{{ titles.get(locale) or titles.values()|first or item.id }}</h2>
+  <p>{{ metadata.get('year', '') }} · {{ item.kind }} · {{ item.provider }}</p>
+  {% if request_saved %}<p role="status" aria-live="polite">{{ _('Title saved.') }}</p>{% endif %}
+  <nav class="tabs" aria-label="{{ _('Title sections') }}">
+    <a href="/items/{{ item.id }}">{{ _('Overview') }}</a>
+    {% if item.kind == 'series' %}<a href="#episodes">{{ _('Seasons and episodes') }}</a>{% endif %}
+    <button type="button" hx-get="/ui/items/{{ item.id }}/tabs/acquisitions" hx-target="#detail-panel" data-testid="detail-tab-acquisitions">{{ _('Acquisitions') }}</button>
+  </nav>
+  <section id="detail-panel" aria-live="polite"><p>{{ metadata.get('plot') or _('No plot available.') }}</p></section>
+  {% if item.kind == 'series' %}<section id="episodes">
+    <h3>{{ _('Seasons and episodes') }}</h3>
+    {% for season in metadata.get('seasons', []) %}<article><h4>{{ _('Season') }} {{ '%02d'|format(season.number) }}</h4>
+      <ul>{% for episode in season.episodes %}<li>E{{ '%02d'|format(episode.number) }} · {{ episode.title }}</li>{% endfor %}</ul>
+    </article>{% endfor %}
+  </section>{% endif %}
+  <p><a href="/items/{{ item.id }}/releases">{{ _('Find release') }}</a></p>
+  <form action="/ui/items/{{ item.id }}/{% if item.archived %}restore{% else %}archive{% endif %}" method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">{% if item.archived %}{{ _('Restore') }}{% else %}{{ _('Archive') }}{% endif %}</button>
+  </form>
+  {% if item.provider == 'manual' and item.kind == 'series' %}<form action="/ui/items/{{ item.id }}/manual/csv" method="post" data-testid="episode-csv-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><label>{{ _('Episode CSV') }} <textarea name="content"></textarea></label><button>{{ _('Import episodes') }}</button>
+  </form>{% endif %}
+</article>
+{% endblock %}

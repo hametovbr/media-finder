@@ -35,13 +35,13 @@
 
 ## 5. Bilingual server-rendered UI
 
-- [ ] 5.1 Establish Jinja2/HTMX layouts, local assets, poster grid, responsive collection sidebar, Archive, Settings, and About/Credits.
-- [ ] 5.2 Add English and Russian gettext catalogs, locale detection, cookie override, and independent metadata locale selection.
-- [ ] 5.3 Add metadata search/Manual entry, confirmation, duplicate handling, item save, and optional release-search flow.
-- [ ] 5.4 Add media Overview, Seasons/Episodes, and Acquisitions views with bounded status presentation.
-- [ ] 5.5 Add Prowlarr result selection, client/destination reload, idempotent submit, and manual reconciliation views.
-- [ ] 5.6 Add first-run readiness that permits Manual-only use and TMDB official attribution.
-- [ ] 5.7 Add signed sessions, CSRF enforcement, configurable secure cookies, invariant machine-code to localized-message mapping, pending-card semantics, semantic feedback, and keyboard-accessible RU/EN Playwright tests.
+- [x] 5.1 Establish Jinja2/HTMX layouts, local assets, poster grid, responsive collection sidebar, Archive, Settings, and About/Credits.
+- [x] 5.2 Add English and Russian gettext catalogs, locale detection, cookie override, and independent metadata locale selection.
+- [x] 5.3 Add metadata search/Manual entry, confirmation, duplicate handling, item save, and optional release-search flow.
+- [x] 5.4 Add media Overview, Seasons/Episodes, and Acquisitions views with bounded status presentation.
+- [x] 5.5 Add Prowlarr result selection, client/destination reload, idempotent submit, and manual reconciliation views.
+- [x] 5.6 Add first-run readiness that permits Manual-only use and TMDB official attribution.
+- [x] 5.7 Add signed sessions, CSRF enforcement, configurable secure cookies, invariant machine-code to localized-message mapping, pending-card semantics, semantic feedback, and keyboard-accessible RU/EN Playwright tests.
 
 ## 6. Container and automation
 

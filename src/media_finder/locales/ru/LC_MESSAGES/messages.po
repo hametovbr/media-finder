@@ -1,0 +1,124 @@
+msgid ""
+msgstr ""
+"Language: ru\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "The release selection expired. Search again."
+msgstr "Срок действия выбранного релиза истёк. Выполните поиск снова."
+
+msgid "A safely hidden error occurred."
+msgstr "Произошла безопасно скрытая ошибка."
+
+msgid "Skip to content"
+msgstr "Перейти к содержимому"
+
+msgid "Collections"
+msgstr "Коллекции"
+
+msgid "All titles"
+msgstr "Все тайтлы"
+
+msgid "Uncategorized"
+msgstr "Без категории"
+
+msgid "Archive"
+msgstr "Архив"
+
+msgid "Archive collection"
+msgstr "Архивировать коллекцию"
+
+msgid "New collection"
+msgstr "Новая коллекция"
+
+msgid "Create collection"
+msgstr "Создать коллекцию"
+
+msgid "Utilities"
+msgstr "Служебные разделы"
+
+msgid "Add title"
+msgstr "Добавить тайтл"
+
+msgid "Settings"
+msgstr "Настройки"
+
+msgid "About"
+msgstr "О сервисе"
+
+msgid "Language"
+msgstr "Язык"
+
+msgid "Russian"
+msgstr "Русский"
+
+msgid "Catalog"
+msgstr "Каталог"
+
+msgid "Year unknown"
+msgstr "Год неизвестен"
+
+msgid "Movie"
+msgstr "Фильм"
+
+msgid "Series"
+msgstr "Сериал"
+
+msgid "Manual reconciliation may be required."
+msgstr "Может потребоваться ручная сверка."
+
+msgid "No titles in this view."
+msgstr "В этом разделе нет тайтлов."
+
+msgid "Search metadata providers"
+msgstr "Поиск у поставщиков метаданных"
+
+msgid "Query"
+msgstr "Запрос"
+
+msgid "Metadata locale"
+msgstr "Язык метаданных"
+
+msgid "Search"
+msgstr "Искать"
+
+msgid "Manual metadata"
+msgstr "Ручные метаданные"
+
+msgid "JSON schema v1 document"
+msgstr "Документ JSON схемы v1"
+
+msgid "Create manually"
+msgstr "Создать вручную"
+
+msgid "Select and confirm"
+msgstr "Выбрать и подтвердить"
+
+msgid "No metadata results."
+msgstr "Метаданные не найдены."
+
+msgid "Acquisitions"
+msgstr "Загрузки"
+
+msgid "Reconcile now"
+msgstr "Сверить сейчас"
+
+msgid "Overview"
+msgstr "Обзор"
+
+msgid "Seasons and episodes"
+msgstr "Сезоны и серии"
+
+msgid "Season"
+msgstr "Сезон"
+
+msgid "Find release"
+msgstr "Найти релиз"
+
+msgid "Restore"
+msgstr "Восстановить"
+
+msgid "First-run readiness"
+msgstr "Готовность первого запуска"
+
+msgid "About and credits"
+msgstr "О сервисе и благодарности"

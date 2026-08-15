@@ -1,0 +1,10 @@
+msgid ""
+msgstr ""
+"Language: en\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "The release selection expired. Search again."
+msgstr "The release selection expired. Search again."
+
+msgid "A safely hidden error occurred."
+msgstr "A safely hidden error occurred."
