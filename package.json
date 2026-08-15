@@ -5,6 +5,8 @@
   "packageManager": "pnpm@11.19.0",
   "scripts": {
     "assets:build": "node scripts/build-assets.mjs",
+    "delivery:validate": "node scripts/validate-delivery.mjs",
+    "docs:check": "python scripts/check_documentation_language.py",
     "py:format": "uv run ruff format --check .",
     "py:lint": "uv run ruff check .",
     "py:type": "uv run mypy",
@@ -15,6 +17,7 @@
   "devDependencies": {
     "@fission-ai/openspec": "1.9.0",
     "axe-core": "4.11.0",
-    "htmx.org": "2.0.10"
+    "htmx.org": "2.0.10",
+    "yaml": "2.9.0"
   }
 }

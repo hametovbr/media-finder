@@ -29,7 +29,16 @@ Modules are statically packaged through a pull request. They must use public con
 
 ```console
 pnpm install --frozen-lockfile
+uv sync --frozen --all-groups
 pnpm spec:validate
+pnpm docs:check
+pnpm delivery:validate
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy
+uv run pytest
+pnpm assets:build
+git diff --exit-code -- src/media_finder/static
 ```
 
-Additional Python, browser, and container checks will be documented as those stages are implemented.
+Browser tests require the pinned Playwright Chromium installation. The production image is built in GitHub Actions; when Docker is available locally, also run `docker build --tag media-finder:local .`.

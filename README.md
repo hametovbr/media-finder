@@ -4,6 +4,12 @@ Media Finder is a self-hosted catalog and torrent-acquisition control plane for 
 
 The project is being implemented from the approved [`bootstrap-media-finder`](openspec/changes/bootstrap-media-finder/) OpenSpec change.
 
+## Deployment
+
+The production image is published at `ghcr.io/hametovbr/media-finder`. Start with [`compose.example.yaml`](compose.example.yaml), keep its localhost-only port until external authentication is configured, and pin an immutable `vX.Y.Z` image tag for production. Media Finder needs a persistent `/data` volume but no download or media-library mounts.
+
+See the [operations guide](docs/operations.md) for secrets, Komodo or Docker Compose deployment, reverse-proxy authentication, networking, health checks, backups, upgrades, and rollback.
+
 ## Product boundary
 
 Media Finder owns catalog metadata, user collections, manual release selection, and submission records. It does not scan, mux, move, or monitor media files, and it does not invoke Jellyfin. FileFlows, n8n, or another external processor may consume its APIs after a download client receives a release.
@@ -21,6 +27,8 @@ uv run mypy
 uv run pytest
 pnpm spec:validate
 pnpm spec:list
+pnpm docs:check
+pnpm delivery:validate
 ```
 
 Use the generated OpenSpec skills in `.agents/skills/` and follow [AGENTS.md](AGENTS.md). See [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change. The interactive low-fidelity [wireframe](docs/design/wireframe.html) records the intended MVP navigation without serving as production UI code.

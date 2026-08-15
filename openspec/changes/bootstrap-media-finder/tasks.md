@@ -45,11 +45,11 @@
 
 ## 6. Container and automation
 
-- [ ] 6.1 Add a non-root multi-stage production image and migration-before-server entrypoint with one Uvicorn worker.
-- [ ] 6.2 Add an infrastructure-neutral Compose example with localhost port, `/data`, healthcheck, and no media/download mounts.
-- [ ] 6.3 Add documentation-policy, OpenSpec, format, lint, type, unit, integration, contract, browser, and production-image GitHub Actions checks.
-- [ ] 6.4 Add amd64/arm64 GHCR release automation for immutable version, moving minor, stable latest, and main-branch edge tags.
-- [ ] 6.5 Document configuration, external authentication, backup/upgrade/rollback, reverse-proxy, volume, port, and network customization.
+- [x] 6.1 Add a non-root multi-stage production image and migration-before-server entrypoint with one Uvicorn worker.
+- [x] 6.2 Add an infrastructure-neutral Compose example with localhost port, `/data`, healthcheck, and no media/download mounts.
+- [x] 6.3 Add documentation-policy, OpenSpec, format, lint, type, unit, integration, contract, browser, and production-image GitHub Actions checks.
+- [x] 6.4 Add amd64/arm64 GHCR release automation for immutable version, moving minor, stable latest, and main-branch edge tags.
+- [x] 6.5 Document configuration, external authentication, backup/upgrade/rollback, reverse-proxy, volume, port, and network customization.
 
 ## 7. Release readiness
 

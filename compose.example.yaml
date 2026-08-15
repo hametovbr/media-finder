@@ -1,0 +1,28 @@
+services:
+  media-finder:
+    image: ghcr.io/hametovbr/media-finder:${MEDIA_FINDER_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    user: "10001:10001"
+    ports:
+      - "127.0.0.1:${MEDIA_FINDER_PORT:-8080}:8000"
+    environment:
+      MEDIA_FINDER_DATABASE_URL: sqlite:////data/media-finder.db
+      MEDIA_FINDER_UI_SECRET: ${MEDIA_FINDER_UI_SECRET:?set a random session secret}
+      MEDIA_FINDER_INTEGRATION_TOKEN: ${MEDIA_FINDER_INTEGRATION_TOKEN:?set a random integration token}
+      MEDIA_FINDER_SECURE_COOKIE: ${MEDIA_FINDER_SECURE_COOKIE:-false}
+    volumes:
+      - media-finder-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3).close()
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  media-finder-data:
+    name: media-finder-data
