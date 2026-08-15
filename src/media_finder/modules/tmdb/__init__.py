@@ -1,6 +1,7 @@
 """TMDB metadata integration with package-owned retention policy."""
 
 from datetime import UTC, date, datetime
+from email.utils import format_datetime
 from typing import Any
 
 from dateutil.relativedelta import relativedelta
@@ -12,6 +13,7 @@ from ...sdk.protocols import JsonTransport
 from ...sdk.types import (
     Attribution,
     Episode,
+    ExportWarning,
     MediaKind,
     MetadataSearchResult,
     ModuleManifest,
@@ -179,6 +181,21 @@ class TmdbProvider:
         if refresh is not None and current >= refresh:
             return RetentionAction(kind=RetentionActionKind.REFRESH)
         return RetentionAction(kind=RetentionActionKind.NONE)
+
+    def export_warning(self, policy: RetentionPolicy, now: datetime) -> ExportWarning | None:
+        del now
+        expires = self._aware(policy.expires_at)
+        if expires is None:
+            return None
+        return ExportWarning(
+            headers={
+                "Warning": (
+                    '299 Media Finder "Provider-derived metadata has a retention deadline"'
+                ),
+                "Sunset": format_datetime(expires, usegmt=True),
+                "X-Media-Finder-Metadata-Expires": expires.isoformat(),
+            }
+        )
 
     def _request(self, path: str, params: dict[str, str]) -> dict[str, Any]:
         if self.transport is None:

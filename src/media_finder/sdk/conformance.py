@@ -1,9 +1,10 @@
 """Small public conformance assertions usable by third-party module fixtures."""
 
 import inspect
+from datetime import UTC, datetime
 
 from .protocols import DownloadClient, MetadataProvider
-from .types import MagnetArtifact, TorrentArtifact
+from .types import ExportWarning, MagnetArtifact, RetentionPolicy, TorrentArtifact
 
 FORBIDDEN_ARGUMENTS = {
     "database",
@@ -49,6 +50,8 @@ def assert_provider_conforms(provider: MetadataProvider) -> None:
     provider.validate_config()
     assert provider.manifest.contract_version == "1"
     assert provider.attribution().provider_key == provider.manifest.key
+    warning = provider.export_warning(RetentionPolicy(), datetime.now(UTC))
+    assert warning is None or isinstance(warning, ExportWarning)
 
 
 def assert_client_conforms(client: DownloadClient) -> None:

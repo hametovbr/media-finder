@@ -26,12 +26,12 @@
 
 ## 4. Processor-facing APIs
 
-- [ ] 4.1 Add unauthenticated liveness/readiness and Bearer-protected `/api/v1` routing with constant-time token checks.
-- [ ] 4.2 Add request IDs, stable machine error envelopes, safe validation details, and structured-log redaction.
-- [ ] 4.3 Add current media-item and pinned Acquisition metadata endpoints without raw provider payloads.
-- [ ] 4.4 Implement `jellyfin-v1` path sanitation and naming for movies, episodes, specials, multi-episode ranges, Unicode, reserved names, and optional extensions.
-- [ ] 4.5 Implement structured movie, TV show, season, and single-episode NFO XML plus multi-episode rejection.
-- [ ] 4.6 Implement provider-expiry 410 responses and TMDB module warning headers without provenance sidecar output.
+- [x] 4.1 Add unauthenticated liveness/readiness and Bearer-protected `/api/v1` routing with constant-time token checks.
+- [x] 4.2 Add request IDs, stable machine error envelopes, safe validation details, and structured-log redaction.
+- [x] 4.3 Add current media-item and pinned Acquisition metadata endpoints without raw provider payloads.
+- [x] 4.4 Implement `jellyfin-v1` path sanitation and naming for movies, episodes, specials, multi-episode ranges, Unicode, reserved names, and optional extensions.
+- [x] 4.5 Implement structured movie, TV show, season, and single-episode NFO XML plus multi-episode rejection.
+- [x] 4.6 Implement provider-expiry 410 responses and TMDB module warning headers without provenance sidecar output.
 
 ## 5. Bilingual server-rendered UI
 

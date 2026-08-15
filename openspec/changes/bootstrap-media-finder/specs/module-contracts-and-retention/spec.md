@@ -19,11 +19,15 @@ Every module SHALL provide a manifest, typed configuration schema, translations,
 - **THEN** core renders generic localized controls without loading module templates or scripts
 
 ### Requirement: Metadata-provider contract
-A metadata-provider module SHALL expose configuration validation, search, fetch, normalization, attribution, standardized errors, and provider-owned retention hooks without direct database or UI-template access.
+A metadata-provider module SHALL expose configuration validation, search, fetch, normalization, attribution, standardized errors, provider-owned retention hooks, and a typed export-warning hook without direct database or UI-template access. The export-warning hook SHALL return only allowlisted, validated response headers or no warning.
 
 #### Scenario: Conform an external provider
 - **WHEN** a test provider implements the public metadata contract using only its fixtures and public types
 - **THEN** the shared conformance suite validates it without knowledge of the provider internals
+
+#### Scenario: Supply an export warning
+- **WHEN** a provider has a retention deadline that external processors need to know
+- **THEN** its export-warning hook returns validated safe headers through the public provider contract without a provider-specific core branch
 
 ### Requirement: Download-client contract
 A download-client module SHALL validate configuration, list live destinations, submit either a magnet URI or in-memory torrent bytes, find a task by correlation token, and guarantee exact preservation of that token without direct database or UI-template access.

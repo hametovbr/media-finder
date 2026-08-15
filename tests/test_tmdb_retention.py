@@ -130,6 +130,21 @@ def test_tmdb_calendar_month_boundaries_and_manual_never_expires() -> None:
     )
 
 
+def test_tmdb_export_warning_headers_are_owned_and_validated_by_the_module() -> None:
+    provider = TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), FixtureTransport())
+    created = datetime(2024, 8, 31, 12, tzinfo=UTC)
+    policy = provider.retention_for(created)
+
+    warning = provider.export_warning(policy, datetime(2025, 1, 1, tzinfo=UTC))
+
+    assert warning is not None
+    assert warning.headers == {
+        "Warning": '299 Media Finder "Provider-derived metadata has a retention deadline"',
+        "Sunset": "Fri, 28 Feb 2025 12:00:00 GMT",
+        "X-Media-Finder-Metadata-Expires": "2025-02-28T12:00:00+00:00",
+    }
+
+
 def test_tmdb_normalizes_series_specials_in_season_zero() -> None:
     transport = SeriesTransport()
     provider = TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), transport)

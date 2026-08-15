@@ -10,6 +10,7 @@ from .types import (
     CorrelationResult,
     DownloadArtifact,
     DownloadDestination,
+    ExportWarning,
     MetadataSearchResult,
     ModuleManifest,
     NormalizedMetadata,
@@ -33,6 +34,7 @@ class MetadataProvider(Protocol):
     def attribution(self) -> Attribution: ...
     def retention_for(self, created_at: datetime) -> RetentionPolicy: ...
     def plan_retention(self, policy: RetentionPolicy, now: datetime) -> RetentionAction: ...
+    def export_warning(self, policy: RetentionPolicy, now: datetime) -> ExportWarning | None: ...
 
 
 @runtime_checkable

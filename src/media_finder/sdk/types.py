@@ -125,6 +125,22 @@ class RetentionPolicy(PublicModel):
     expires_at: datetime | None = None
 
 
+class ExportWarning(PublicModel):
+    """Provider-supplied, allowlisted warning headers for an export."""
+
+    headers: dict[str, str]
+
+    @field_validator("headers")
+    @classmethod
+    def safe_headers(cls, value: dict[str, str]) -> dict[str, str]:
+        allowed = {"Warning", "Sunset", "X-Media-Finder-Metadata-Expires"}
+        if not value or set(value) - allowed:
+            raise ValueError("export warning contains an unsupported header")
+        if any("\r" in item or "\n" in item or len(item) > 512 for item in value.values()):
+            raise ValueError("export warning contains an unsafe header value")
+        return value
+
+
 class RetentionActionKind(StrEnum):
     NONE = "none"
     REFRESH = "refresh"

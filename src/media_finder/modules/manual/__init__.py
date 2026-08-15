@@ -12,6 +12,7 @@ from ...sdk.errors import ModuleError
 from ...sdk.types import (
     Attribution,
     Episode,
+    ExportWarning,
     MediaKind,
     MetadataSearchResult,
     ModuleManifest,
@@ -167,6 +168,10 @@ class ManualProvider:
 
     def plan_retention(self, policy: RetentionPolicy, now: Any) -> RetentionAction:
         return RetentionAction(kind=RetentionActionKind.NONE)
+
+    def export_warning(self, policy: RetentionPolicy, now: Any) -> ExportWarning | None:
+        del policy, now
+        return None
 
     @staticmethod
     def _normalize(document: ManualDocumentV1, external_id: str) -> NormalizedMetadata:

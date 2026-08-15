@@ -10,6 +10,7 @@ from media_finder.sdk.types import (
     Attribution,
     CorrelationResult,
     DownloadDestination,
+    ExportWarning,
     MediaKind,
     MetadataSearchResult,
     ModuleKind,
@@ -81,6 +82,9 @@ class FakeProvider:
 
     def plan_retention(self, policy, now) -> RetentionAction:
         return RetentionAction(kind=RetentionActionKind.NONE)
+
+    def export_warning(self, policy, now) -> ExportWarning | None:
+        return None
 
 
 class FakeClient:
