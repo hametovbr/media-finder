@@ -20,6 +20,7 @@ from media_finder.sdk.registration import (
     MetadataProviderRegistration,
     StaticModuleRegistry,
 )
+from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 from media_finder.ui_runtime import DefaultRuntimeFactory
 
 
@@ -30,6 +31,26 @@ def _secrets(reference: str) -> str:
         "env:QB_USER": "operator",
         "env:QB_PASS": "qb-secret",
     }[reference]
+
+
+ENVIRONMENT = {
+    "TMDB_TOKEN": "tmdb-secret",
+    "PROWLARR_URL": "https://services.example.test:9696/prowlarr",
+    "PROWLARR_API_KEY": "prowlarr-secret",
+    "QBITTORRENT_URL": "https://services.example.test:8080/qb",
+    "QBITTORRENT_USERNAME": "operator",
+    "QBITTORRENT_PASSWORD": "qb-secret",
+}
+
+
+def system_client(module_key: str = "qbittorrent") -> DownloadClientInstance:
+    return DownloadClientInstance(
+        id=SYSTEM_QBITTORRENT_ID,
+        name="qBittorrent",
+        module_key=module_key,
+        config_payload={},
+        system_owned=True,
+    )
 
 
 def test_integration_base_urls_reject_secret_components_but_allow_safe_subpaths() -> None:
@@ -84,44 +105,18 @@ def test_runtime_http_sessions_are_isolated_per_service_and_qb_instance() -> Non
         created.append(client)
         return client
 
-    factory = DefaultRuntimeFactory(http_client_factory=clients, secret_resolver=_secrets)
-    provider = factory.metadata_provider(
-        "tmdb",
-        {
-            "api_token": "env:TMDB_TOKEN",
-            "base_url": "https://api.themoviedb.org/3",
-        },
-    ).value
+    factory = DefaultRuntimeFactory(environment=ENVIRONMENT, http_client_factory=clients)
+    provider = factory.metadata_provider("tmdb").value
     assert provider is not None
-    assert (
-        factory.prowlarr(
-            {
-                "base_url": "https://services.example.test:9696/prowlarr",
-                "api_key_ref": "env:PROWLARR_KEY",
-            }
-        ).value
-        is not None
-    )
-
-    for instance_id, port in (("q1", 8080), ("q2", 8081)):
-        instance = DownloadClientInstance(
-            id=instance_id,
-            name=instance_id,
-            module_key="qbittorrent",
-            config_payload={
-                "base_url": f"https://services.example.test:{port}/qb",
-                "username_ref": "env:QB_USER",
-                "password_ref": "env:QB_PASS",
-            },
-        )
-        client = factory.download_client(instance).value
-        assert client is not None
+    assert factory.prowlarr().value is not None
+    client = factory.download_client(system_client()).value
+    assert client is not None
 
     authentication_requests = [
         request for request in requests if request[2].endswith(("configuration", "status", "login"))
     ]
-    assert len(created) == 4
-    assert len({id(client) for client in created}) == 4
+    assert len(created) == 3
+    assert len({id(client) for client in created}) == 3
     assert all(cookie is None for _, _, _, cookie in authentication_requests)
     factory.close()
 
@@ -159,28 +154,15 @@ def test_failed_runtime_construction_closes_and_forgets_every_created_http_clien
         },
     )
     factory = DefaultRuntimeFactory(
-        http_client_factory=clients, secret_resolver=_secrets, registry=registry
+        environment=ENVIRONMENT, http_client_factory=clients, registry=registry
     )
 
     for _ in range(2):
-        assert (
-            factory.prowlarr(
-                {
-                    "base_url": "https://services.example.test/prowlarr",
-                    "api_key_ref": "env:PROWLARR_KEY",
-                }
-            ).error_code
-            == "prowlarr_configuration_invalid"
-        )
-        assert factory.metadata_provider("broken", {}).error_code == (
+        assert factory.prowlarr().error_code == "prowlarr_configuration_invalid"
+        assert factory.metadata_provider("broken").error_code == (
             "metadata_provider_configuration_invalid"
         )
-        instance = DownloadClientInstance(
-            id="broken",
-            name="Broken",
-            module_key="broken",
-            config_payload={},
-        )
+        instance = system_client("broken")
         assert factory.download_client(instance).error_code == (
             "download_client_configuration_invalid"
         )
@@ -206,30 +188,15 @@ def test_first_party_validation_owns_only_successful_cached_http_clients() -> No
         return client
 
     failed_factory = DefaultRuntimeFactory(
-        http_client_factory=failing_clients, secret_resolver=_secrets
+        environment=ENVIRONMENT, http_client_factory=failing_clients
     )
     for _ in range(2):
         assert (
-            failed_factory.metadata_provider(
-                "tmdb",
-                {"api_token": "env:TMDB_TOKEN", "base_url": "https://api.themoviedb.org/3"},
-            ).error_code
+            failed_factory.metadata_provider("tmdb").error_code
             == "metadata_provider_configuration_invalid"
         )
-    for instance_id, host in (
-        ("bad-1", "qb-fail-one.example.test"),
-        ("bad-2", "qb-fail-two.example.test"),
-    ):
-        instance = DownloadClientInstance(
-            id=instance_id,
-            name=instance_id,
-            module_key="qbittorrent",
-            config_payload={
-                "base_url": f"https://{host}",
-                "username_ref": "env:QB_USER",
-                "password_ref": "env:QB_PASS",
-            },
-        )
+    for _ in range(2):
+        instance = system_client()
         assert failed_factory.download_client(instance).error_code == (
             "download_client_configuration_invalid"
         )
@@ -241,8 +208,8 @@ def test_first_party_validation_owns_only_successful_cached_http_clients() -> No
 
     def mixed_clients() -> httpx.Client:
         def handler(request: httpx.Request) -> httpx.Response:
-            if request.url.host == "qb-bad.example.test":
-                return httpx.Response(200, text="Fails.")
+            if request.url.host == "services.example.test" and request.url.port == 9696:
+                return httpx.Response(500, text="Fails.")
             if request.url.path.endswith("/api/v2/auth/login"):
                 return httpx.Response(200, text="Ok.")
             return httpx.Response(200, json={})
@@ -252,41 +219,16 @@ def test_first_party_validation_owns_only_successful_cached_http_clients() -> No
         return client
 
     success_factory = DefaultRuntimeFactory(
-        http_client_factory=mixed_clients, secret_resolver=_secrets
+        environment=ENVIRONMENT, http_client_factory=mixed_clients
     )
-    tmdb_config = {
-        "api_token": "env:TMDB_TOKEN",
-        "base_url": "https://api.themoviedb.org/3",
-    }
-    first_tmdb = success_factory.metadata_provider("tmdb", tmdb_config).value
+    first_tmdb = success_factory.metadata_provider("tmdb").value
     assert first_tmdb is not None
-    assert success_factory.metadata_provider("tmdb", tmdb_config).value is first_tmdb
-    good_instance = DownloadClientInstance(
-        id="good",
-        name="Good",
-        module_key="qbittorrent",
-        config_payload={
-            "base_url": "https://qb-good.example.test",
-            "username_ref": "env:QB_USER",
-            "password_ref": "env:QB_PASS",
-        },
-    )
+    assert success_factory.metadata_provider("tmdb").value is first_tmdb
+    good_instance = system_client()
     first_qb = success_factory.download_client(good_instance).value
     assert first_qb is not None
     assert success_factory.download_client(good_instance).value is first_qb
-    bad_instance = DownloadClientInstance(
-        id="bad",
-        name="Bad",
-        module_key="qbittorrent",
-        config_payload={
-            "base_url": "https://qb-bad.example.test",
-            "username_ref": "env:QB_USER",
-            "password_ref": "env:QB_PASS",
-        },
-    )
-    assert success_factory.download_client(bad_instance).error_code == (
-        "download_client_configuration_invalid"
-    )
+    assert success_factory.prowlarr().error_code == "prowlarr_configuration_invalid"
     assert len(retained) == 3
     assert not retained[0].is_closed and not retained[1].is_closed
     assert retained[2].is_closed
@@ -314,30 +256,16 @@ def test_failed_interleaved_attempt_cannot_close_a_later_successful_client() -> 
         created.append(client)
         return client
 
-    factory = DefaultRuntimeFactory(http_client_factory=clients, secret_resolver=_secrets)
+    factory = DefaultRuntimeFactory(environment=ENVIRONMENT, http_client_factory=clients)
     failed_result: list[object] = []
 
     def fail_tmdb() -> None:
-        failed_result.append(
-            factory.metadata_provider(
-                "tmdb",
-                {"api_token": "env:TMDB_TOKEN", "base_url": "https://api.themoviedb.org/3"},
-            )
-        )
+        failed_result.append(factory.metadata_provider("tmdb"))
 
     worker = threading.Thread(target=fail_tmdb)
     worker.start()
     assert tmdb_started.wait(timeout=5)
-    instance = DownloadClientInstance(
-        id="interleaved-success",
-        name="Interleaved success",
-        module_key="qbittorrent",
-        config_payload={
-            "base_url": "https://qb-success.example.test",
-            "username_ref": "env:QB_USER",
-            "password_ref": "env:QB_PASS",
-        },
-    )
+    instance = system_client()
     successful = factory.download_client(instance).value
     assert successful is not None
     release_tmdb.set()
@@ -353,6 +281,41 @@ def test_failed_interleaved_attempt_cannot_close_a_later_successful_client() -> 
     assert factory._http_clients == [created[1]]
     factory.close()
     assert created[1].is_closed
+
+
+def test_factory_close_during_build_cannot_repopulate_caches_or_leak_client() -> None:
+    request_started = threading.Event()
+    release_request = threading.Event()
+    created: list[httpx.Client] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "api.themoviedb.org"
+        request_started.set()
+        assert release_request.wait(timeout=5)
+        return httpx.Response(200, json={})
+
+    def clients() -> httpx.Client:
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        created.append(client)
+        return client
+
+    factory = DefaultRuntimeFactory(environment=ENVIRONMENT, http_client_factory=clients)
+    results: list[object] = []
+    worker = threading.Thread(target=lambda: results.append(factory.metadata_provider("tmdb")))
+    worker.start()
+    assert request_started.wait(timeout=5)
+
+    factory.close()
+    release_request.set()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert len(results) == 1
+    assert results[0].value is None
+    assert results[0].error_code == "integration_runtime_closed"
+    assert len(created) == 1 and created[0].is_closed
+    assert factory._http_clients == []
+    assert factory._metadata == {}
 
 
 def test_prowlarr_bounds_json_result_count_and_torrent_bytes_with_one_use_token() -> None:

@@ -10,6 +10,8 @@ The production image is published at `ghcr.io/hametovbr/media-finder`. Start wit
 
 See the [operations guide](docs/operations.md) for secrets, Komodo or Docker Compose deployment, reverse-proxy authentication, networking, health checks, backups, upgrades, and rollback.
 
+TMDB, Prowlarr, and the single qBittorrent instance are configured only through their exact process environment variables. The Settings page is diagnostic and read-only; changing integration configuration requires recreating the container.
+
 External FileFlows, n8n, and custom post-processors should follow the [processor integration guide](docs/processor-integration.md) for pinned metadata, naming, NFO, expiry, and safe error handling.
 
 ## Product boundary

@@ -83,10 +83,48 @@ function validateCompose(root, failures) {
     "compose.example.yaml: exactly one service is required",
   );
   const service = services[serviceNames[0]] ?? {};
+  const environment = service.environment ?? {};
   requireValue(
     failures,
     typeof service.image === "string" && service.image.startsWith("ghcr.io/"),
     "compose.example.yaml: service must use a GHCR image",
+  );
+  const integrationVariables = [
+    "TMDB_TOKEN",
+    "PROWLARR_URL",
+    "PROWLARR_API_KEY",
+    "QBITTORRENT_URL",
+    "QBITTORRENT_USERNAME",
+    "QBITTORRENT_PASSWORD",
+  ];
+  for (const name of integrationVariables) {
+    requireValue(
+      failures,
+      Object.hasOwn(environment, name),
+      `compose.example.yaml: exact integration variable ${name} is required`,
+    );
+  }
+  for (const obsolete of ["TMDB_API_TOKEN", "QB_USERNAME", "QB_PASSWORD"]) {
+    requireValue(
+      failures,
+      !Object.hasOwn(environment, obsolete),
+      `compose.example.yaml: obsolete integration variable ${obsolete} is forbidden`,
+    );
+  }
+  const operatorDocumentation = ["README.md", "docs/operations.md"]
+    .map((file) => readText(root, file, failures))
+    .join("\n");
+  for (const name of integrationVariables) {
+    requireValue(
+      failures,
+      operatorDocumentation.includes(name),
+      `operator documentation: exact integration variable ${name} is required`,
+    );
+  }
+  requireValue(
+    failures,
+    !operatorDocumentation.includes("Store the corresponding `env:VARIABLE_NAME` reference"),
+    "operator documentation: persisted integration settings guidance is forbidden",
   );
   requireValue(
     failures,

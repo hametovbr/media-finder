@@ -1,9 +1,9 @@
 """The single compile-time composition boundary for first-party modules."""
 
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import cast
 
-from pydantic import ValidationError
+from pydantic import HttpUrl
 
 from ..sdk.protocols import DownloadClient, MetadataProvider
 from ..sdk.registration import (
@@ -13,6 +13,8 @@ from ..sdk.registration import (
     SecretResolver,
     StaticModuleRegistry,
 )
+from ..sdk.settings import EnvReference
+from ..sdk.types import EnvironmentVariableSpec
 from .manual import ManualConfig, ManualProvider
 from .qbittorrent import (
     HttpxQbittorrentTransport,
@@ -27,7 +29,7 @@ def _build_tmdb(
     http_client: HttpClientFactory,
     secret_resolver: SecretResolver,
 ) -> MetadataProvider:
-    config = TmdbConfig.model_validate(payload)
+    config = TmdbConfig(api_token=EnvReference(value="env:TMDB_TOKEN"))
     return cast(
         MetadataProvider,
         TmdbProvider(
@@ -54,7 +56,11 @@ def _build_qbittorrent(
     http_client: HttpClientFactory,
     secret_resolver: SecretResolver,
 ) -> DownloadClient:
-    config = QbittorrentConfig.model_validate(payload)
+    config = QbittorrentConfig(
+        base_url=HttpUrl(str(payload["QBITTORRENT_URL"])),
+        username_ref="env:QBITTORRENT_USERNAME",
+        password_ref="env:QBITTORRENT_PASSWORD",
+    )
     return cast(
         DownloadClient,
         QbittorrentClient(
@@ -72,12 +78,21 @@ FIRST_PARTY_MODULES = StaticModuleRegistry(
             config_model=ManualConfig,
             retention_factory=lambda: cast(MetadataProvider, ManualProvider()),
             build=_build_manual,
+            environment=(),
         ),
         "tmdb": MetadataProviderRegistration(
             key="tmdb",
             config_model=TmdbConfig,
             retention_factory=lambda: cast(MetadataProvider, TmdbProvider.retention_only()),
             build=_build_tmdb,
+            environment=(
+                EnvironmentVariableSpec(
+                    name="TMDB_TOKEN",
+                    required=True,
+                    secret=True,
+                    description_key="module.tmdb.environment.token",
+                ),
+            ),
         ),
     },
     download_clients={
@@ -85,17 +100,26 @@ FIRST_PARTY_MODULES = StaticModuleRegistry(
             key="qbittorrent",
             config_model=QbittorrentConfig,
             build=_build_qbittorrent,
+            environment=(
+                EnvironmentVariableSpec(
+                    name="QBITTORRENT_URL",
+                    required=True,
+                    secret=False,
+                    description_key="module.qbittorrent.environment.url",
+                ),
+                EnvironmentVariableSpec(
+                    name="QBITTORRENT_USERNAME",
+                    required=True,
+                    secret=True,
+                    description_key="module.qbittorrent.environment.username",
+                ),
+                EnvironmentVariableSpec(
+                    name="QBITTORRENT_PASSWORD",
+                    required=True,
+                    secret=True,
+                    description_key="module.qbittorrent.environment.password",
+                ),
+            ),
         )
     },
 )
-
-
-def normalize_download_client_config(module_key: str, payload: dict[str, object]) -> dict[str, Any]:
-    registration = FIRST_PARTY_MODULES.download_clients.get(module_key)
-    if registration is None:
-        raise ValueError("download_client_module_unknown")
-    try:
-        validated = registration.config_model.model_validate(payload)
-    except ValidationError:
-        raise ValueError("download_client_configuration_invalid") from None
-    return validated.model_dump(mode="json")

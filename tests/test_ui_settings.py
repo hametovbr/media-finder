@@ -1,96 +1,115 @@
-import re
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from media_finder.db import migrate_to_head, session_factory
 from media_finder.models import AppSetting, DownloadClientInstance
-from media_finder.modules.tmdb import TmdbProvider
 from media_finder.ui import create_ui_app
 
 
-def _csrf(text: str) -> str:
-    match = re.search(r'name="csrf" value="([^"]+)"', text)
-    assert match
-    return match.group(1)
-
-
 @pytest.fixture
-def settings_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def settings_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     url = f"sqlite:///{tmp_path / 'settings.db'}"
     migrate_to_head(url)
     monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long test session secret")
-    return create_ui_app(
-        url,
+    return url
+
+
+def test_settings_lists_exact_missing_environment_without_values(settings_url: str) -> None:
+    app = create_ui_app(
+        settings_url,
         session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
-        providers={"tmdb": TmdbProvider.retention_only()},
+        environment={},
     )
 
+    with TestClient(app) as client:
+        page = client.get("/settings")
 
-def test_generic_settings_store_only_environment_references_and_safe_values(settings_app) -> None:
-    with TestClient(settings_app) as client:
-        csrf = _csrf(client.get("/").text)
-        rejected = client.post(
-            "/ui/settings/providers/tmdb",
-            data={
-                "csrf": csrf,
-                "api_token": "literal-secret",
-                "base_url": "https://api.themoviedb.org/3",
-            },
-        )
-        assert rejected.status_code == 422
+    assert page.status_code == 200
+    for name in (
+        "TMDB_TOKEN",
+        "PROWLARR_URL",
+        "PROWLARR_API_KEY",
+        "QBITTORRENT_URL",
+        "QBITTORRENT_USERNAME",
+        "QBITTORRENT_PASSWORD",
+    ):
+        assert f'data-environment-variable="{name}"' in page.text
+        assert f"<code>{name}</code>" in page.text
+    assert page.text.count('data-variable-state="missing"') == 6
+    assert 'data-integration-state="missing"' in page.text
+    assert "a sufficiently long test session secret" not in page.text
+    assert "/ui/settings/" not in page.text
+    assert 'name="api_token"' not in page.text
+    assert 'name="client_instance_id"' not in page.text
 
-        saved = client.post(
-            "/ui/settings/providers/tmdb",
-            data={
-                "csrf": csrf,
-                "api_token": "env:TMDB_API_TOKEN",
-                "base_url": "https://api.themoviedb.org/3",
-            },
-            follow_redirects=False,
-        )
-        assert saved.status_code == 303
 
-        prowlarr = client.post(
-            "/ui/settings/prowlarr",
-            data={
-                "csrf": csrf,
-                "base_url": "https://prowlarr.example.test",
-                "api_key_ref": "env:PROWLARR_API_KEY",
-            },
-            follow_redirects=False,
-        )
-        assert prowlarr.status_code == 303
+def test_settings_distinguishes_ready_from_unavailable_without_disclosure(
+    settings_url: str,
+) -> None:
+    environment = {
+        "TMDB_TOKEN": "tmdb-secret-never-render",
+        "PROWLARR_URL": "https://prowlarr.example.test",
+        "PROWLARR_API_KEY": "prowlarr-secret-never-render",
+        "QBITTORRENT_URL": "https://qb.example.test",
+        "QBITTORRENT_USERNAME": "qb-user-never-render",
+        "QBITTORRENT_PASSWORD": "qb-password-never-render",
+    }
 
-        download_client = client.post(
-            "/ui/settings/clients",
-            data={
-                "csrf": csrf,
-                "name": "Home",
-                "module_key": "qbittorrent",
-                "base_url": "https://qb.example.test",
-                "username_ref": "env:QB_USERNAME",
-                "password_ref": "env:QB_PASSWORD",
-            },
-            follow_redirects=False,
-        )
-        assert download_client.status_code == 303
-        refreshed = client.get("/settings")
-        assert "Ready: TMDB" in refreshed.text
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.themoviedb.org":
+            return httpx.Response(200, json={})
+        if request.url.host == "prowlarr.example.test":
+            return httpx.Response(503, text="upstream-secret-body")
+        if request.url.host == "qb.example.test":
+            if request.url.path == "/api/v2/auth/login":
+                return httpx.Response(200, text="Ok.")
+            return httpx.Response(200, json={})
+        return httpx.Response(404)
 
-    sessions = session_factory(settings_app.state.engine)
-    with sessions() as session:
-        tmdb = session.get(AppSetting, "metadata_provider:tmdb")
-        assert tmdb is not None
-        assert tmdb.value_payload["api_token"]["value"] == "env:TMDB_API_TOKEN"
-        assert "literal-secret" not in str(tmdb.value_payload)
-        configured_prowlarr = session.get(AppSetting, "prowlarr")
-        assert configured_prowlarr is not None
-        assert configured_prowlarr.value_payload["api_key_ref"] == "env:PROWLARR_API_KEY"
-        instance = session.scalar(
-            select(DownloadClientInstance).where(DownloadClientInstance.name == "Home")
-        )
-        assert instance is not None
-        assert instance.config_payload["password_ref"] == "env:QB_PASSWORD"
+    app = create_ui_app(
+        settings_url,
+        session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
+        environment=environment,
+        http_client_factory=lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    with TestClient(app) as client:
+        page = client.get("/settings")
+
+    assert 'data-integration="tmdb" data-integration-state="ready"' in page.text
+    assert 'data-integration="prowlarr" data-integration-state="unavailable"' in page.text
+    assert 'data-integration="qbittorrent" data-integration-state="ready"' in page.text
+    assert page.text.count('data-variable-state="set"') == 6
+    for value in environment.values():
+        assert value not in page.text
+    assert "upstream-secret-body" not in page.text
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/ui/settings/providers/tmdb",
+        "/ui/settings/prowlarr",
+        "/ui/settings/clients",
+        "/ui/settings/clients/legacy/archive",
+        "/ui/settings/clients/legacy/restore",
+    ],
+)
+def test_legacy_integration_mutation_routes_are_absent(settings_url: str, path: str) -> None:
+    app = create_ui_app(
+        settings_url,
+        session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
+        environment={},
+    )
+    with TestClient(app) as client:
+        response = client.post(path)
+
+    assert response.status_code in {404, 405}
+    sessions = session_factory(app.state.engine)
+    with sessions() as database:
+        assert list(database.scalars(select(AppSetting))) == []
+        clients = list(database.scalars(select(DownloadClientInstance)))
+    assert len(clients) == 1 and clients[0].system_owned

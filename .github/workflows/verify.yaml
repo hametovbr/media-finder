@@ -85,11 +85,13 @@ jobs:
         run: >-
           uv run pytest
           tests/test_acquisition.py
+          tests/test_environment_runtime.py
           tests/test_api_foundation.py
           tests/test_db.py
           tests/test_domain.py
           tests/test_metadata_api.py
           tests/test_runtime.py
+          tests/test_system_download_client.py
           tests/test_ui_catalog.py
           tests/test_ui_error_feedback.py
           tests/test_ui_foundation.py
@@ -115,6 +117,7 @@ jobs:
         run: >-
           uv run pytest
           tests/test_sdk.py
+          tests/test_environment_contract.py
           tests/test_tmdb_retention.py
           tests/test_qbittorrent.py
           tests/test_transport_hardening.py

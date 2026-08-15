@@ -45,17 +45,32 @@ When deploying from a Git-backed stack in an orchestrator such as Komodo, keep `
 | `MEDIA_FINDER_PORT` | Compose only | `8080` | Local host port in the example |
 | `MEDIA_FINDER_IMAGE_TAG` | Compose only | `latest` | GHCR tag; pin `vX.Y.Z` for production |
 
-Provider and download-client credentials use operator-chosen environment variables. Store the corresponding `env:VARIABLE_NAME` reference in the Settings UI, never the secret value. For example:
+First-party integrations have one fixed environment contract:
+
+| Integration | Variable | Required for that integration | Secret |
+| --- | --- | --- | --- |
+| TMDB | `TMDB_TOKEN` | Yes | Yes |
+| Prowlarr | `PROWLARR_URL` | Yes | No |
+| Prowlarr | `PROWLARR_API_KEY` | Yes | Yes |
+| qBittorrent | `QBITTORRENT_URL` | Yes | No |
+| qBittorrent | `QBITTORRENT_USERNAME` | Yes | Yes |
+| qBittorrent | `QBITTORRENT_PASSWORD` | Yes | Yes |
+
+Manual-only catalog use needs none of these integration variables. To enable an integration, set every variable in its row group before recreating the container. Empty values are treated as missing. The Settings page reports only exact variable names, required/secret classifications, and safe states; it cannot edit environment configuration and never displays values.
+
+For example:
 
 ```yaml
 environment:
   TMDB_TOKEN: ${TMDB_TOKEN:?set the TMDB bearer token}
+  PROWLARR_URL: ${PROWLARR_URL:?set the Prowlarr base URL}
   PROWLARR_API_KEY: ${PROWLARR_API_KEY:?set the Prowlarr API key}
+  QBITTORRENT_URL: ${QBITTORRENT_URL:?set the qBittorrent base URL}
   QBITTORRENT_USERNAME: ${QBITTORRENT_USERNAME:?set the qBittorrent username}
   QBITTORRENT_PASSWORD: ${QBITTORRENT_PASSWORD:?set the qBittorrent password}
 ```
 
-The matching settings values are `env:TMDB_TOKEN`, `env:PROWLARR_API_KEY`, `env:QBITTORRENT_USERNAME`, and `env:QBITTORRENT_PASSWORD`. Restart the container after adding or rotating an environment secret so the process receives the new value.
+Media Finder supports one qBittorrent instance. Its categories remain live destination choices; there is no download-client instance selector or lifecycle configuration in the UI. Restart or recreate the container after adding, changing, or rotating any integration value because the process snapshots its environment at construction.
 
 ## Network exposure and external authentication
 
@@ -124,6 +139,8 @@ Store the archive outside the Docker host and verify that it can be listed with 
 
 ## Upgrade
 
+The environment-only integration migration creates one stable system-owned qBittorrent identity, archives prior client-instance rows, and clears their stored configuration payloads while preserving Acquisition history. Before upgrading from a release with writable integration Settings, verify all six required integration variables in the deployment and rotate any credential that may previously have been stored literally. This migration is intentionally breaking for multiple qBittorrent instances.
+
 1. Record the currently deployed immutable image tag.
 2. Back up `/data` using the procedure above.
 3. Change `MEDIA_FINDER_IMAGE_TAG` to the new immutable `vX.Y.Z` tag.
@@ -142,6 +159,8 @@ If migrations fail, the web server will not start. Do not bypass the entrypoint 
 ## Rollback
 
 Rollback means restoring both the previous immutable image and the pre-upgrade `/data` snapshot. Merely changing the image tag is unsafe after a schema migration.
+
+An older image expects persisted integration settings that the environment-only migration clears. Therefore rollback from this migration always requires the pre-upgrade `/data` backup as well as the earlier image; environment variables alone are not a compatible downgrade path.
 
 1. Stop the service.
 2. Verify the exact volume or bind-mount target before changing any files.

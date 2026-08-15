@@ -57,6 +57,5 @@ def test_redirect_result_queries_render_announced_focusable_feedback(
             assert "progress" not in page.text.casefold()
 
         settings = client.get("/settings?saved=1")
-        assert 'role="status"' in settings.text
-        assert "data-autofocus" in settings.text
-        assert "Settings saved." in settings.text
+        assert "Settings saved." not in settings.text
+        assert 'form action="/ui/settings/' not in settings.text

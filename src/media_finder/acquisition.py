@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
@@ -13,11 +13,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import Acquisition, DownloadClientInstance, MediaItem, MetadataRevision
-from .modules.registry import normalize_download_client_config
 from .prowlarr import ExpiredSearchToken, ProwlarrAdapter
 from .sdk.errors import ModuleError
 from .sdk.protocols import DownloadClient
 from .sdk.types import DownloadDestination
+from .system_clients import SYSTEM_QBITTORRENT_ID
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,24 +39,6 @@ class DestinationUnavailable(ValueError):
 ClientLoader = Callable[[DownloadClientInstance], DownloadClient]
 
 
-def create_download_client_instance(
-    session: Session,
-    *,
-    name: str,
-    module_key: str,
-    config_payload: Mapping[str, object],
-) -> DownloadClientInstance:
-    """Persist only generic values and secret references, never literal secrets."""
-
-    safe_config = normalize_download_client_config(module_key, dict(config_payload))
-    instance = DownloadClientInstance(
-        name=name.strip(), module_key=module_key, config_payload=safe_config
-    )
-    session.add(instance)
-    session.commit()
-    return instance
-
-
 class AcquisitionService:
     def __init__(
         self,
@@ -72,6 +54,8 @@ class AcquisitionService:
         existing = self._by_idempotency(request.idempotency_key)
         if existing is not None:
             return existing
+        if request.client_instance_id != SYSTEM_QBITTORRENT_ID:
+            raise ValueError("download_client_system_required")
         if self._prowlarr is None:
             raise ValueError("acquisition_unavailable")
 
@@ -82,6 +66,8 @@ class AcquisitionService:
             raise ValueError("acquisition_reference_not_found")
         if instance.archived_at is not None:
             raise ValueError("download_client_archived")
+        if not instance.system_owned or instance.module_key != "qbittorrent":
+            raise ValueError("download_client_system_required")
         if revision.media_item_id != item.id:
             raise ValueError("acquisition_revision_mismatch")
 
@@ -146,6 +132,12 @@ class AcquisitionService:
         if acquisition.status != "pending":
             return acquisition
         instance = cast(DownloadClientInstance, acquisition.download_client_instance)
+        if (
+            instance.id != SYSTEM_QBITTORRENT_ID
+            or not instance.system_owned
+            or instance.archived_at is not None
+        ):
+            raise ValueError("download_client_system_required")
         client = self._client_loader(instance)
         return self._reconcile_lookup(
             acquisition, client, f"mf-acq-{acquisition.id}", absent_is_failure=False

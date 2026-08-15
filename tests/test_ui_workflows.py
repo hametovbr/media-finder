@@ -10,6 +10,7 @@ from media_finder.db import migrate_to_head, session_factory
 from media_finder.models import Acquisition, DownloadClientInstance, MediaItem, MetadataRevision
 from media_finder.modules.registry import FIRST_PARTY_MODULES
 from media_finder.prowlarr import ProwlarrAdapter, SearchResultCache
+from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 from media_finder.ui import create_ui_app
 
 
@@ -64,13 +65,8 @@ def workflow_app(
     )
     sessions = session_factory(app.state.engine)
     with sessions() as session:
-        client_instance = DownloadClientInstance(
-            name="Fixture client",
-            module_key="fixture-client",
-            config_payload={},
-        )
-        session.add(client_instance)
-        session.commit()
+        client_instance = session.get(DownloadClientInstance, SYSTEM_QBITTORRENT_ID)
+        assert client_instance is not None
         app.state.client_instance_id = client_instance.id
     return app
 
@@ -179,7 +175,7 @@ def test_release_destinations_submit_idempotently_and_pending_reconcile_is_expli
         release_token = _token(search.text, "release-result")
 
         destinations = client.post(
-            f"/ui/clients/{workflow_app.state.client_instance_id}/destinations",
+            "/ui/qbittorrent/destinations",
             data={"csrf": csrf},
             headers={"HX-Request": "true"},
         )
@@ -188,7 +184,6 @@ def test_release_destinations_submit_idempotently_and_pending_reconcile_is_expli
         payload = {
             "csrf": csrf,
             "release_token": release_token,
-            "client_instance_id": workflow_app.state.client_instance_id,
             "destination": "fixture",
             "idempotency_key": "browser-idempotency-1",
         }
@@ -223,9 +218,9 @@ def test_settings_first_run_and_about_are_generic_and_provider_attributed(
     assert 'data-testid="readiness-checklist"' in settings.text
     assert "Manual metadata" in settings.text
     assert "Prowlarr" in settings.text
-    assert "Fixture client" in settings.text
+    assert "QBITTORRENT_URL" in settings.text
     assert "Manual-only catalog use remains available." in settings.text
-    assert 'data-testid="module-settings-fixture-provider"' in settings.text
+    assert 'form action="/ui/settings/' not in settings.text
     assert about.status_code == 200
     assert "MIT" in about.text
     assert "Fixture data" in about.text

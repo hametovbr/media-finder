@@ -533,3 +533,33 @@ msgstr "Клиент загрузки восстановлен."
 
 msgid "The download client is archived."
 msgstr "Клиент загрузки находится в архиве."
+
+msgid "Integration diagnostics"
+msgstr "Диагностика интеграций"
+
+msgid "Missing"
+msgstr "Отсутствует"
+
+msgid "Unavailable"
+msgstr "Недоступно"
+
+msgid "Set"
+msgstr "Задано"
+
+msgid "required"
+msgstr "обязательно"
+
+msgid "optional"
+msgstr "необязательно"
+
+msgid "secret"
+msgstr "секрет"
+
+msgid "non-secret"
+msgstr "не секрет"
+
+msgid "Prowlarr base URL"
+msgstr "Базовый URL Prowlarr"
+
+msgid "Prowlarr API key"
+msgstr "API-ключ Prowlarr"

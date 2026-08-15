@@ -10,7 +10,7 @@ const sourceRoot = path.resolve(import.meta.dirname, "..");
 
 function copyDeliveryFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "media-finder-delivery-"));
-  for (const entry of [".github", "tests"]) {
+  for (const entry of [".github", "tests", "docs"]) {
     fs.cpSync(path.join(sourceRoot, entry), path.join(root, entry), { recursive: true });
   }
   fs.mkdirSync(path.join(root, "scripts"));
@@ -18,7 +18,7 @@ function copyDeliveryFixture() {
     path.join(sourceRoot, "scripts/smoke-container.sh"),
     path.join(root, "scripts/smoke-container.sh"),
   );
-  for (const entry of ["Dockerfile", "compose.example.yaml"]) {
+  for (const entry of ["Dockerfile", "compose.example.yaml", "README.md"]) {
     fs.copyFileSync(path.join(sourceRoot, entry), path.join(root, entry));
   }
   return root;
@@ -94,4 +94,14 @@ test("image smoke test must exercise every public and protected surface", (conte
   );
 
   assert.match(validateDelivery(root).join("\n"), /image smoke test must validate \/health\/live/);
+});
+
+test("all exact first-party integration variables are required in deployment artifacts", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, "compose.example.yaml", (value) =>
+    value.replace(/^\s+QBITTORRENT_PASSWORD:.*\n/m, ""),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /QBITTORRENT_PASSWORD/);
 });

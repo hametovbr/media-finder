@@ -1,18 +1,12 @@
 {% extends "base.html" %}
 {% block content %}<h2>{{ _('Settings') }}</h2>
-{% if feedback %}<p id="ui-feedback" role="status" aria-live="polite" tabindex="-1" data-autofocus>{{ feedback }}</p>{% endif %}
-<section data-testid="readiness-checklist"><h3>{{ _('First-run readiness') }}</h3>
+<section data-testid="readiness-checklist"><h3>{{ _('Integration diagnostics') }}</h3>
   <p data-readiness="manual:ready">{{ _('Ready') }}: {{ _('Manual metadata') }}</p>
-  <p data-readiness="prowlarr:{% if prowlarr_ready %}ready{% else %}not-ready{% endif %}">{% if prowlarr_ready %}{{ _('Ready') }}{% else %}{{ _('Needs configuration') }}{% endif %}: Prowlarr</p>
-  {% for provider, ready in provider_readiness.items() %}<p data-readiness="{{ provider }}:{% if ready %}ready{% else %}not-ready{% endif %}">{% if ready %}{{ _('Ready') }}{% else %}{{ _('Needs configuration') }}{% endif %}: {{ mt(provider, 'module.' ~ provider ~ '.name') }}</p>{% endfor %}
-  {% for client in clients %}<p data-readiness="client:{% if client_readiness[client.id] %}ready{% else %}not-ready{% endif %}">{% if client_readiness[client.id] %}{{ _('Ready') }}{% else %}{{ _('Needs configuration') }}{% endif %}: {{ client.name }}</p>{% else %}<p data-readiness="client:not-ready">{{ _('Needs configuration') }}: {{ _('download clients') }}</p>{% endfor %}
+  {% for integration in diagnostics %}<article data-integration="{{ integration.key }}" data-integration-state="{{ integration.state }}">
+    <h4>{% if integration.key == 'prowlarr' %}Prowlarr{% else %}{{ mt(integration.key, 'module.' ~ integration.key ~ '.name') }}{% endif %}: {{ _(integration.state|capitalize) }}</h4>
+    <dl>{% for variable in integration.variables %}<div data-environment-variable="{{ variable.name }}" data-variable-state="{{ variable.state }}">
+      <dt><code>{{ variable.name }}</code></dt><dd>{{ variable.description }} — {{ _(variable.state|capitalize) }}; {% if variable.required %}{{ _('required') }}{% else %}{{ _('optional') }}{% endif %}; {% if variable.secret %}{{ _('secret') }}{% else %}{{ _('non-secret') }}{% endif %}</dd>
+    </div>{% endfor %}</dl>
+  </article>{% endfor %}
   <p>{{ _('Manual-only catalog use remains available.') }}</p>
-</section>
-<section aria-labelledby="active-clients-heading"><h3 id="active-clients-heading">{{ _('Active download clients') }}</h3>
-{% for client in clients %}<div><span>{{ client.name }}</span><form method="post" action="/ui/settings/clients/{{ client.id }}/archive"><input type="hidden" name="csrf" value="{{ csrf }}"><button>{{ _('Archive download client') }}</button></form></div>{% else %}<p>{{ _('No active download clients.') }}</p>{% endfor %}</section>
-<section aria-labelledby="archived-clients-heading"><h3 id="archived-clients-heading">{{ _('Archived download clients') }}</h3>
-{% for client in archived_clients %}<div><span>{{ client.name }}</span><form method="post" action="/ui/settings/clients/{{ client.id }}/restore"><input type="hidden" name="csrf" value="{{ csrf }}"><button>{{ _('Restore download client') }}</button></form></div>{% else %}<p>{{ _('No archived download clients.') }}</p>{% endfor %}</section>
-{% for provider, fields in provider_fields.items() %}<section data-testid="module-settings-{{ provider }}"><h3>{{ mt(provider, 'module.' ~ provider ~ '.name') }}</h3><form method="post" action="/ui/settings/providers/{{ provider }}"><input type="hidden" name="csrf" value="{{ csrf }}">{% for field in fields %}<label>{{ mt(provider, field.title_key) }} <input name="{{ field.name }}" type="{{ field.input_type }}"{% if field.required %} required{% endif %}></label>{% endfor %}<button>{{ _('Save') }}</button></form></section>{% endfor %}
-<section data-testid="prowlarr-settings"><h3>Prowlarr</h3><form method="post" action="/ui/settings/prowlarr"><input type="hidden" name="csrf" value="{{ csrf }}">{% for field in prowlarr_fields %}<label>{{ _(field.title_key) }} <input name="{{ field.name }}" type="{{ field.input_type }}"{% if field.name == 'base_url' %} placeholder="https://prowlarr.example.test"{% else %} placeholder="env:PROWLARR_API_KEY"{% endif %}{% if field.required %} required{% endif %}></label>{% endfor %}<button>{{ _('Save') }}</button></form></section>
-{% for module_key, fields in client_fields.items() %}<section data-testid="client-module-{{ module_key }}"><h3>{{ mt(module_key, 'module.' ~ module_key ~ '.name') }}</h3><form method="post" action="/ui/settings/clients"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="module_key" value="{{ module_key }}"><label>{{ _('Instance name') }} <input name="name" required></label>{% for field in fields %}<label>{{ mt(module_key, field.title_key) }} <input name="{{ field.name }}" type="{{ field.input_type }}"{% if field.required %} required{% endif %}></label>{% endfor %}<button>{{ _('Save') }}</button></form></section>{% endfor %}
-{% endblock %}
+</section>{% endblock %}

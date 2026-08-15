@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -19,6 +19,7 @@ from .db import create_database, session_factory
 from .modules.registry import FIRST_PARTY_MODULES
 from .prowlarr import ProwlarrAdapter
 from .sdk.protocols import MetadataProvider
+from .system_clients import ensure_system_qbittorrent
 from .ui_acquisition_routes import acquisition_router
 from .ui_catalog_routes import catalog_router
 from .ui_context import UIContext
@@ -44,6 +45,7 @@ def create_ui_app(
     client_loader: ClientLoader | None = None,
     runtime_factory: RuntimeFactory | None = None,
     http_client_factory: Callable[[], httpx.Client] = httpx.Client,
+    environment: Mapping[str, str] | None = None,
     **_: Any,
 ) -> FastAPI:
     engine = create_database(database_url)
@@ -60,7 +62,10 @@ def create_ui_app(
         and prowlarr is None
         and client_loader is None
     ):
-        selected_factory = DefaultRuntimeFactory(http_client_factory=http_client_factory)
+        selected_factory = DefaultRuntimeFactory(
+            environment=environment,
+            http_client_factory=http_client_factory,
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -74,9 +79,10 @@ def create_ui_app(
 
     app = FastAPI(lifespan=lifespan)
     sessions = session_factory(engine)
+    with sessions() as database:
+        ensure_system_qbittorrent(database)
     repository = UIRepository(sessions)
     runtime = RuntimeResolver(
-        sessions,
         factory=selected_factory,
         providers=provider_registry,
         prowlarr=prowlarr,

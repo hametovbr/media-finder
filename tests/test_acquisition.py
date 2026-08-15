@@ -11,7 +11,6 @@ from media_finder.acquisition import (
     AcquisitionRequest,
     AcquisitionService,
     DestinationUnavailable,
-    create_download_client_instance,
 )
 from media_finder.domain import CatalogService
 from media_finder.models import Acquisition, DownloadClientInstance, MetadataRevision
@@ -26,6 +25,7 @@ from media_finder.sdk.types import (
     Provenance,
     SubmissionResult,
 )
+from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 
 
 class SearchTransport:
@@ -81,16 +81,8 @@ def seed(database: Session) -> tuple[str, str, DownloadClientInstance]:
     )
     item = CatalogService(database).create_manual_item(normalized)
     revision = cast(MetadataRevision, item.current_revision)
-    instance = create_download_client_instance(
-        database,
-        name="Home qBittorrent",
-        module_key="qbittorrent",
-        config_payload={
-            "base_url": "https://qb.example.test",
-            "username_ref": "env:QB_USER",
-            "password_ref": "env:QB_PASSWORD",
-        },
-    )
+    instance = database.get(DownloadClientInstance, SYSTEM_QBITTORRENT_ID)
+    assert instance is not None and instance.system_owned
     return item.id, revision.id, instance
 
 
@@ -156,73 +148,13 @@ def test_disappeared_destination_returns_current_live_choices_without_acquisitio
     assert client.submissions == []
 
 
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {
-            "base_url": "https://qb.example.test",
-            "username_ref": "env:QB_USER",
-            "password_ref": "env:QB_PASSWORD",
-            "api_key": "literal-secret",
-        },
-        {
-            "base_url": "https://qb.example.test",
-            "username_ref": "env:QB_USER",
-            "password_ref": "env:QB_PASSWORD",
-            "credential": "literal-secret",
-        },
-        {
-            "base_url": "https://qb.example.test",
-            "username_ref": "env:QB_USER",
-            "password_ref": "env:QB_PASSWORD",
-            "nested": {"password": "literal-secret"},
-        },
-        {
-            "base_url": "https://qb.example.test",
-            "username_ref": "env:qb-user",
-            "password_ref": "env:QB_PASSWORD",
-        },
-        {
-            "base_url": "https://qb.example.test/api/passkey-literal-secret",
-            "username_ref": "env:QB_USER",
-            "password_ref": "env:QB_PASSWORD",
-        },
-    ],
-)
-def test_download_client_instance_uses_selected_module_typed_config(
-    database: Session, payload: dict[str, object]
-) -> None:
-    with pytest.raises(ValueError):
-        create_download_client_instance(
-            database,
-            name="Unsafe",
-            module_key="qbittorrent",
-            config_payload=payload,
-        )
+def test_database_exposes_only_empty_system_client_configuration(database: Session) -> None:
+    instances = list(database.scalars(select(DownloadClientInstance)))
 
-    assert database.scalar(select(DownloadClientInstance)) is None
-
-
-def test_download_client_instance_persists_only_normalized_references(
-    database: Session,
-) -> None:
-    instance = create_download_client_instance(
-        database,
-        name="Safe",
-        module_key="qbittorrent",
-        config_payload={
-            "base_url": "https://qb.example.test",
-            "username_ref": "env:QB_USER",
-            "password_ref": "env:QB_PASSWORD",
-        },
-    )
-
-    assert instance.config_payload == {
-        "base_url": "https://qb.example.test/",
-        "username_ref": "env:QB_USER",
-        "password_ref": "env:QB_PASSWORD",
-    }
-    assert "literal" not in repr(instance.config_payload)
+    assert len(instances) == 1
+    assert instances[0].id == SYSTEM_QBITTORRENT_ID
+    assert instances[0].system_owned is True
+    assert instances[0].config_payload == {}
 
 
 class RecoveryClient(AcceptingClient):
