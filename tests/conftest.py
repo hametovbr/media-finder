@@ -18,6 +18,8 @@ from media_finder.sdk.types import (
     Provenance,
     RetentionAction,
     RetentionActionKind,
+    RetentionExecution,
+    RetentionExecutionStatus,
     RetentionPolicy,
     SubmissionResult,
 )
@@ -61,7 +63,10 @@ class FakeProvider:
             )
         ]
 
-    def fetch(self, kind: str, external_id: str, locale: str) -> NormalizedMetadata:
+    def fetch(self, kind: str, external_id: str, locale: str) -> dict:
+        return {"title": "Fixture"}
+
+    def normalize(self, payload, kind: str, external_id: str, locale: str) -> NormalizedMetadata:
         return NormalizedMetadata(
             kind=MediaKind(kind),
             titles={locale: "Fixture"},
@@ -69,9 +74,6 @@ class FakeProvider:
                 provider_key=self.manifest.key, external_id=external_id, locale=locale
             ),
         )
-
-    def normalize(self, payload, kind: str, external_id: str, locale: str) -> NormalizedMetadata:
-        return self.fetch(kind, external_id, locale)
 
     def attribution(self) -> Attribution:
         return Attribution(provider_key=self.manifest.key, notice="Fixture data")
@@ -81,6 +83,9 @@ class FakeProvider:
 
     def plan_retention(self, policy, now) -> RetentionAction:
         return RetentionAction(kind=RetentionActionKind.NONE)
+
+    def execute_retention(self, subject, action, now) -> RetentionExecution:
+        return RetentionExecution(status=RetentionExecutionStatus.NOOP)
 
 
 class FakeClient:

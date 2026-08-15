@@ -19,7 +19,15 @@ def test_redaction_removes_secrets_and_sensitive_urls() -> None:
     assert "pass" not in result
     assert "secret" not in result
     assert "api_key" not in result
-    assert result == "failed https://example.test/a [REDACTED]"
+    assert result == "failed https://example.test [REDACTED]"
+
+
+def test_redaction_drops_sensitive_url_paths_queries_and_fragments() -> None:
+    result = redact(
+        "upstream https://example.test/passkey/token/file?apikey=hidden#secret",
+        secrets=["hidden"],
+    )
+    assert result == "upstream https://example.test"
 
 
 def test_settings_repository_persists_only_secret_reference(database) -> None:

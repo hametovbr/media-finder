@@ -1,13 +1,20 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from media_finder.domain import CatalogService
 from media_finder.maintenance import MaintenanceCoordinator, MaintenanceRunner
 from media_finder.modules.tmdb import TmdbConfig, TmdbProvider
+from media_finder.sdk.errors import ModuleError
 from media_finder.sdk.types import RetentionActionKind
 
 
 class FixtureTransport:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, str]]] = []
+
     def get_json(self, path: str, params: dict[str, str]) -> dict:
+        self.calls.append((path, params))
         if path == "/search/movie":
             return {
                 "results": [
@@ -16,6 +23,17 @@ class FixtureTransport:
                         "title": "Spirited Away",
                         "release_date": "2001-07-20",
                         "overview": "A journey.",
+                    }
+                ]
+            }
+        if path == "/search/tv":
+            return {
+                "results": [
+                    {
+                        "id": 200,
+                        "name": "Fixture Series",
+                        "first_air_date": "2020-01-01",
+                        "overview": "Series result",
                     }
                 ]
             }
@@ -34,7 +52,11 @@ class FixtureTransport:
 
 
 class SeriesTransport:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, str]]] = []
+
     def get_json(self, path: str, params: dict[str, str]) -> dict:
+        self.calls.append((path, params))
         return {
             "id": 900,
             "name": "Fixture Series",
@@ -59,10 +81,23 @@ class SeriesTransport:
 
 
 def test_tmdb_search_fetch_normalize_locale_attribution_and_provenance() -> None:
-    provider = TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), FixtureTransport())
-    result = provider.search("Spirited Away", "ru-RU")[0]
-    assert result.external_id == "129" and result.locale == "ru-RU"
-    normalized = provider.fetch("movie", "129", "ja-JP")
+    transport = FixtureTransport()
+    provider = TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), transport)
+    results = provider.search("Spirited Away", "ru-RU")
+    result = results[0]
+    assert [(value.external_id, value.kind.value) for value in results] == [
+        ("129", "movie"),
+        ("200", "series"),
+    ]
+    assert result.locale == "ru-RU"
+    assert transport.calls[:2] == [
+        ("/search/movie", {"query": "Spirited Away", "language": "ru-RU"}),
+        ("/search/tv", {"query": "Spirited Away", "language": "ru-RU"}),
+    ]
+    raw = provider.fetch("movie", "129", "ja-JP")
+    assert raw["id"] == 129 and raw["overview"] == "A journey."
+    assert transport.calls[-1] == ("/movie/129", {"language": "ja-JP"})
+    normalized = provider.normalize(raw, "movie", "129", "ja-JP")
     assert normalized.titles["ja-JP"] == "Spirited Away"
     assert normalized.provenance.provider_key == "tmdb"
     assert "TMDB" in provider.attribution().notice
@@ -89,8 +124,11 @@ def test_tmdb_calendar_month_boundaries_and_manual_never_expires() -> None:
 
 
 def test_tmdb_normalizes_series_specials_in_season_zero() -> None:
-    provider = TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), SeriesTransport())
-    normalized = provider.fetch("series", "900", "en-US")
+    transport = SeriesTransport()
+    provider = TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), transport)
+    raw = provider.fetch("series", "900", "en-US")
+    assert transport.calls == [("/tv/900", {"language": "en-US"})]
+    normalized = provider.normalize(raw, "series", "900", "en-US")
     assert normalized.kind.value == "series"
     assert normalized.seasons[0].number == 0
     assert normalized.seasons[0].episodes[0].provider_ids == {"tmdb": "901"}
@@ -102,9 +140,15 @@ def test_generic_purge_preserves_envelope_overrides_identity_and_acquisition(dat
     provider = TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), FixtureTransport())
     item, _ = service.get_or_create_item("tmdb", "129", "movie")
     created = datetime(2024, 1, 1, tzinfo=UTC)
-    normalized = provider.fetch("movie", "129", "en-US")
+    raw = provider.fetch("movie", "129", "en-US")
+    normalized = provider.normalize(raw, "movie", "129", "en-US")
     revision = service.add_provider_revision(
-        item, normalized, {"title": "Custom"}, provider.retention_for(created), created
+        item,
+        {"id": 129, "title": "Spirited Away"},
+        normalized,
+        {"plot": "Custom"},
+        provider.retention_for(created),
+        created,
     )
     coordinator = MaintenanceCoordinator({"tmdb": provider})
     coordinator.run(database, datetime(2024, 7, 1, tzinfo=UTC))
@@ -112,7 +156,7 @@ def test_generic_purge_preserves_envelope_overrides_identity_and_acquisition(dat
     assert revision.raw_payload is None
     assert revision.normalized_payload is None
     assert revision.effective_payload is None
-    assert revision.overrides_payload == {"title": "Custom"}
+    assert revision.overrides_payload == {"plot": "Custom"}
     assert revision.provider_key == "tmdb" and revision.external_id == "129"
     assert revision.expired_at is not None
 
@@ -139,3 +183,71 @@ def test_generic_maintenance_runs_at_startup_and_once_daily(database) -> None:
     assert runner.run_if_daily_due(database, datetime(2025, 1, 1, 23, tzinfo=UTC)) is False
     assert runner.run_if_daily_due(database, datetime(2025, 1, 2, tzinfo=UTC)) is True
     assert calls == [start, datetime(2025, 1, 2, tzinfo=UTC)]
+
+
+def test_generic_refresh_executes_provider_and_persists_new_revision(database) -> None:
+    service = CatalogService(database)
+    transport = FixtureTransport()
+    provider = TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), transport)
+    item, _ = service.get_or_create_item("tmdb", "129", "movie")
+    created = datetime(2024, 1, 1, tzinfo=UTC)
+    fetched = provider.fetch("movie", "129", "en-US")
+    normalized = provider.normalize(fetched, "movie", "129", "en-US")
+    original = service.add_provider_revision(
+        item,
+        {"id": 129, "title": "Old"},
+        normalized,
+        {"plot": "User plot"},
+        provider.retention_for(created),
+        created,
+    )
+    MaintenanceCoordinator({"tmdb": provider}).run(database, datetime(2024, 6, 1, tzinfo=UTC))
+    database.refresh(item)
+    database.refresh(original)
+    assert original.maintenance_status == "refreshed"
+    assert len(item.revisions) == 2
+    assert item.revisions[-1].raw_payload["id"] == 129
+    assert item.revisions[-1].effective_payload["plot"] == "User plot"
+    MaintenanceCoordinator({"tmdb": provider}).run(database, datetime(2024, 6, 2, tzinfo=UTC))
+    assert len(item.revisions) == 2
+
+
+def test_removed_configuration_still_executes_registered_expiry_purge(database) -> None:
+    service = CatalogService(database)
+    active = TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), FixtureTransport())
+    item, _ = service.get_or_create_item("tmdb", "129", "movie")
+    created = datetime(2024, 1, 1, tzinfo=UTC)
+    revision = service.add_provider_revision(
+        item,
+        {"id": 129},
+        active.normalize(active.fetch("movie", "129", "en-US"), "movie", "129", "en-US"),
+        {},
+        active.retention_for(created),
+        created,
+    )
+    retention_only = TmdbProvider.retention_only()
+    MaintenanceCoordinator({"tmdb": retention_only}).run(database, datetime(2024, 7, 1, tzinfo=UTC))
+    database.refresh(revision)
+    assert revision.expired_at is not None
+    assert revision.maintenance_status == "purged"
+
+
+class FailingTransport:
+    def get_json(self, path: str, params: dict[str, str]) -> dict:
+        raise RuntimeError(
+            "failed https://api.example.test/passkey/SECRET/file?api_key=TOKEN#fragment"
+        )
+
+
+def test_tmdb_transport_failures_are_standardized_and_secret_safe() -> None:
+    provider = TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), FailingTransport())
+    with pytest.raises(ModuleError) as captured:
+        provider.search("secret", "en-US")
+    error = captured.value
+    rendered = f"{error} {error.safe_details}"
+    assert error.code == "metadata_provider_unavailable"
+    assert "SECRET" not in rendered
+    assert "TOKEN" not in rendered
+    assert "passkey" not in rendered
+    assert "api_key" not in rendered
+    assert "https://api.example.test" in rendered

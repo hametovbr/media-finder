@@ -136,6 +136,29 @@ class RetentionAction(PublicModel):
     mandatory: bool = False
 
 
+class RetentionSubject(PublicModel):
+    provider_key: str
+    external_id: str
+    media_kind: MediaKind
+    locale: str
+    policy: RetentionPolicy
+
+
+class RetentionExecutionStatus(StrEnum):
+    NOOP = "noop"
+    REFRESHED = "refreshed"
+    FAILED = "failed"
+    PURGED = "purged"
+
+
+class RetentionExecution(PublicModel):
+    status: RetentionExecutionStatus
+    raw_payload: dict[str, Any] | None = None
+    normalized: NormalizedMetadata | None = None
+    policy: RetentionPolicy | None = None
+    error_code: str | None = None
+
+
 class MagnetArtifact(PublicModel):
     kind: Literal["magnet"] = "magnet"
     uri: str

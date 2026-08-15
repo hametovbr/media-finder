@@ -41,7 +41,18 @@ def _safe_url(match: re.Match[str]) -> str:
     parsed = urlsplit(match.group(0))
     hostname = parsed.hostname or ""
     port = f":{parsed.port}" if parsed.port else ""
-    return urlunsplit((parsed.scheme, hostname + port, parsed.path, "", ""))
+    return urlunsplit((parsed.scheme, hostname + port, "", "", ""))
+
+
+def safe_url_origin(value: str) -> str | None:
+    match = URL.search(value)
+    if match is None:
+        return None
+    parsed = urlsplit(match.group(0))
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    port = f":{parsed.port}" if parsed.port else ""
+    return urlunsplit((parsed.scheme, parsed.hostname + port, "", "", ""))
 
 
 def redact(value: str, *, secrets: list[str] | tuple[str, ...] = ()) -> str:

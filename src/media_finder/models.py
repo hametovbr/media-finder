@@ -103,6 +103,9 @@ class MetadataRevision(Base):
     refresh_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    maintenance_status: Mapped[str | None] = mapped_column(String(30))
+    maintenance_error_code: Mapped[str | None] = mapped_column(String(200))
+    maintenance_attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     media_item: Mapped[MediaItem] = relationship(
@@ -200,3 +203,9 @@ def prevent_revision_envelope_mutation(session: Session, *_: object) -> None:
         )
         if changed and not maintenance_purge:
             raise ValueError("metadata revision envelope is immutable")
+    for instance in session.dirty:
+        if not isinstance(instance, Acquisition):
+            continue
+        state = inspect(instance)
+        if state.attrs.metadata_revision_id.history.has_changes():
+            raise ValueError("an acquisition's pinned metadata revision is immutable")

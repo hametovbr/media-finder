@@ -10,6 +10,7 @@ FORBIDDEN_ARGUMENTS = {
     "db",
     "session",
     "repository",
+    "catalog",
     "jinja",
     "environment",
     "template",
@@ -22,6 +23,18 @@ FORBIDDEN_ARGUMENTS = {
 
 
 def _assert_boundary(module: object) -> None:
+    constructor_parameters = set(inspect.signature(type(module)).parameters)
+    forbidden_constructor = constructor_parameters & FORBIDDEN_ARGUMENTS
+    assert not forbidden_constructor, (
+        f"constructor exposes forbidden dependencies: {sorted(forbidden_constructor)}"
+    )
+    for name, value in vars(module).items():
+        type_path = f"{type(value).__module__}.{type(value).__qualname__}".lower()
+        assert name not in FORBIDDEN_ARGUMENTS, f"instance stores forbidden dependency: {name}"
+        assert not any(
+            marker in type_path
+            for marker in ("sqlalchemy", "jinja", "media_finder.domain", "media_finder.models")
+        ), f"instance stores forbidden application type: {type_path}"
     for name, method in inspect.getmembers(module, predicate=callable):
         if name.startswith("_"):
             continue

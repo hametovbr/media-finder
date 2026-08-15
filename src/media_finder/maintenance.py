@@ -4,12 +4,19 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Protocol
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from .domain import CatalogService
 from .models import AppSetting, MetadataRevision
 from .sdk.protocols import MetadataProvider
-from .sdk.types import RetentionActionKind, RetentionPolicy
+from .sdk.types import (
+    MediaKind,
+    RetentionActionKind,
+    RetentionExecutionStatus,
+    RetentionPolicy,
+    RetentionSubject,
+)
 
 
 class MaintenanceCoordinator:
@@ -18,7 +25,13 @@ class MaintenanceCoordinator:
 
     def run(self, session: Session, now: datetime) -> None:
         revisions = session.scalars(
-            select(MetadataRevision).where(MetadataRevision.expired_at.is_(None))
+            select(MetadataRevision).where(
+                MetadataRevision.expired_at.is_(None),
+                or_(
+                    MetadataRevision.maintenance_status.is_(None),
+                    MetadataRevision.maintenance_status != "refreshed",
+                ),
+            )
         ).all()
         session.info["retention_purge"] = True
         try:
@@ -31,11 +44,41 @@ class MaintenanceCoordinator:
                     expires_at=revision.expires_at,
                 )
                 action = provider.plan_retention(policy, now)
-                if action.kind is RetentionActionKind.PURGE:
+                if action.kind is RetentionActionKind.NONE:
+                    continue
+                subject = RetentionSubject(
+                    provider_key=revision.provider_key,
+                    external_id=revision.external_id,
+                    media_kind=MediaKind(revision.media_item.kind),
+                    locale=revision.locale,
+                    policy=policy,
+                )
+                result = provider.execute_retention(subject, action, now)
+                revision.maintenance_status = result.status.value
+                revision.maintenance_error_code = result.error_code
+                revision.maintenance_attempted_at = now
+                if result.status is RetentionExecutionStatus.PURGED:
                     revision.raw_payload = None
                     revision.normalized_payload = None
                     revision.effective_payload = None
                     revision.expired_at = now
+                elif result.status is RetentionExecutionStatus.REFRESHED:
+                    if (
+                        result.raw_payload is None
+                        or result.normalized is None
+                        or result.policy is None
+                    ):
+                        raise ValueError(
+                            "a refreshed outcome requires payload, metadata, and policy"
+                        )
+                    CatalogService(session).add_provider_revision(
+                        revision.media_item,
+                        result.raw_payload,
+                        result.normalized,
+                        revision.overrides_payload,
+                        result.policy,
+                        now,
+                    )
             session.commit()
         finally:
             session.info.pop("retention_purge", None)

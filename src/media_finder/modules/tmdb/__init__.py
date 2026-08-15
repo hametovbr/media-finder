@@ -6,7 +6,8 @@ from typing import Any
 from dateutil.relativedelta import relativedelta
 from pydantic import BaseModel, Field, field_validator
 
-from ...config import EnvReference
+from ...config import EnvReference, safe_url_origin
+from ...sdk.errors import ModuleError
 from ...sdk.protocols import JsonTransport
 from ...sdk.types import (
     Attribution,
@@ -19,7 +20,10 @@ from ...sdk.types import (
     Rating,
     RetentionAction,
     RetentionActionKind,
+    RetentionExecution,
+    RetentionExecutionStatus,
     RetentionPolicy,
+    RetentionSubject,
     Season,
 )
 
@@ -55,34 +59,47 @@ class TmdbProvider:
     )
     config_model = TmdbConfig
 
-    def __init__(self, config: TmdbConfig, transport: JsonTransport) -> None:
+    def __init__(self, config: TmdbConfig | None, transport: JsonTransport | None) -> None:
         self.config = config
         self.transport = transport
 
+    @classmethod
+    def retention_only(cls) -> "TmdbProvider":
+        return cls(None, None)
+
     def validate_config(self) -> None:
+        if self.config is None:
+            raise ModuleError(
+                code="metadata_provider_not_configured",
+                message="The metadata provider is not configured.",
+            )
         TmdbConfig.model_validate(self.config.model_dump())
 
     def search(self, query: str, locale: str) -> list[MetadataSearchResult]:
-        payload = self.transport.get_json("/search/movie", {"query": query, "language": locale})
         results: list[MetadataSearchResult] = []
-        for item in payload.get("results", []):
-            release = item.get("release_date") or ""
-            results.append(
-                MetadataSearchResult(
-                    provider_key="tmdb",
-                    external_id=str(item["id"]),
-                    kind=MediaKind.MOVIE,
-                    title=item["title"],
-                    year=int(release[:4]) if len(release) >= 4 else None,
-                    locale=locale,
+        searches = (
+            ("/search/movie", MediaKind.MOVIE, "title", "release_date"),
+            ("/search/tv", MediaKind.SERIES, "name", "first_air_date"),
+        )
+        for path, kind, title_field, date_field in searches:
+            payload = self._request(path, {"query": query, "language": locale})
+            for item in payload.get("results", []):
+                release = item.get(date_field) or ""
+                results.append(
+                    MetadataSearchResult(
+                        provider_key="tmdb",
+                        external_id=str(item["id"]),
+                        kind=kind,
+                        title=str(item[title_field]),
+                        year=int(release[:4]) if len(release) >= 4 else None,
+                        locale=locale,
+                    )
                 )
-            )
         return results
 
-    def fetch(self, kind: str, external_id: str, locale: str) -> NormalizedMetadata:
+    def fetch(self, kind: str, external_id: str, locale: str) -> dict[str, Any]:
         path_kind = "tv" if kind == "series" else "movie"
-        payload = self.transport.get_json(f"/{path_kind}/{external_id}", {"language": locale})
-        return self.normalize(payload, kind, external_id, locale)
+        return self._request(f"/{path_kind}/{external_id}", {"language": locale})
 
     def normalize(
         self, payload: dict[str, Any], kind: str, external_id: str, locale: str
@@ -165,6 +182,52 @@ class TmdbProvider:
         if refresh is not None and current >= refresh:
             return RetentionAction(kind=RetentionActionKind.REFRESH)
         return RetentionAction(kind=RetentionActionKind.NONE)
+
+    def execute_retention(
+        self, subject: RetentionSubject, action: RetentionAction, now: datetime
+    ) -> RetentionExecution:
+        if action.kind is RetentionActionKind.PURGE:
+            return RetentionExecution(status=RetentionExecutionStatus.PURGED)
+        if action.kind is not RetentionActionKind.REFRESH:
+            return RetentionExecution(status=RetentionExecutionStatus.NOOP)
+        if self.config is None or self.transport is None:
+            return RetentionExecution(
+                status=RetentionExecutionStatus.FAILED,
+                error_code="metadata_provider_not_configured",
+            )
+        path_kind = "tv" if subject.media_kind is MediaKind.SERIES else "movie"
+        try:
+            raw = self._request(f"/{path_kind}/{subject.external_id}", {"language": subject.locale})
+            normalized = self.normalize(
+                raw, subject.media_kind.value, subject.external_id, subject.locale
+            )
+        except ModuleError as error:
+            return RetentionExecution(status=RetentionExecutionStatus.FAILED, error_code=error.code)
+        return RetentionExecution(
+            status=RetentionExecutionStatus.REFRESHED,
+            raw_payload=raw,
+            normalized=normalized,
+            policy=self.retention_for(now),
+        )
+
+    def _request(self, path: str, params: dict[str, str]) -> dict[str, Any]:
+        if self.transport is None:
+            raise ModuleError(
+                code="metadata_provider_not_configured",
+                message="The metadata provider is not configured.",
+            )
+        try:
+            return self.transport.get_json(path, params)
+        except Exception as error:
+            details = {"provider": self.manifest.key}
+            origin = safe_url_origin(str(error))
+            if origin is not None:
+                details["upstream_origin"] = origin
+            raise ModuleError(
+                code="metadata_provider_unavailable",
+                message="The metadata provider is temporarily unavailable.",
+                safe_details=details,
+            ) from None
 
     @staticmethod
     def _aware(value: datetime | None) -> datetime | None:

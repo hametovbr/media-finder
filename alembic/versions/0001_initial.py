@@ -60,6 +60,9 @@ def upgrade() -> None:
         sa.Column("refresh_after", sa.DateTime(timezone=True)),
         sa.Column("expires_at", sa.DateTime(timezone=True)),
         sa.Column("expired_at", sa.DateTime(timezone=True)),
+        sa.Column("maintenance_status", sa.String(30)),
+        sa.Column("maintenance_error_code", sa.String(200)),
+        sa.Column("maintenance_attempted_at", sa.DateTime(timezone=True)),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint("media_item_id", "revision_number", name="uq_item_revision"),
     )

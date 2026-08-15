@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from media_finder.domain import CatalogService
+from media_finder.manual import ManualCatalogService
 from media_finder.modules.manual import ManualImportError, ManualProvider
 
 
@@ -23,7 +24,7 @@ def movie_document(external_id: str | None = None) -> dict:
 
 
 def test_complete_json_import_preserves_or_allocates_uuid4_atomically(database) -> None:
-    provider = ManualProvider(CatalogService(database))
+    provider = ManualCatalogService(CatalogService(database), ManualProvider())
     supplied = uuid4()
     item = provider.import_json(movie_document(str(supplied)))
     assert item.external_id == str(supplied)
@@ -36,7 +37,7 @@ def test_complete_json_import_preserves_or_allocates_uuid4_atomically(database) 
 
 
 def test_existing_identity_requires_explicit_confirmation(database) -> None:
-    provider = ManualProvider(CatalogService(database))
+    provider = ManualCatalogService(CatalogService(database), ManualProvider())
     identity = str(uuid4())
     original = provider.import_json(movie_document(identity))
     result = provider.import_json(movie_document(identity))
@@ -49,7 +50,7 @@ def test_existing_identity_requires_explicit_confirmation(database) -> None:
 
 
 def test_episode_csv_import_is_atomic_and_preserves_identity(database) -> None:
-    provider = ManualProvider(CatalogService(database))
+    provider = ManualCatalogService(CatalogService(database), ManualProvider())
     series = provider.import_json(
         {
             "schema_version": "1",
@@ -63,11 +64,11 @@ def test_episode_csv_import_is_atomic_and_preserves_identity(database) -> None:
     good = io.StringIO(
         "season,episode,title,plot,air_date\n0,1,Special,Bonus,2024-01-01\n1,1,Pilot,Start,2024-02-01\n"
     )
-    provider.import_episode_csv(series.id, good)
+    provider.import_episode_csv(series.id, good.read())
     assert series.external_id == identity
     assert series.revisions[-1].effective_payload["seasons"][0]["number"] == 0
     count = len(series.revisions)
     bad = io.StringIO("season,episode,title\n1,2,Valid\ninvalid,3,Broken\n")
     with pytest.raises((ManualImportError, csv.Error)):
-        provider.import_episode_csv(series.id, bad)
+        provider.import_episode_csv(series.id, bad.read())
     assert len(series.revisions) == count

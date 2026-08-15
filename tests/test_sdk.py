@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field, SecretStr
 
+from media_finder.modules.manual import ManualProvider
+from media_finder.modules.tmdb import TmdbConfig, TmdbProvider
 from media_finder.sdk.conformance import assert_client_conforms, assert_provider_conforms
 from media_finder.sdk.settings import describe_settings
 from media_finder.sdk.types import ModuleManifest
@@ -27,3 +29,19 @@ def test_module_manifest_rejects_markup_and_paths() -> None:
 def test_fixture_modules_conform(fake_provider, fake_client) -> None:
     assert_provider_conforms(fake_provider)
     assert_client_conforms(fake_client)
+
+
+class RealProviderTransport:
+    def get_json(self, path: str, params: dict[str, str]) -> dict:
+        return (
+            {"results": []}
+            if path.startswith("/search/")
+            else {"id": 1, "title": "Fixture", "release_date": "2024-01-01"}
+        )
+
+
+def test_real_metadata_providers_conform_without_application_dependencies() -> None:
+    assert_provider_conforms(ManualProvider())
+    assert_provider_conforms(
+        TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), RealProviderTransport())
+    )

@@ -5,11 +5,32 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import MediaItem, MetadataRevision
 from .sdk.types import MediaKind, NormalizedMetadata, RetentionPolicy
+
+JSON_OBJECT = TypeAdapter(dict[str, Any])
+OVERRIDABLE_FIELDS = {
+    "titles",
+    "original_title",
+    "year",
+    "plot",
+    "release_date",
+    "runtime_minutes",
+    "ratings",
+    "genres",
+    "tags",
+    "countries",
+    "studios",
+    "people",
+    "artwork",
+    "seasons",
+    "completeness",
+    "structural_quality",
+}
 
 
 def utcnow() -> datetime:
@@ -69,7 +90,15 @@ class CatalogService:
         normalized = revision_input.normalized
         payload = normalized.model_dump(mode="json")
         overrides = revision_input.overrides or {}
-        effective = payload | overrides
+        unknown = set(overrides) - OVERRIDABLE_FIELDS
+        if unknown:
+            raise ValueError(f"override contains unsupported fields: {sorted(unknown)}")
+        try:
+            effective_model = NormalizedMetadata.model_validate(payload | overrides)
+        except ValidationError as error:
+            raise ValueError("override does not produce valid normalized metadata") from error
+        effective = effective_model.model_dump(mode="json")
+        serialized_overrides = JSON_OBJECT.dump_python(overrides, mode="json")
         revision = MetadataRevision(
             media_item_id=item.id,
             revision_number=len(item.revisions) + 1,
@@ -78,9 +107,11 @@ class CatalogService:
             locale=normalized.provenance.locale,
             schema_version=normalized.schema_version,
             provenance_payload=normalized.provenance.model_dump(mode="json"),
-            raw_payload=revision_input.raw_payload,
+            raw_payload=JSON_OBJECT.dump_python(revision_input.raw_payload, mode="json")
+            if revision_input.raw_payload is not None
+            else None,
             normalized_payload=payload,
-            overrides_payload=overrides,
+            overrides_payload=serialized_overrides,
             effective_payload=effective,
             refresh_after=revision_input.retention.refresh_after,
             expires_at=revision_input.retention.expires_at,
@@ -98,16 +129,23 @@ class CatalogService:
     def add_provider_revision(
         self,
         item: MediaItem,
+        raw_payload: dict[str, Any],
         normalized: NormalizedMetadata,
         overrides: dict[str, Any],
         retention: RetentionPolicy,
         created_at: datetime,
     ) -> MetadataRevision:
+        if (
+            normalized.provenance.provider_key != item.provider_key
+            or normalized.provenance.external_id != item.external_id
+            or normalized.kind.value != item.kind
+        ):
+            raise ValueError("normalized provider identity does not match the media item")
         return self.add_revision(
             item,
             RevisionInput(
                 normalized=normalized,
-                raw_payload={"provider_identity": normalized.provenance.external_id},
+                raw_payload=raw_payload,
                 overrides=overrides,
                 retention=retention,
                 created_at=created_at,

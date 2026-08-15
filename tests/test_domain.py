@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -5,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.models import Acquisition, Collection, MediaItem, MetadataRevision
-from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
+from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance, RetentionPolicy
 
 
 def metadata(title: str = "Spirited Away", year: int = 2001) -> NormalizedMetadata:
@@ -115,6 +116,60 @@ def test_acquisition_pins_revision_and_idempotency_key_is_unique(database) -> No
     )
     with pytest.raises(IntegrityError):
         database.commit()
+
+
+def test_acquisition_cannot_be_repointed_to_a_new_revision(database) -> None:
+    service = CatalogService(database)
+    item = service.create_manual_item(metadata())
+    pinned = item.revisions[-1]
+    acquisition = Acquisition(
+        media_item_id=item.id,
+        metadata_revision_id=pinned.id,
+        idempotency_key="immutable-pin",
+        naming_profile="jellyfin-v1",
+        status="pending",
+    )
+    database.add(acquisition)
+    database.commit()
+    replacement = service.add_revision(
+        item, RevisionInput.from_normalized(metadata("Replacement", 2002))
+    )
+    acquisition.metadata_revision_id = replacement.id
+    with pytest.raises(ValueError, match="pinned"):
+        database.flush()
+
+
+def test_provider_revision_preserves_raw_and_validates_effective_snapshot(database) -> None:
+    service = CatalogService(database)
+    item, _ = service.get_or_create_item("tmdb", "129", "movie")
+    normalized = metadata()
+    normalized = normalized.model_copy(
+        update={
+            "provenance": normalized.provenance.model_copy(
+                update={"provider_key": "tmdb", "external_id": "129"}
+            )
+        }
+    )
+    raw = {"id": 129, "overview": "Provider plot", "internal": {"cache": True}}
+    revision = service.add_provider_revision(
+        item,
+        raw,
+        normalized,
+        {"plot": "User plot"},
+        RetentionPolicy(),
+        datetime.now(UTC),
+    )
+    assert revision.raw_payload == raw
+    assert revision.effective_payload["plot"] == "User plot"
+    with pytest.raises(ValueError, match="override"):
+        service.add_provider_revision(
+            item,
+            raw,
+            normalized,
+            {"runtime_minutes": "junk"},
+            RetentionPolicy(),
+            datetime.now(UTC),
+        )
     database.rollback()
 
     item = MediaItem(provider_key="tmdb", external_id="1", kind="movie")
