@@ -53,7 +53,7 @@
 
 ## 7. Release readiness
 
-- [ ] 7.1 Run the complete pristine validation matrix and independent security, module-boundary, and architecture reviews.
-- [ ] 7.2 Resolve all blocking findings and verify acceptance scenarios in both supported locales.
+- [x] 7.1 Run the complete pristine validation matrix and independent security, module-boundary, and architecture reviews.
+- [x] 7.2 Resolve all blocking findings and verify acceptance scenarios in both supported locales.
 - [ ] 7.3 Synchronize the approved capability specs, archive `bootstrap-media-finder`, and verify strict validation.
 - [ ] 7.4 Create the first stable GitHub Release only after required checks pass and `/data` upgrade guidance is published.

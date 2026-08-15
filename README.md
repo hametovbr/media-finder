@@ -2,7 +2,7 @@
 
 Media Finder is a self-hosted catalog and torrent-acquisition control plane for manually curated movie and series libraries. It preserves selected metadata revisions, delegates downloads to pluggable clients, and gives external processors stable metadata, naming, and NFO APIs.
 
-The project is being implemented from the approved [`bootstrap-media-finder`](openspec/changes/bootstrap-media-finder/) OpenSpec change.
+The implemented behavior contracts live in the canonical [OpenSpec capability specifications](openspec/specs/). Historical changes are retained under `openspec/changes/archive/` after release closure.
 
 ## Deployment
 
