@@ -4,9 +4,10 @@ from time import sleep
 
 import pytest
 from fastapi.testclient import TestClient
+from media_finder_server import create_application
 
 from media_finder.db import migrate_to_head
-from media_finder.runtime import create_application, ui_mode
+from media_finder.runtime import ui_mode
 
 
 def _environment(

@@ -3,10 +3,10 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
+from media_finder_server import create_legacy_module_registry, create_runtime_factory
 from pydantic import ValidationError
 
 from media_finder import sdk
-from media_finder.modules.registry import FIRST_PARTY_MODULES
 from media_finder.sdk.conformance import ClientConformanceFixture, ProviderConformanceFixture
 from media_finder.sdk.registration import (
     DownloadClientRegistration,
@@ -20,6 +20,8 @@ from media_finder.sdk.types import (
     TorrentArtifact,
 )
 
+LEGACY_REGISTRY = create_legacy_module_registry()
+
 
 def _environment_type():
     contract = getattr(sdk, "EnvironmentVariableSpec", None)
@@ -30,9 +32,9 @@ def _environment_type():
 def test_first_party_modules_publish_exact_environment_contracts() -> None:
     environment_type = _environment_type()
 
-    manual = FIRST_PARTY_MODULES.metadata_providers["manual"].environment
-    tmdb = FIRST_PARTY_MODULES.metadata_providers["tmdb"].environment
-    qbittorrent = FIRST_PARTY_MODULES.download_clients["qbittorrent"].environment
+    manual = LEGACY_REGISTRY.metadata_providers["manual"].environment
+    tmdb = LEGACY_REGISTRY.metadata_providers["tmdb"].environment
+    qbittorrent = LEGACY_REGISTRY.download_clients["qbittorrent"].environment
 
     assert manual == ()
     assert tmdb == (
@@ -82,11 +84,11 @@ def test_environment_contract_rejects_invalid_names_and_duplicates() -> None:
         description_key="module.conflict.environment.token",
     )
     conflicting_client = replace(
-        FIRST_PARTY_MODULES.download_clients["qbittorrent"], environment=(duplicate,)
+        LEGACY_REGISTRY.download_clients["qbittorrent"], environment=(duplicate,)
     )
     with pytest.raises(ValueError, match="environment_variable_conflict"):
         StaticModuleRegistry(
-            metadata_providers=FIRST_PARTY_MODULES.metadata_providers,
+            metadata_providers=LEGACY_REGISTRY.metadata_providers,
             download_clients={"qbittorrent": conflicting_client},
         )
 
@@ -123,14 +125,14 @@ def test_environment_resolution_reports_only_missing_names() -> None:
 def test_prowlarr_publishes_the_same_public_descriptor_type() -> None:
     descriptor = getattr(sdk, "IntegrationDescriptor", None)
     assert descriptor is not None
-    from media_finder.integration_runtime import PROWLARR_INTEGRATION
+    release_integration = create_runtime_factory(environment={}).release_integration
 
-    assert isinstance(PROWLARR_INTEGRATION, descriptor)
-    assert [item.name for item in PROWLARR_INTEGRATION.environment] == [
+    assert isinstance(release_integration, descriptor)
+    assert [item.name for item in release_integration.environment] == [
         "PROWLARR_URL",
         "PROWLARR_API_KEY",
     ]
-    assert [item.secret for item in PROWLARR_INTEGRATION.environment] == [False, True]
+    assert [item.secret for item in release_integration.environment] == [False, True]
 
 
 def test_shared_conformance_exercises_declared_and_missing_environment() -> None:
@@ -139,15 +141,15 @@ def test_shared_conformance_exercises_declared_and_missing_environment() -> None
     assertion = getattr(conformance, "assert_environment_conforms", None)
     assert assertion is not None, "shared environment conformance is missing"
     assertion(
-        FIRST_PARTY_MODULES.metadata_providers["manual"].environment,
+        LEGACY_REGISTRY.metadata_providers["manual"].environment,
         {},
     )
     assertion(
-        FIRST_PARTY_MODULES.metadata_providers["tmdb"].environment,
+        LEGACY_REGISTRY.metadata_providers["tmdb"].environment,
         {"TMDB_TOKEN": "fixture-secret"},
     )
     assertion(
-        FIRST_PARTY_MODULES.download_clients["qbittorrent"].environment,
+        LEGACY_REGISTRY.download_clients["qbittorrent"].environment,
         {
             "QBITTORRENT_URL": "https://qb.example.test",
             "QBITTORRENT_USERNAME": "fixture-user",
@@ -260,9 +262,9 @@ def test_first_party_registration_conformance_builds_from_exact_environment() ->
         created.append(client)
         return client
 
-    manual = FIRST_PARTY_MODULES.metadata_providers["manual"]
-    tmdb = FIRST_PARTY_MODULES.metadata_providers["tmdb"]
-    qbittorrent = FIRST_PARTY_MODULES.download_clients["qbittorrent"]
+    manual = LEGACY_REGISTRY.metadata_providers["manual"]
+    tmdb = LEGACY_REGISTRY.metadata_providers["tmdb"]
+    qbittorrent = LEGACY_REGISTRY.download_clients["qbittorrent"]
 
     built_manual = conformance.assert_provider_registration_conforms(manual, (), {}, clients)
     built_tmdb = conformance.assert_provider_registration_conforms(

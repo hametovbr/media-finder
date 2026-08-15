@@ -4,12 +4,12 @@ from xml.etree import ElementTree
 
 import pytest
 from fastapi.testclient import TestClient
+from media_finder_server import create_legacy_module_registry
 
 from media_finder.api import create_app
 from media_finder.db import create_database, migrate_to_head, session_factory
 from media_finder.domain import CatalogService
 from media_finder.models import Acquisition
-from media_finder.modules.registry import FIRST_PARTY_MODULES
 from media_finder.naming import EntityType
 from media_finder.nfo import render_nfo
 from media_finder.sdk.types import (
@@ -25,6 +25,8 @@ from media_finder.sdk.types import (
     RetentionPolicy,
     Season,
 )
+
+LEGACY_REGISTRY = create_legacy_module_registry()
 
 
 def _rich_movie(provider: str = "manual") -> NormalizedMetadata:
@@ -174,7 +176,7 @@ def test_current_and_pinned_nfo_api_adds_provider_owned_warning_headers(
         url,
         integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN",
         clock=lambda: datetime(2025, 2, 1, tzinfo=UTC),
-        providers={"tmdb": FIRST_PARTY_MODULES.metadata_providers["tmdb"].retention_factory()},
+        providers={"tmdb": LEGACY_REGISTRY.metadata_providers["tmdb"].retention_factory()},
     )
     client = TestClient(app)
     headers = {"Authorization": "Bearer integration-secret"}

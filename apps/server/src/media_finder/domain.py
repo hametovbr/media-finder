@@ -79,10 +79,11 @@ class CatalogService:
         if parsed.version != 4:
             raise ValueError("Manual external_id must be a UUIDv4")
         identity = str(parsed)
-        item, created = self.get_or_create_item("manual", identity, normalized.kind)
+        provider_key = normalized.provenance.provider_key
+        item, created = self.get_or_create_item(provider_key, identity, normalized.kind)
         if created:
             provenance = normalized.provenance.model_copy(
-                update={"provider_key": "manual", "external_id": identity}
+                update={"provider_key": provider_key, "external_id": identity}
             )
             normalized = normalized.model_copy(update={"provenance": provenance})
             self.add_revision(item, RevisionInput.from_normalized(normalized))

@@ -5,7 +5,9 @@ description = "Production composition host for Media Finder"
 requires-python = ">=3.13,<3.14"
 license = "MIT"
 dependencies = [
+  "alembic>=1.16,<2",
   "fastapi>=0.116,<1",
+  "httpx>=0.28,<1",
   "media-finder-builtin-ui",
   "media-finder-control-contracts",
   "media-finder-core",
@@ -14,6 +16,8 @@ dependencies = [
   "media-finder-release-prowlarr",
   "media-finder-download-qbittorrent",
   "pydantic-settings>=2.10,<3",
+  "python-dateutil>=2.9,<3",
+  "sqlalchemy>=2.0,<3",
   "uvicorn>=0.35,<1",
 ]
 
@@ -22,4 +26,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/media_finder_server"]
+packages = ["src/media_finder_server", "src/media_finder"]

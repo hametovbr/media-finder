@@ -1,13 +1,14 @@
 import asyncio
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
-from media_finder_builtin_ui.forms import decode_form
-from starlette.requests import Request
-
 from media_finder.db import migrate_to_head
-from media_finder.ui import create_ui_app, error_message, resolve_locale
+from media_finder.ui import error_message, resolve_locale
+from media_finder_builtin_ui.forms import decode_form
+from media_finder_server import create_ui_app
+from starlette.requests import Request
 
 MAX_UI_FORM_BYTES = 1024 * 1024
 
@@ -57,6 +58,35 @@ def test_ui_cookie_is_hardened_and_mutations_require_session_csrf(
         assert rejected.status_code == 403
         assert rejected.headers["content-type"].startswith("text/html")
         assert "csrf_invalid" in rejected.text
+
+
+def test_ui_lifespan_disposes_database_after_runtime_close_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_url = f"sqlite:///{tmp_path / 'ui-close-failure.db'}"
+    migrate_to_head(database_url)
+    monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long test session secret")
+    runtime_factory = Mock()
+    runtime_factory.close.side_effect = RuntimeError("module close failed")
+    app = create_ui_app(
+        database_url,
+        session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
+        runtime_factory=runtime_factory,
+    )
+    disposed = False
+    original_dispose = app.state.engine.dispose
+
+    def dispose() -> None:
+        nonlocal disposed
+        disposed = True
+        original_dispose()
+
+    monkeypatch.setattr(app.state.engine, "dispose", dispose)
+
+    with pytest.raises(RuntimeError, match="module close failed"), TestClient(app):
+        pass
+
+    assert disposed is True
 
 
 def test_ui_form_limit_rejects_declared_and_streamed_oversize_with_stable_code(

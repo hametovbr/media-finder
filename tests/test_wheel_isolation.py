@@ -128,6 +128,9 @@ def test_foundation_wheel_builds_and_imports_without_source_tree_leakage(
 
     assert f"{normalized_import_path}/__init__.py" in wheel.members
     assert f"{normalized_import_path}/py.typed" in wheel.members
+    if distribution == "media-finder":
+        assert "media_finder/__init__.py" in wheel.members
+        assert "media_finder/py.typed" in wheel.members
     requirements = tuple(wheel.metadata.get_all("Requires-Dist", []))
     assert all(
         any(requirement.lower().startswith(expected.lower()) for requirement in requirements)

@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from media_finder_server import create_ui_app
 
 from media_finder.db import migrate_to_head
-from media_finder.ui import create_ui_app
 
 
 def _csrf(text: str) -> str:

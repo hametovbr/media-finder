@@ -1,10 +1,8 @@
 from datetime import UTC, datetime
 
 import httpx
-
 from media_finder.domain import CatalogService
 from media_finder.maintenance import MaintenanceCoordinator, MaintenanceRunner
-from media_finder.modules.registry import FIRST_PARTY_MODULES
 from media_finder.sdk.errors import ModuleError
 from media_finder.sdk.protocols import MetadataProvider
 from media_finder.sdk.types import (
@@ -15,6 +13,9 @@ from media_finder.sdk.types import (
     RetentionActionKind,
     RetentionPolicy,
 )
+from media_finder_server import create_legacy_module_registry
+
+LEGACY_REGISTRY = create_legacy_module_registry()
 
 
 def _tmdb_provider() -> MetadataProvider:
@@ -37,7 +38,7 @@ def _tmdb_provider() -> MetadataProvider:
             },
         )
 
-    registration = FIRST_PARTY_MODULES.metadata_providers["tmdb"]
+    registration = LEGACY_REGISTRY.metadata_providers["tmdb"]
     return registration.build(
         {"TMDB_TOKEN": "fixture-token"},
         lambda: httpx.Client(transport=httpx.MockTransport(respond)),
@@ -74,7 +75,7 @@ def test_generic_purge_preserves_envelope_overrides_identity_and_acquisition(dat
 def test_core_contains_no_provider_policy() -> None:
     from pathlib import Path
 
-    core = Path("src/media_finder/maintenance.py").read_text(encoding="utf-8").lower()
+    core = Path("apps/server/src/media_finder/maintenance.py").read_text(encoding="utf-8").lower()
     assert "tmdb" not in core
     assert "month" not in core
     assert "six" not in core
@@ -300,7 +301,7 @@ def test_removed_configuration_still_executes_registered_expiry_purge(database) 
         active.retention_for(created),
         created,
     )
-    retention_only = FIRST_PARTY_MODULES.metadata_providers["tmdb"].retention_factory()
+    retention_only = LEGACY_REGISTRY.metadata_providers["tmdb"].retention_factory()
     MaintenanceCoordinator({"tmdb": retention_only}).run(database, datetime(2024, 7, 1, tzinfo=UTC))
     database.refresh(revision)
     assert revision.expired_at is not None
@@ -322,7 +323,7 @@ def test_removed_configuration_records_stable_refresh_failure(database) -> None:
         created,
     )
 
-    retention_only = FIRST_PARTY_MODULES.metadata_providers["tmdb"].retention_factory()
+    retention_only = LEGACY_REGISTRY.metadata_providers["tmdb"].retention_factory()
     MaintenanceCoordinator({"tmdb": retention_only}).run(database, datetime(2024, 6, 1, tzinfo=UTC))
 
     database.refresh(revision)

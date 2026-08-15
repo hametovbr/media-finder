@@ -184,7 +184,7 @@ function validateImage(root, verify, verifyText, failures) {
   );
   requireValue(
     failures,
-    /ENTRYPOINT \["python", "-m", "media_finder\.runtime"\]/.test(dockerfile),
+    /ENTRYPOINT \["python", "-m", "media_finder_server"\]/.test(dockerfile),
     "Dockerfile: runtime entrypoint must gate startup",
   );
   requireValue(

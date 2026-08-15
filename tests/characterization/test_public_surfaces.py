@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from media_finder_server import create_application
 
 from media_finder.db import migrate_to_head
-from media_finder.runtime import create_application
 
 
 def _configure(

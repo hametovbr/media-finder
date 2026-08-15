@@ -24,10 +24,7 @@ from media_finder_sdk import (
 )
 
 ROOT = Path(__file__).parents[1]
-CORE_ROOTS = (
-    ROOT / "packages" / "core" / "src",
-    ROOT / "src" / "media_finder",
-)
+CORE_ROOTS = (ROOT / "packages" / "core" / "src",)
 CONCRETE_PACKAGES = {
     "media_finder_metadata_manual",
     "media_finder_metadata_tmdb",
@@ -38,8 +35,14 @@ CONCRETE_IDS = {"manual", "tmdb", "prowlarr", "qbittorrent"}
 
 
 class FixtureDownloadClient:
-    def __init__(self, *, validation_error: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        validation_error: bool = False,
+        close_error: bool = False,
+    ) -> None:
         self.validation_error = validation_error
+        self.close_error = close_error
         self.validate_calls = 0
         self.close_calls = 0
 
@@ -68,11 +71,19 @@ class FixtureDownloadClient:
 
     def close(self) -> None:
         self.close_calls += 1
+        if self.close_error:
+            raise RuntimeError("fixture_close_failed")
 
 
 class RecordingDownloadFactory:
-    def __init__(self, *, validation_error: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        validation_error: bool = False,
+        close_error: bool = False,
+    ) -> None:
         self.validation_error = validation_error
+        self.close_error = close_error
         self.environment_names: list[tuple[str, ...]] = []
         self.environment_values: list[dict[str, str]] = []
         self.instances: list[FixtureDownloadClient] = []
@@ -83,7 +94,10 @@ class RecordingDownloadFactory:
         self.environment_values.append({name: environment.require(name) for name in names})
         with pytest.raises(AttributeError, match="module_environment_name_undeclared"):
             environment.require("UNDECLARED_SECRET")
-        instance = FixtureDownloadClient(validation_error=self.validation_error)
+        instance = FixtureDownloadClient(
+            validation_error=self.validation_error,
+            close_error=self.close_error,
+        )
         self.instances.append(instance)
         return instance
 
@@ -269,6 +283,67 @@ def test_failed_attempt_closes_its_instance_without_affecting_cached_sibling() -
     assert [instance.close_calls for instance in failing_factory.instances] == [1, 1]
 
 
+def test_shutdown_continues_closing_siblings_after_one_close_failure() -> None:
+    first_factory = RecordingDownloadFactory()
+    failing_factory = RecordingDownloadFactory(close_error=True)
+    first_variable = EnvironmentVariableSpec(
+        name="FIRST_TOKEN",
+        required=True,
+        secret=True,
+        description_key="module.first.environment.token",
+    )
+    failing_variable = EnvironmentVariableSpec(
+        name="FAILING_CLOSE_TOKEN",
+        required=True,
+        secret=True,
+        description_key="module.failing-close.environment.token",
+    )
+    registry = StaticModuleRegistry.create(
+        download=(
+            _download_registration("first", first_variable, first_factory),
+            _download_registration("failing-close", failing_variable, failing_factory),
+        )
+    )
+    runtime_type = _module_runtime_type()
+    runtime = runtime_type(
+        registry=registry,
+        environment={
+            "FIRST_TOKEN": "first-secret",
+            "FAILING_CLOSE_TOKEN": "failing-secret",
+        },
+    )
+    runtime.download_client("first")
+    runtime.download_client("failing-close")
+
+    with pytest.raises(RuntimeError, match="fixture_close_failed"):
+        runtime.close()
+    runtime.close()
+
+    assert first_factory.instances[0].close_calls == 1
+    assert failing_factory.instances[0].close_calls == 1
+
+
+def test_validation_failure_remains_primary_when_attempt_cleanup_also_fails() -> None:
+    failing_factory = RecordingDownloadFactory(validation_error=True, close_error=True)
+    variable = EnvironmentVariableSpec(
+        name="FAILING_TOKEN",
+        required=True,
+        secret=True,
+        description_key="module.failing.environment.token",
+    )
+    registry = StaticModuleRegistry.create(
+        download=(_download_registration("failing", variable, failing_factory),)
+    )
+    runtime_type = _module_runtime_type()
+    runtime = runtime_type(registry=registry, environment={"FAILING_TOKEN": "secret"})
+
+    with pytest.raises(ModuleError, match="fixture_validation_failed"):
+        runtime.download_client("failing")
+
+    assert failing_factory.instances[0].close_calls == 1
+    runtime.close()
+
+
 def test_core_sources_have_no_concrete_imports_or_module_id_branches() -> None:
     violations: list[str] = []
 
@@ -315,3 +390,18 @@ def test_server_registry_factory_accepts_no_runtime_service_container() -> None:
     signature = inspect.signature(factory)
 
     assert tuple(signature.parameters) == ()
+
+
+def test_server_runtime_uses_the_typed_registry_as_its_single_module_lifecycle() -> None:
+    from media_finder_core import ModuleRuntime
+    from media_finder_server import create_runtime_factory
+
+    factory = create_runtime_factory(environment={})
+    lifecycle = factory._lifecycle
+    assert isinstance(lifecycle, ModuleRuntime)
+    assert set(lifecycle.registry.metadata) == {"manual", "tmdb"}
+    assert set(lifecycle.registry.release) == {"prowlarr"}
+    assert set(lifecycle.registry.download) == {"qbittorrent"}
+
+    factory.close()
+    factory.close()

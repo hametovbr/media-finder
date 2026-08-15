@@ -146,6 +146,14 @@ jobs:
           tests/test_control_api_metadata.py
           tests/test_control_api_security.py
           tests/test_control_openapi.py
+          tests/test_module_registry_composition.py
+          tests/test_wheel_isolation.py
+          tests/architecture
+          packages/module-sdk/tests
+          packages/modules/metadata-manual/tests
+          packages/modules/metadata-tmdb/tests
+          packages/modules/release-prowlarr/tests
+          packages/modules/download-qbittorrent/tests
 
   browser:
     runs-on: ubuntu-latest

@@ -62,12 +62,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from .acquisition import AcquisitionRequest, AcquisitionService, DestinationUnavailable
 from .domain import CatalogService, RevisionInput
 from .ephemeral import EphemeralCache, EphemeralTokenExpired
-from .integration_runtime import PROWLARR_INTEGRATION, RuntimeResolver
+from .integration_runtime import RuntimeResolver
 from .manual import ManualCatalogService
 from .models import Acquisition, Collection, DownloadClientInstance, MediaItem, MetadataRevision
-from .modules.registry import FIRST_PARTY_MODULES
 from .sdk.protocols import DownloadClient
-from .sdk.registration import StaticModuleRegistry
+from .sdk.registration import IntegrationDescriptor, StaticModuleRegistry
 from .sdk.types import EnvironmentVariableSpec, NormalizedMetadata
 from .sdk.types import MetadataSearchResult as ProviderSearchResult
 from .system_clients import SYSTEM_QBITTORRENT_ID
@@ -164,7 +163,8 @@ class BackendControlGateway:
         runtime: RuntimeResolver | None = None,
         metadata_selections: EphemeralCache[ProviderSearchResult] | None = None,
         manual_drafts: EphemeralCache[_ManualDraft] | None = None,
-        registry: StaticModuleRegistry = FIRST_PARTY_MODULES,
+        registry: StaticModuleRegistry,
+        release_integration: IntegrationDescriptor,
         build_version: str = "0.1.0",
     ) -> None:
         self._sessions = sessions
@@ -173,6 +173,17 @@ class BackendControlGateway:
         self._metadata_selections = metadata_selections or EphemeralCache()
         self._manual_drafts = manual_drafts or EphemeralCache()
         self._registry = registry
+        self._release_integration = release_integration
+        editor_keys = (
+            tuple(
+                key
+                for key, provider in runtime.supported_providers.items()
+                if isinstance(provider, MetadataEditor)
+            )
+            if runtime is not None
+            else ()
+        )
+        self._metadata_editor_key = editor_keys[0] if len(editor_keys) == 1 else None
         self._build_version = build_version
 
     async def _run(self, operation: Callable[[Session], T]) -> T:
@@ -492,7 +503,7 @@ class BackendControlGateway:
             if request.document.external_id is not None:
                 existing = database.scalar(
                     select(MediaItem).where(
-                        MediaItem.provider_key == "manual",
+                        MediaItem.provider_key == self._metadata_editor_key,
                         MediaItem.external_id == request.document.external_id,
                     )
                 )
@@ -508,7 +519,9 @@ class BackendControlGateway:
                 )
             try:
                 catalog = CatalogService(database)
-                item = ManualCatalogService(catalog, provider).import_json(
+                item = ManualCatalogService(
+                    catalog, provider, self._require_editor_key()
+                ).import_json(
                     payload,
                     confirm_existing=confirm_existing,
                 )
@@ -538,7 +551,7 @@ class BackendControlGateway:
                 item = database.get(MediaItem, item_id)
                 if (
                     item is None
-                    or item.provider_key != "manual"
+                    or item.provider_key != self._metadata_editor_key
                     or document.external_id != item.external_id
                 ):
                     raise ControlFailure(code="manual_item_not_found", status=404)
@@ -559,14 +572,14 @@ class BackendControlGateway:
             item = database.get(MediaItem, item_id)
             if (
                 item is None
-                or item.provider_key != "manual"
+                or item.provider_key != self._metadata_editor_key
                 or draft.request.document.external_id != item.external_id
             ):
                 raise ControlFailure(code="manual_item_not_found", status=404)
             try:
-                updated = ManualCatalogService(CatalogService(database), provider).import_json(
-                    payload, confirm_existing=True
-                )
+                updated = ManualCatalogService(
+                    CatalogService(database), provider, self._require_editor_key()
+                ).import_json(payload, confirm_existing=True)
                 return ManualImportResult(
                     item=self._media_item_detail(
                         database,
@@ -612,9 +625,9 @@ class BackendControlGateway:
 
         def operation(database: Session) -> MediaItemDetail:
             try:
-                item = ManualCatalogService(CatalogService(database), provider).import_episode_csv(
-                    item_id, request.csv
-                )
+                item = ManualCatalogService(
+                    CatalogService(database), provider, self._require_editor_key()
+                ).import_episode_csv(item_id, request.csv)
                 return self._media_item_detail(database, item, locale)
             except Exception as error:
                 database.rollback()
@@ -783,9 +796,9 @@ class BackendControlGateway:
             prowlarr_result = runtime.prowlarr()
             diagnostics.append(
                 self._diagnostic(
-                    key="prowlarr",
+                    key=self._release_integration.key,
                     kind="release_search",
-                    declarations=PROWLARR_INTEGRATION.environment,
+                    declarations=self._release_integration.environment,
                     result_value=prowlarr_result.value,
                     error_code=prowlarr_result.error_code,
                 )
@@ -800,12 +813,19 @@ class BackendControlGateway:
                 client_result = runtime.download_client(instance)
                 client_value = client_result.value
                 client_error = client_result.error_code
-            client_registration = self._registry.download_clients["qbittorrent"]
+            client_key = (
+                instance.module_key
+                if instance is not None
+                else next(iter(self._registry.download_clients), "download-client")
+            )
+            client_registration = self._registry.download_clients.get(client_key)
             diagnostics.append(
                 self._diagnostic(
-                    key="qbittorrent",
+                    key=client_key,
                     kind="download_client",
-                    declarations=client_registration.environment,
+                    declarations=(
+                        client_registration.environment if client_registration is not None else ()
+                    ),
                     result_value=client_value,
                     error_code=client_error,
                 )
@@ -855,7 +875,7 @@ class BackendControlGateway:
         return self._runtime
 
     def _manual_provider(self) -> MetadataEditor:
-        resolved = self._require_runtime().metadata_provider("manual")
+        resolved = self._require_runtime().metadata_provider(self._require_editor_key())
         if resolved.value is None:
             raise ControlFailure(
                 code=resolved.error_code or "metadata_provider_unavailable",
@@ -864,6 +884,11 @@ class BackendControlGateway:
         if not isinstance(resolved.value, MetadataEditor):
             raise ControlFailure(code="metadata_editor_unavailable", status=503)
         return resolved.value
+
+    def _require_editor_key(self) -> str:
+        if self._metadata_editor_key is None:
+            raise ControlFailure(code="metadata_editor_unavailable", status=503)
+        return self._metadata_editor_key
 
     def _load_client(self, instance: DownloadClientInstance) -> DownloadClient:
         if instance.archived_at is not None:

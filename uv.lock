@@ -324,7 +324,9 @@ name = "media-finder"
 version = "0.1.0"
 source = { editable = "apps/server" }
 dependencies = [
+    { name = "alembic" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "media-finder-builtin-ui" },
     { name = "media-finder-control-contracts" },
     { name = "media-finder-core" },
@@ -333,12 +335,16 @@ dependencies = [
     { name = "media-finder-metadata-tmdb" },
     { name = "media-finder-release-prowlarr" },
     { name = "pydantic-settings" },
+    { name = "python-dateutil" },
+    { name = "sqlalchemy" },
     { name = "uvicorn" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "alembic", specifier = ">=1.16,<2" },
     { name = "fastapi", specifier = ">=0.116,<1" },
+    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "media-finder-builtin-ui", editable = "packages/builtin-ui" },
     { name = "media-finder-control-contracts", editable = "packages/control-contracts" },
     { name = "media-finder-core", editable = "packages/core" },
@@ -347,6 +353,8 @@ requires-dist = [
     { name = "media-finder-metadata-tmdb", editable = "packages/modules/metadata-tmdb" },
     { name = "media-finder-release-prowlarr", editable = "packages/modules/release-prowlarr" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
+    { name = "python-dateutil", specifier = ">=2.9,<3" },
+    { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "uvicorn", specifier = ">=0.35,<1" },
 ]
 

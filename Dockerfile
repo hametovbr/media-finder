@@ -10,11 +10,24 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /build
 
 COPY pyproject.toml uv.lock README.md ./
+COPY apps/server/pyproject.toml apps/server/pyproject.toml
+COPY packages/core/pyproject.toml packages/core/pyproject.toml
+COPY packages/module-sdk/pyproject.toml packages/module-sdk/pyproject.toml
 COPY packages/control-contracts/pyproject.toml packages/control-contracts/pyproject.toml
 COPY packages/builtin-ui/pyproject.toml packages/builtin-ui/pyproject.toml
-COPY src ./src
+COPY packages/modules/metadata-manual/pyproject.toml packages/modules/metadata-manual/pyproject.toml
+COPY packages/modules/metadata-tmdb/pyproject.toml packages/modules/metadata-tmdb/pyproject.toml
+COPY packages/modules/release-prowlarr/pyproject.toml packages/modules/release-prowlarr/pyproject.toml
+COPY packages/modules/download-qbittorrent/pyproject.toml packages/modules/download-qbittorrent/pyproject.toml
+COPY apps/server/src ./apps/server/src
+COPY packages/core/src ./packages/core/src
+COPY packages/module-sdk/src ./packages/module-sdk/src
 COPY packages/control-contracts/src ./packages/control-contracts/src
 COPY packages/builtin-ui/src ./packages/builtin-ui/src
+COPY packages/modules/metadata-manual/src ./packages/modules/metadata-manual/src
+COPY packages/modules/metadata-tmdb/src ./packages/modules/metadata-tmdb/src
+COPY packages/modules/release-prowlarr/src ./packages/modules/release-prowlarr/src
+COPY packages/modules/download-qbittorrent/src ./packages/modules/download-qbittorrent/src
 RUN uv sync --frozen --no-dev --no-editable
 
 FROM python:3.13.14-slim-bookworm AS runtime
@@ -38,4 +51,4 @@ USER 10001:10001
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3).close()"]
-ENTRYPOINT ["python", "-m", "media_finder.runtime"]
+ENTRYPOINT ["python", "-m", "media_finder_server"]

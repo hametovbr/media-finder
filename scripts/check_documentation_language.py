@@ -50,7 +50,7 @@ LOCALIZATION_TESTS = {
     "tests/test_ui_release_acceptance.py",
 }
 MODULE_TRANSLATION = re.compile(
-    r"^(src/media_finder/modules/[^/]+/translations|"
+    r"^(apps/server/src/media_finder/modules/[^/]+/translations|"
     r"packages/modules/[^/]+/src/[^/]+/translations|"
     r"packages/builtin-ui/src/media_finder_builtin_ui/module_translations/[^/]+)/ru\.json$"
 )

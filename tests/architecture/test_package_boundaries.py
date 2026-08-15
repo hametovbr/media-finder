@@ -162,14 +162,12 @@ def test_only_server_host_contains_concrete_composition() -> None:
     }
     violations: list[str] = []
 
-    for root in (ROOT / "packages", ROOT / "src"):
-        if not root.exists():
-            continue
-        for path in sorted(root.rglob("*.py")):
-            content = path.read_text(encoding="utf-8")
-            for marker in forbidden_outside_host:
-                if marker in content:
-                    violations.append(f"{path.relative_to(ROOT)}:{marker}")
+    production_sources = tuple((ROOT / "packages").glob("**/src/**/*.py"))
+    for path in sorted(production_sources):
+        content = path.read_text(encoding="utf-8")
+        for marker in forbidden_outside_host:
+            if marker in content:
+                violations.append(f"{path.relative_to(ROOT)}:{marker}")
 
     assert (PACKAGES["server"] / "src" / "media_finder_server").is_dir()
     assert violations == []

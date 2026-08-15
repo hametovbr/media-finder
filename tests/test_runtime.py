@@ -3,10 +3,10 @@ from time import monotonic, sleep
 
 import pytest
 from fastapi.testclient import TestClient
-
+from media_finder import runtime as legacy_runtime
 from media_finder.db import migrate_to_head
 from media_finder.models import AppSetting
-from media_finder.runtime import create_application, run
+from media_finder_server import create_application, run
 
 
 def test_environment_application_serves_ui_health_and_protected_api(
@@ -55,6 +55,67 @@ def test_runtime_lifespan_executes_generic_startup_maintenance(
     assert completed is not None
 
 
+def test_runtime_lifespan_disposes_database_after_module_close_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_url = f"sqlite:///{tmp_path / 'close-failure.db'}"
+    monkeypatch.setenv("MEDIA_FINDER_DATABASE_URL", database_url)
+    monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long production session secret")
+    monkeypatch.setenv("MEDIA_FINDER_INTEGRATION_TOKEN", "processor-token")
+    migrate_to_head(database_url)
+    app = create_application()
+    disposed = False
+    original_dispose = app.state.engine.dispose
+    original_close = app.state.runtime_factory.close
+
+    def dispose() -> None:
+        nonlocal disposed
+        disposed = True
+        original_dispose()
+
+    def close_with_failure() -> None:
+        original_close()
+        raise RuntimeError("module close failed")
+
+    monkeypatch.setattr(app.state.engine, "dispose", dispose)
+    monkeypatch.setattr(app.state.runtime_factory, "close", close_with_failure)
+
+    with pytest.raises(RuntimeError, match="module close failed"), TestClient(app):
+        pass
+
+    assert disposed is True
+
+
+def test_application_construction_disposes_database_when_secret_resolution_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_url = f"sqlite:///{tmp_path / 'construction-failure.db'}"
+    monkeypatch.setenv("MEDIA_FINDER_DATABASE_URL", database_url)
+    monkeypatch.delenv("MEDIA_FINDER_UI_SECRET", raising=False)
+    migrate_to_head(database_url)
+    disposed = False
+    original_create_database = legacy_runtime.create_database
+
+    def create_recorded_database(url: str):
+        engine = original_create_database(url)
+        original_dispose = engine.dispose
+
+        def dispose() -> None:
+            nonlocal disposed
+            disposed = True
+            original_dispose()
+
+        monkeypatch.setattr(engine, "dispose", dispose)
+        return engine
+
+    monkeypatch.setattr(legacy_runtime, "create_database", create_recorded_database)
+
+    with pytest.raises(ValueError, match="referenced environment variable is not set"):
+        create_application()
+
+    assert disposed is True
+
+
 def test_run_migrates_before_starting_exactly_one_worker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -67,7 +128,7 @@ def test_run_migrates_before_starting_exactly_one_worker(
     application = object()
     monkeypatch.setattr(
         "media_finder.runtime.create_application",
-        lambda: events.append("create") or application,
+        lambda **_: events.append("create") or application,
     )
     monkeypatch.setattr(
         "media_finder.runtime.uvicorn.run",

@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 import uvicorn
 from fastapi import FastAPI
 from media_finder_builtin_ui import BuiltinUIOptions, create_builtin_ui
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from .api import create_app as create_processor_app
 from .config import EnvReference, resolve_env_reference
@@ -19,10 +21,13 @@ from .control_api import create_control_app
 from .control_gateway import BackendControlGateway
 from .control_security import BackendBrowserSecurity
 from .db import create_database, migrate_to_head, session_factory
-from .integration_runtime import DefaultRuntimeFactory, RuntimeResolver
+from .integration_runtime import (
+    DefaultRuntimeFactory,
+    RuntimeResolver,
+)
 from .maintenance import MaintenanceCoordinator, MaintenanceRunner
-from .modules.registry import FIRST_PARTY_MODULES
 from .sdk.protocols import MetadataProvider
+from .sdk.registration import StaticModuleRegistry
 from .system_clients import ensure_system_qbittorrent
 
 DEFAULT_DATABASE_URL = "sqlite:////data/media-finder.db"
@@ -52,21 +57,47 @@ def ui_mode() -> str:
     return value
 
 
-def create_application() -> FastAPI:
+def create_application(
+    *,
+    registry: StaticModuleRegistry,
+    runtime_factory: DefaultRuntimeFactory,
+) -> FastAPI:
     """Compose browser and processor interfaces from environment configuration."""
 
     url = database_url()
     mode = ui_mode()
     engine = create_database(url)
     sessions = session_factory(engine)
+    try:
+        return _compose_application(
+            url=url,
+            mode=mode,
+            engine=engine,
+            sessions=sessions,
+            registry=registry,
+            runtime_factory=runtime_factory,
+        )
+    except BaseException:
+        engine.dispose()
+        raise
+
+
+def _compose_application(
+    *,
+    url: str,
+    mode: str,
+    engine: Engine,
+    sessions: sessionmaker[Session],
+    registry: StaticModuleRegistry,
+    runtime_factory: DefaultRuntimeFactory,
+) -> FastAPI:
     with sessions() as database:
         ensure_system_qbittorrent(database)
     secret = resolve_env_reference(EnvReference(value=UI_SECRET_REFERENCE)).get_secret_value()
     secret_bytes = secret.encode()
-    runtime_factory = DefaultRuntimeFactory()
     runtime = RuntimeResolver(
         factory=runtime_factory,
-        providers=FIRST_PARTY_MODULES.retention_providers(),
+        providers=registry.retention_providers(),
         prowlarr=None,
         client_loader=None,
     )
@@ -74,6 +105,8 @@ def create_application() -> FastAPI:
         sessions=sessions,
         cursor_secret=secret_bytes,
         runtime=runtime,
+        registry=registry,
+        release_integration=runtime_factory.release_integration,
     )
     security = BackendBrowserSecurity(secret=secret_bytes)
     application = (
@@ -90,7 +123,7 @@ def create_application() -> FastAPI:
         security=security,
         secure_cookie=_secure_cookie(),
     )
-    providers: dict[str, MetadataProvider] = FIRST_PARTY_MODULES.retention_providers()
+    providers: dict[str, MetadataProvider] = registry.retention_providers()
     processor = create_processor_app(
         url,
         integration_token_reference=INTEGRATION_TOKEN_REFERENCE,
@@ -107,9 +140,13 @@ def create_application() -> FastAPI:
             yield
         finally:
             stop_maintenance.set()
-            await maintenance
-            runtime_factory.close()
-            engine.dispose()
+            try:
+                await maintenance
+            finally:
+                try:
+                    runtime_factory.close()
+                finally:
+                    engine.dispose()
 
     application.router.lifespan_context = runtime_lifespan
     application.state.engine = engine
@@ -148,11 +185,18 @@ async def _maintenance_loop(application: FastAPI, stop: asyncio.Event) -> None:
             await asyncio.wait_for(stop.wait(), timeout=MAINTENANCE_CHECK_SECONDS)
 
 
-def run() -> None:
+def run(
+    *,
+    registry: StaticModuleRegistry,
+    runtime_factory: DefaultRuntimeFactory,
+) -> None:
     """Migrate storage before constructing or starting the single web worker."""
 
     migrate_to_head(database_url())
-    application = create_application()
+    application = create_application(
+        registry=registry,
+        runtime_factory=runtime_factory,
+    )
     uvicorn.run(
         application,
         host="0.0.0.0",
@@ -160,7 +204,3 @@ def run() -> None:
         workers=1,
         proxy_headers=True,
     )
-
-
-if __name__ == "__main__":
-    run()

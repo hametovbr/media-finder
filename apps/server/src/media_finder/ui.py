@@ -10,19 +10,45 @@ import httpx
 from fastapi import FastAPI
 from media_finder_builtin_ui import BuiltinUIOptions, create_builtin_ui
 from media_finder_builtin_ui.i18n import message_for
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from .acquisition import ClientLoader
 from .config import EnvReference, resolve_env_reference
 from .control_gateway import BackendControlGateway
 from .control_security import BackendBrowserSecurity
 from .db import create_database, session_factory
-from .integration_runtime import DefaultRuntimeFactory, RuntimeFactory, RuntimeResolver
-from .modules.registry import FIRST_PARTY_MODULES
+from .integration_runtime import (
+    DefaultRuntimeFactory,
+    ReleaseRegistrationFactory,
+    RuntimeFactory,
+    RuntimeResolver,
+)
 from .release_selection import ReleaseSelectionService
 from .sdk.protocols import MetadataProvider
+from .sdk.registration import IntegrationDescriptor, StaticModuleRegistry
+from .sdk.types import EnvironmentVariableSpec
 from .system_clients import ensure_system_qbittorrent
 
 __all__ = ["create_ui_app", "error_message", "resolve_locale"]
+
+
+def _release_descriptor(
+    factory: ReleaseRegistrationFactory,
+) -> IntegrationDescriptor:
+    manifest = factory(httpx.Client).manifest
+    return IntegrationDescriptor(
+        key=manifest.module_id,
+        environment=tuple(
+            EnvironmentVariableSpec(
+                name=value.name,
+                required=value.required,
+                secret=value.secret,
+                description_key=value.description_key,
+            )
+            for value in manifest.environment
+        ),
+    )
 
 
 def resolve_locale(override: str | None, accept_language: str | None) -> str:
@@ -48,6 +74,8 @@ def create_ui_app(
     prowlarr: ReleaseSelectionService | None = None,
     client_loader: ClientLoader | None = None,
     runtime_factory: RuntimeFactory | None = None,
+    registry: StaticModuleRegistry,
+    release_registration_factory: ReleaseRegistrationFactory,
     http_client_factory: Callable[[], httpx.Client] = httpx.Client,
     environment: Mapping[str, str] | None = None,
     **_: Any,
@@ -56,6 +84,43 @@ def create_ui_app(
 
     engine = create_database(database_url)
     sessions = session_factory(engine)
+    try:
+        return _compose_ui_app(
+            database_url=database_url,
+            engine=engine,
+            sessions=sessions,
+            session_secret_reference=session_secret_reference,
+            secure_cookie=secure_cookie,
+            providers=providers,
+            prowlarr=prowlarr,
+            client_loader=client_loader,
+            runtime_factory=runtime_factory,
+            registry=registry,
+            release_registration_factory=release_registration_factory,
+            http_client_factory=http_client_factory,
+            environment=environment,
+        )
+    except BaseException:
+        engine.dispose()
+        raise
+
+
+def _compose_ui_app(
+    *,
+    database_url: str,
+    engine: Engine,
+    sessions: sessionmaker[Session],
+    session_secret_reference: str,
+    secure_cookie: bool,
+    providers: dict[str, MetadataProvider] | None,
+    prowlarr: ReleaseSelectionService | None,
+    client_loader: ClientLoader | None,
+    runtime_factory: RuntimeFactory | None,
+    registry: StaticModuleRegistry,
+    release_registration_factory: ReleaseRegistrationFactory,
+    http_client_factory: Callable[[], httpx.Client],
+    environment: Mapping[str, str] | None,
+) -> FastAPI:
     with sessions() as database:
         ensure_system_qbittorrent(database)
     secret = (
@@ -64,7 +129,7 @@ def create_ui_app(
         .encode()
     )
     selected_factory = runtime_factory
-    provider_registry = dict(providers or FIRST_PARTY_MODULES.retention_providers())
+    provider_registry = dict(providers or registry.retention_providers())
     if (
         selected_factory is None
         and providers is None
@@ -74,6 +139,8 @@ def create_ui_app(
         selected_factory = DefaultRuntimeFactory(
             environment=environment,
             http_client_factory=http_client_factory,
+            registry=registry,
+            release_registration_factory=release_registration_factory,
         )
     runtime = RuntimeResolver(
         factory=selected_factory,
@@ -85,6 +152,12 @@ def create_ui_app(
         sessions=sessions,
         cursor_secret=secret,
         runtime=runtime,
+        registry=registry,
+        release_integration=(
+            selected_factory.release_integration
+            if isinstance(selected_factory, DefaultRuntimeFactory)
+            else _release_descriptor(release_registration_factory)
+        ),
     )
     app = create_builtin_ui(
         gateway=gateway,
@@ -98,9 +171,11 @@ def create_ui_app(
             yield
         finally:
             close = getattr(selected_factory, "close", None)
-            if callable(close):
-                close()
-            engine.dispose()
+            try:
+                if callable(close):
+                    close()
+            finally:
+                engine.dispose()
 
     app.router.lifespan_context = lifespan
     app.state.engine = engine

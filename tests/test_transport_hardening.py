@@ -1,17 +1,22 @@
 import threading
 
 import httpx
-from pydantic import BaseModel
-
 from media_finder.integration_runtime import DefaultRuntimeFactory
 from media_finder.models import DownloadClientInstance
-from media_finder.modules.registry import FIRST_PARTY_MODULES
 from media_finder.sdk.registration import (
     DownloadClientRegistration,
     MetadataProviderRegistration,
     StaticModuleRegistry,
 )
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
+from media_finder_server import (
+    create_legacy_module_registry,
+    create_release_registration,
+    create_runtime_factory,
+)
+from pydantic import BaseModel
+
+LEGACY_REGISTRY = create_legacy_module_registry()
 
 ENVIRONMENT = {
     "TMDB_TOKEN": "tmdb-secret",
@@ -54,7 +59,7 @@ def test_runtime_http_sessions_are_isolated_per_service_and_qb_instance() -> Non
         created.append(client)
         return client
 
-    factory = DefaultRuntimeFactory(environment=ENVIRONMENT, http_client_factory=clients)
+    factory = create_runtime_factory(environment=ENVIRONMENT, http_client_factory=clients)
     provider = factory.metadata_provider("tmdb").value
     assert provider is not None
     assert factory.prowlarr().value is not None
@@ -78,15 +83,13 @@ def test_runtime_closes_release_provider_through_its_owned_lifecycle() -> None:
         created.append(client)
         return client
 
-    factory = DefaultRuntimeFactory(environment=ENVIRONMENT, http_client_factory=clients)
+    factory = create_runtime_factory(environment=ENVIRONMENT, http_client_factory=clients)
     service = factory.prowlarr().value
     assert service is not None
-    provider = service._provider
-    assert provider._closed is False
+    assert len(created) == 1 and not created[0].is_closed
 
     factory.close()
 
-    assert provider._closed is True
     assert len(created) == 1 and created[0].is_closed
 
 
@@ -112,7 +115,7 @@ def test_failed_runtime_construction_closes_and_forgets_every_created_http_clien
             "broken": MetadataProviderRegistration(
                 key="broken",
                 config_model=EmptyIntegrationConfig,
-                retention_factory=lambda: FIRST_PARTY_MODULES.retention_providers()["manual"],
+                retention_factory=lambda: LEGACY_REGISTRY.retention_providers()["manual"],
                 build=fail_builder,
             )
         },
@@ -123,7 +126,10 @@ def test_failed_runtime_construction_closes_and_forgets_every_created_http_clien
         },
     )
     factory = DefaultRuntimeFactory(
-        environment=ENVIRONMENT, http_client_factory=clients, registry=registry
+        environment=ENVIRONMENT,
+        http_client_factory=clients,
+        registry=registry,
+        release_registration_factory=create_release_registration,
     )
 
     for _ in range(2):
@@ -156,7 +162,7 @@ def test_first_party_validation_owns_only_successful_cached_http_clients() -> No
         failed.append(client)
         return client
 
-    failed_factory = DefaultRuntimeFactory(
+    failed_factory = create_runtime_factory(
         environment=ENVIRONMENT, http_client_factory=failing_clients
     )
     for _ in range(2):
@@ -187,7 +193,7 @@ def test_first_party_validation_owns_only_successful_cached_http_clients() -> No
         retained.append(client)
         return client
 
-    success_factory = DefaultRuntimeFactory(
+    success_factory = create_runtime_factory(
         environment=ENVIRONMENT, http_client_factory=mixed_clients
     )
     first_tmdb = success_factory.metadata_provider("tmdb").value
@@ -201,7 +207,7 @@ def test_first_party_validation_owns_only_successful_cached_http_clients() -> No
     assert len(retained) == 3
     assert not retained[0].is_closed and not retained[1].is_closed
     assert retained[2].is_closed
-    assert success_factory._http_clients == retained[:1]
+    assert success_factory._http_clients == []
     success_factory.close()
     assert all(client.is_closed for client in retained)
 
@@ -225,7 +231,7 @@ def test_failed_interleaved_attempt_cannot_close_a_later_successful_client() -> 
         created.append(client)
         return client
 
-    factory = DefaultRuntimeFactory(environment=ENVIRONMENT, http_client_factory=clients)
+    factory = create_runtime_factory(environment=ENVIRONMENT, http_client_factory=clients)
     failed_result: list[object] = []
 
     def fail_tmdb() -> None:
@@ -268,7 +274,7 @@ def test_factory_close_during_build_cannot_repopulate_caches_or_leak_client() ->
         created.append(client)
         return client
 
-    factory = DefaultRuntimeFactory(environment=ENVIRONMENT, http_client_factory=clients)
+    factory = create_runtime_factory(environment=ENVIRONMENT, http_client_factory=clients)
     results: list[object] = []
     worker = threading.Thread(target=lambda: results.append(factory.metadata_provider("tmdb")))
     worker.start()

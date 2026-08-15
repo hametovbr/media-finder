@@ -36,9 +36,15 @@ def _sdk_metadata(metadata: NormalizedMetadata) -> SDKNormalizedMetadata:
 
 
 class ManualCatalogService:
-    def __init__(self, catalog: CatalogService, editor: MetadataEditor) -> None:
+    def __init__(
+        self,
+        catalog: CatalogService,
+        editor: MetadataEditor,
+        provider_id: str,
+    ) -> None:
         self.catalog = catalog
         self.editor = editor
+        self.provider_id = provider_id
 
     def import_json(self, payload: dict[str, Any], *, confirm_existing: bool = False) -> MediaItem:
         try:
@@ -67,7 +73,7 @@ class ManualCatalogService:
 
     def import_episode_csv(self, media_item_id: str, content: str) -> MediaItem:
         item = self.catalog.session.get(MediaItem, media_item_id)
-        if item is None or item.provider_key != "manual" or item.kind != "series":
+        if item is None or item.provider_key != self.provider_id or item.kind != "series":
             raise ValueError("manual_episode_target_invalid")
         current = item.current_revision
         if current is None or current.effective_payload is None:

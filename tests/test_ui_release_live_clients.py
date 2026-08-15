@@ -11,6 +11,7 @@ from media_finder_sdk import (
     ReleaseSearchQuery,
     SafeReleaseSnapshot,
 )
+from media_finder_server import create_ui_app
 from sqlalchemy import select
 
 from media_finder.db import migrate_to_head, session_factory
@@ -18,7 +19,6 @@ from media_finder.models import Acquisition, MediaItem
 from media_finder.release_selection import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder.sdk.types import CorrelationResult, DownloadDestination, SubmissionResult
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
-from media_finder.ui import create_ui_app
 
 
 def _csrf(text: str) -> str:

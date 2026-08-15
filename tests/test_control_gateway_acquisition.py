@@ -11,6 +11,7 @@ from media_finder_sdk import (
     ReleaseSearchQuery,
     SafeReleaseSnapshot,
 )
+from media_finder_server import create_legacy_module_registry, create_runtime_factory
 from sqlalchemy.orm import Session, sessionmaker
 
 from media_finder.control_gateway import BackendControlGateway
@@ -20,6 +21,9 @@ from media_finder.models import Acquisition, DownloadClientInstance
 from media_finder.release_selection import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID, ensure_system_qbittorrent
+
+REGISTRY = create_legacy_module_registry()
+RELEASE_INTEGRATION = create_runtime_factory(environment={}).release_integration
 
 
 class FixtureReleaseProvider:
@@ -86,6 +90,8 @@ def _gateway(
         sessions=sessions,
         cursor_secret=b"cursor-secret-for-tests",
         runtime=runtime,
+        registry=REGISTRY,
+        release_integration=RELEASE_INTEGRATION,
     )
 
 

@@ -11,14 +11,15 @@ from media_finder_sdk import (
     ReleaseSearchQuery,
     SafeReleaseSnapshot,
 )
+from media_finder_server import create_legacy_module_registry, create_ui_app
 from sqlalchemy import func, select
 
 from media_finder.db import migrate_to_head, session_factory
 from media_finder.models import Acquisition, DownloadClientInstance, MediaItem, MetadataRevision
-from media_finder.modules.registry import FIRST_PARTY_MODULES
 from media_finder.release_selection import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
-from media_finder.ui import create_ui_app
+
+LEGACY_REGISTRY = create_legacy_module_registry()
 
 
 def _csrf(text: str) -> str:
@@ -73,7 +74,7 @@ def workflow_app(
         session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
         providers={
             fake_provider.manifest.key: fake_provider,
-            "manual": FIRST_PARTY_MODULES.retention_providers()["manual"],
+            "manual": LEGACY_REGISTRY.retention_providers()["manual"],
         },
         prowlarr=prowlarr,
         client_loader=lambda _: fake_client,

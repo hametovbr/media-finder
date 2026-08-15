@@ -50,6 +50,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 SESSION_COOKIE = "mf_session"
 MAX_CONTROL_BODY_BYTES = 1024 * 1024
+MANUAL_CONFIRMATION_KIND = "manual"
 
 
 class ControlRequestBoundary:
@@ -330,7 +331,7 @@ def create_control_app(
                 status=409,
                 details={
                     "confirmation_token": result.confirmation_token,
-                    "kind": "manual",
+                    "kind": MANUAL_CONFIRMATION_KIND,
                 },
             )
         if result.item is None:

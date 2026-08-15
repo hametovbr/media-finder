@@ -3,12 +3,16 @@ from datetime import UTC, datetime
 
 import pytest
 from media_finder_control import ControlFailure, Locale, PageRequest
+from media_finder_server import create_legacy_module_registry, create_runtime_factory
 from sqlalchemy.orm import Session, sessionmaker
 
 from media_finder.control_gateway import BackendControlGateway, CursorCodec
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.models import Collection
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
+
+REGISTRY = create_legacy_module_registry()
+RELEASE_INTEGRATION = create_runtime_factory(environment={}).release_integration
 
 
 def _sessions(database: Session) -> sessionmaker[Session]:
@@ -46,7 +50,10 @@ def test_gateway_pages_collections_with_default_limit_and_no_repeats(database: S
     database.add_all(Collection(name=f"Collection {number:03}") for number in range(105))
     database.commit()
     gateway = BackendControlGateway(
-        sessions=_sessions(database), cursor_secret=b"cursor-secret-for-tests"
+        sessions=_sessions(database),
+        cursor_secret=b"cursor-secret-for-tests",
+        registry=REGISTRY,
+        release_integration=RELEASE_INTEGRATION,
     )
 
     async def scenario() -> None:
@@ -89,7 +96,10 @@ def test_gateway_pages_catalog_in_stable_order(database: Session) -> None:
             ),
         )
     gateway = BackendControlGateway(
-        sessions=_sessions(database), cursor_secret=b"cursor-secret-for-tests"
+        sessions=_sessions(database),
+        cursor_secret=b"cursor-secret-for-tests",
+        registry=REGISTRY,
+        release_integration=RELEASE_INTEGRATION,
     )
 
     async def scenario() -> None:

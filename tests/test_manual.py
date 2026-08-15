@@ -4,14 +4,16 @@ from uuid import UUID, uuid4
 
 import pytest
 from media_finder_sdk import MetadataEditor, ModuleError
+from media_finder_server import create_legacy_module_registry
 
 from media_finder.domain import CatalogService
 from media_finder.manual import ManualCatalogService
-from media_finder.modules.registry import FIRST_PARTY_MODULES
+
+LEGACY_REGISTRY = create_legacy_module_registry()
 
 
 def manual_editor() -> MetadataEditor:
-    provider = FIRST_PARTY_MODULES.retention_providers()["manual"]
+    provider = LEGACY_REGISTRY.retention_providers()["manual"]
     assert isinstance(provider, MetadataEditor)
     return provider
 
@@ -32,7 +34,7 @@ def movie_document(external_id: str | None = None) -> dict:
 
 def test_complete_json_import_preserves_or_allocates_uuid4_atomically(database) -> None:
     manual_module = manual_editor()
-    provider = ManualCatalogService(CatalogService(database), manual_module)
+    provider = ManualCatalogService(CatalogService(database), manual_module, "manual")
     supplied = uuid4()
     item = provider.import_json(movie_document(str(supplied)))
     assert item.external_id == str(supplied)
@@ -45,7 +47,7 @@ def test_complete_json_import_preserves_or_allocates_uuid4_atomically(database) 
 
 
 def test_existing_identity_requires_explicit_confirmation(database) -> None:
-    provider = ManualCatalogService(CatalogService(database), manual_editor())
+    provider = ManualCatalogService(CatalogService(database), manual_editor(), "manual")
     identity = str(uuid4())
     original = provider.import_json(movie_document(identity))
     result = provider.import_json(movie_document(identity))
@@ -58,7 +60,7 @@ def test_existing_identity_requires_explicit_confirmation(database) -> None:
 
 
 def test_episode_csv_import_is_atomic_and_preserves_identity(database) -> None:
-    provider = ManualCatalogService(CatalogService(database), manual_editor())
+    provider = ManualCatalogService(CatalogService(database), manual_editor(), "manual")
     series = provider.import_json(
         {
             "schema_version": "1",

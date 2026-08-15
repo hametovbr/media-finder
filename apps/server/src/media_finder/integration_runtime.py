@@ -9,12 +9,10 @@ from threading import RLock
 from typing import Protocol
 
 import httpx
-from media_finder_release_prowlarr import registration as prowlarr_registration
-from media_finder_sdk import resolve_module_environment
+from media_finder_sdk import ReleaseProviderRegistration, resolve_module_environment
 
 from .acquisition import ClientLoader
 from .models import DownloadClientInstance
-from .modules.registry import FIRST_PARTY_MODULES
 from .release_selection import ReleaseSelectionCache, ReleaseSelectionService
 from .sdk.protocols import DownloadClient, MetadataProvider
 from .sdk.registration import (
@@ -27,19 +25,9 @@ from .sdk.settings import EnvReference
 from .sdk.types import Attribution, EnvironmentVariableSpec
 from .system_clients import SYSTEM_QBITTORRENT_ID
 
-_PROWLARR_MANIFEST = prowlarr_registration().manifest
-PROWLARR_INTEGRATION = IntegrationDescriptor(
-    key=_PROWLARR_MANIFEST.module_id,
-    environment=tuple(
-        EnvironmentVariableSpec(
-            name=value.name,
-            required=value.required,
-            secret=value.secret,
-            description_key=value.description_key,
-        )
-        for value in _PROWLARR_MANIFEST.environment
-    ),
-)
+type ReleaseRegistrationFactory = Callable[
+    [Callable[[], httpx.Client]], ReleaseProviderRegistration
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +47,10 @@ class RuntimeFactory(Protocol):
     ) -> RuntimeResult[DownloadClient]: ...
 
 
+class RuntimeLifecycle(Protocol):
+    def close(self) -> None: ...
+
+
 class DefaultRuntimeFactory:
     """Construct first-party integrations from one process-environment snapshot."""
 
@@ -66,8 +58,10 @@ class DefaultRuntimeFactory:
         self,
         *,
         http_client_factory: Callable[[], httpx.Client] = httpx.Client,
-        registry: StaticModuleRegistry = FIRST_PARTY_MODULES,
+        registry: StaticModuleRegistry,
+        release_registration_factory: ReleaseRegistrationFactory,
         environment: Mapping[str, str] | None = None,
+        lifecycle: RuntimeLifecycle | None = None,
     ) -> None:
         self._http_client_factory = http_client_factory
         self._environment = dict(os.environ if environment is None else environment)
@@ -77,11 +71,28 @@ class DefaultRuntimeFactory:
         self._download_clients: dict[tuple[str, str], DownloadClient] = {}
         self._http_clients: list[httpx.Client] = []
         self._registry = registry
+        self._lifecycle = lifecycle
+        self._release_registration_factory = release_registration_factory
+        release_manifest = release_registration_factory(http_client_factory).manifest
+        self._release_integration = IntegrationDescriptor(
+            key=release_manifest.module_id,
+            environment=tuple(
+                EnvironmentVariableSpec(
+                    name=value.name,
+                    required=value.required,
+                    secret=value.secret,
+                    description_key=value.description_key,
+                )
+                for value in release_manifest.environment
+            ),
+        )
         self._lock = RLock()
         self._closed = False
 
     def close(self) -> None:
         with self._lock:
+            if self._closed:
+                return
             self._closed = True
             release_services = list(self._prowlarr.values())
             download_clients = list(self._download_clients.values())
@@ -90,11 +101,42 @@ class DefaultRuntimeFactory:
             self._prowlarr.clear()
             self._metadata.clear()
             self._download_clients.clear()
-        for service in reversed(release_services):
-            service.close()
-        for client in reversed(download_clients):
-            self._close_module(client)
-        self._close_clients(clients)
+            lifecycle = self._lifecycle
+            self._lifecycle = None
+        first_error: BaseException | None = None
+        for release_service in reversed(release_services):
+            try:
+                release_service.close()
+            except BaseException as error:
+                if first_error is None:
+                    first_error = error
+        for download_client in reversed(download_clients):
+            try:
+                self._close_module(download_client)
+            except BaseException as error:
+                if first_error is None:
+                    first_error = error
+        try:
+            self._close_clients(clients)
+        except BaseException as error:
+            if first_error is None:
+                first_error = error
+        if lifecycle is not None:
+            try:
+                lifecycle.close()
+            except BaseException as error:
+                if first_error is None:
+                    first_error = error
+        if first_error is not None:
+            raise first_error
+
+    @property
+    def release_integration(self) -> IntegrationDescriptor:
+        return self._release_integration
+
+    @property
+    def registry(self) -> StaticModuleRegistry:
+        return self._registry
 
     def metadata_provider(self, key: str) -> RuntimeResult[MetadataProvider]:
         with self._lock:
@@ -138,6 +180,9 @@ class DefaultRuntimeFactory:
             return RuntimeResult(None, error.code, error.missing)
         except Exception:
             self._close_clients(owned_clients)
+            with self._lock:
+                if self._closed:
+                    return RuntimeResult(None, "integration_runtime_closed")
             return RuntimeResult(None, "metadata_provider_configuration_invalid")
 
     def prowlarr(self) -> RuntimeResult[ReleaseSelectionService]:
@@ -147,14 +192,16 @@ class DefaultRuntimeFactory:
         owned_clients: list[httpx.Client] = []
         provider = None
         try:
-            environment = resolve_environment(PROWLARR_INTEGRATION.environment, self._environment)
-            key = ("environment", "prowlarr")
+            environment = resolve_environment(
+                self._release_integration.environment, self._environment
+            )
+            key = ("environment", self._release_integration.key)
             with self._lock:
                 existing = self._prowlarr.get(key)
             if existing is not None:
                 return RuntimeResult(existing)
-            registered = prowlarr_registration(
-                client_factory=self._attempt_client_factory(owned_clients)
+            registered = self._release_registration_factory(
+                self._attempt_client_factory(owned_clients)
             )
             provider = registered.build(
                 resolve_module_environment(registered.manifest, environment)
@@ -184,6 +231,9 @@ class DefaultRuntimeFactory:
                 provider.close()
             else:
                 self._close_clients(owned_clients)
+            with self._lock:
+                if self._closed:
+                    return RuntimeResult(None, "integration_runtime_closed")
             return RuntimeResult(None, "prowlarr_configuration_invalid")
 
     def download_client(self, instance: DownloadClientInstance) -> RuntimeResult[DownloadClient]:
@@ -235,6 +285,9 @@ class DefaultRuntimeFactory:
                 self._close_clients(owned_clients)
             else:
                 self._close_module_or_clients(client, owned_clients)
+            with self._lock:
+                if self._closed:
+                    return RuntimeResult(None, "integration_runtime_closed")
             return RuntimeResult(None, "download_client_configuration_invalid")
 
     def _attempt_client_factory(

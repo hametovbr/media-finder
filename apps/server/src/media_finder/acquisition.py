@@ -69,7 +69,7 @@ class AcquisitionService:
             raise ValueError("acquisition_reference_not_found")
         if instance.archived_at is not None:
             raise ValueError("download_client_archived")
-        if not instance.system_owned or instance.module_key != "qbittorrent":
+        if not instance.system_owned:
             raise ValueError("download_client_system_required")
         if revision.media_item_id != item.id:
             raise ValueError("acquisition_revision_mismatch")

@@ -22,6 +22,7 @@ from media_finder_sdk import (
     ReleaseSearchQuery,
     SafeReleaseSnapshot,
 )
+from media_finder_server import create_legacy_module_registry, create_ui_app
 from playwright.sync_api import Browser, Page, Playwright, sync_playwright
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -31,7 +32,6 @@ from media_finder.control_security import BackendBrowserSecurity
 from media_finder.db import migrate_to_head, session_factory
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.models import Acquisition, DownloadClientInstance, MediaItem
-from media_finder.modules.registry import FIRST_PARTY_MODULES
 from media_finder.release_selection import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder.sdk.types import (
     Attribution,
@@ -49,7 +49,8 @@ from media_finder.sdk.types import (
     SubmissionResult,
 )
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
-from media_finder.ui import create_ui_app
+
+LEGACY_REGISTRY = create_legacy_module_registry()
 
 
 def _port() -> int:
@@ -223,7 +224,7 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         providers={
             "provider-a": BrowserProvider("provider-a"),
             "provider-b": BrowserProvider("provider-b"),
-            "manual": FIRST_PARTY_MODULES.retention_providers()["manual"],
+            "manual": LEGACY_REGISTRY.retention_providers()["manual"],
         },
         prowlarr=ReleaseSelectionService(BrowserReleaseProvider(), ReleaseSelectionCache()),
         client_loader=load_client,

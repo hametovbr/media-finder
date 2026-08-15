@@ -4,11 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from media_finder_download_qbittorrent import registration as qbittorrent_registration
-from pydantic import BaseModel, Field, SecretStr, ValidationError
-
 from media_finder import sdk
-from media_finder.modules import registry as module_registry
 from media_finder.sdk import conformance
 from media_finder.sdk.conformance import (
     ClientConformanceFixture,
@@ -33,6 +29,9 @@ from media_finder.sdk.types import (
     SubmissionResult,
     TorrentArtifact,
 )
+from media_finder_download_qbittorrent import registration as qbittorrent_registration
+from media_finder_server import create_legacy_module_registry
+from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 
 class Config(BaseModel):
@@ -119,12 +118,14 @@ def test_provider_protocol_and_first_party_modules_use_only_public_sdk() -> None
     if "execute_retention" in MetadataProvider.__dict__:
         violations.append("MetadataProvider.execute_retention")
 
-    protocol_source = Path("src/media_finder/sdk/protocols.py").read_text(encoding="utf-8")
+    protocol_source = Path("apps/server/src/media_finder/sdk/protocols.py").read_text(
+        encoding="utf-8"
+    )
     for forbidden in ("InternalRetentionResult", "raw_payload"):
         if forbidden in protocol_source:
             violations.append(f"protocol exposes {forbidden}")
 
-    private_boundary = Path("src/media_finder/sdk/_retention.py")
+    private_boundary = Path("apps/server/src/media_finder/sdk/_retention.py")
     if private_boundary.exists():
         violations.append(str(private_boundary))
 
@@ -147,8 +148,7 @@ def test_provider_protocol_and_first_party_modules_use_only_public_sdk() -> None
 
 
 def test_one_public_static_registry_composes_runtime_and_settings_without_switches() -> None:
-    registry = getattr(module_registry, "FIRST_PARTY_MODULES", None)
-    assert registry is not None
+    registry = create_legacy_module_registry()
     assert set(registry.metadata_providers) == {"manual", "tmdb"}
     assert set(registry.download_clients) == {"qbittorrent"}
     assert registry.metadata_providers["tmdb"].retention_factory().manifest.key == "tmdb"
@@ -158,9 +158,9 @@ def test_one_public_static_registry_composes_runtime_and_settings_without_switch
         registry.metadata_providers["mutated"] = registry.metadata_providers["tmdb"]
 
     for path in (
-        Path("src/media_finder/ui.py"),
-        Path("src/media_finder/integration_runtime.py"),
-        Path("src/media_finder/control_gateway.py"),
+        Path("apps/server/src/media_finder/ui.py"),
+        Path("apps/server/src/media_finder/integration_runtime.py"),
+        Path("apps/server/src/media_finder/control_gateway.py"),
     ):
         source = path.read_text(encoding="utf-8")
         assert "TmdbProvider" not in source

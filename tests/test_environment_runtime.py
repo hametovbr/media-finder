@@ -1,6 +1,6 @@
 import httpx
+from media_finder_server import create_runtime_factory
 
-from media_finder.integration_runtime import DefaultRuntimeFactory
 from media_finder.models import DownloadClientInstance
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 
@@ -24,7 +24,7 @@ def test_default_runtime_constructs_every_integration_only_from_exact_environmen
             return httpx.Response(200, json={})
         return httpx.Response(404)
 
-    factory = DefaultRuntimeFactory(
+    factory = create_runtime_factory(
         environment={
             "TMDB_TOKEN": "tmdb-from-environment",
             "PROWLARR_URL": "https://prowlarr.example.test",
@@ -58,7 +58,7 @@ def test_default_runtime_constructs_every_integration_only_from_exact_environmen
 
 
 def test_missing_environment_returns_safe_exact_names_without_values() -> None:
-    factory = DefaultRuntimeFactory(environment={"TMDB_TOKEN": ""})
+    factory = create_runtime_factory(environment={"TMDB_TOKEN": ""})
 
     tmdb = factory.metadata_provider("tmdb")
     prowlarr = factory.prowlarr()

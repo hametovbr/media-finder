@@ -1,3 +1,5 @@
 """Domain and application core for Media Finder."""
 
-__all__: tuple[str, ...] = ()
+from .module_runtime import ModuleRuntime
+
+__all__ = ["ModuleRuntime"]
