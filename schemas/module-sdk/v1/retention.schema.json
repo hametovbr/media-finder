@@ -1,0 +1,196 @@
+{
+  "$defs": {
+    "ExportHeader": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "enum": [
+            "Warning",
+            "Sunset",
+            "X-Media-Finder-Metadata-Expires"
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "title": "ExportHeader",
+      "type": "object"
+    },
+    "ExportWarning": {
+      "additionalProperties": false,
+      "properties": {
+        "headers": {
+          "items": {
+            "$ref": "#/$defs/ExportHeader"
+          },
+          "title": "Headers",
+          "type": "array"
+        }
+      },
+      "required": [
+        "headers"
+      ],
+      "title": "ExportWarning",
+      "type": "object"
+    },
+    "MediaKind": {
+      "enum": [
+        "movie",
+        "series"
+      ],
+      "title": "MediaKind",
+      "type": "string"
+    },
+    "MetadataIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "external_id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "External Id",
+          "type": "string"
+        },
+        "locale": {
+          "pattern": "^[a-z]{2}(?:-[A-Z]{2})?$",
+          "title": "Locale",
+          "type": "string"
+        },
+        "media_kind": {
+          "$ref": "#/$defs/MediaKind"
+        },
+        "provider_id": {
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+          "title": "Provider Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider_id",
+        "external_id",
+        "media_kind",
+        "locale"
+      ],
+      "title": "MetadataIdentity",
+      "type": "object"
+    },
+    "RetentionAction": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/RetentionActionKind"
+        },
+        "mandatory": {
+          "default": false,
+          "title": "Mandatory",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "RetentionAction",
+      "type": "object"
+    },
+    "RetentionActionKind": {
+      "enum": [
+        "none",
+        "refresh",
+        "purge"
+      ],
+      "title": "RetentionActionKind",
+      "type": "string"
+    },
+    "RetentionPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "refresh_after": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Refresh After"
+        }
+      },
+      "title": "RetentionPolicy",
+      "type": "object"
+    },
+    "RetentionSubject": {
+      "additionalProperties": false,
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/MetadataIdentity"
+        },
+        "policy": {
+          "$ref": "#/$defs/RetentionPolicy"
+        }
+      },
+      "required": [
+        "identity",
+        "policy"
+      ],
+      "title": "RetentionSubject",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.media-finder.dev/module-sdk/v1/retention.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "$ref": "#/$defs/RetentionAction"
+    },
+    "export_warning": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExportWarning"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "policy": {
+      "$ref": "#/$defs/RetentionPolicy"
+    },
+    "subject": {
+      "$ref": "#/$defs/RetentionSubject"
+    }
+  },
+  "required": [
+    "policy",
+    "subject",
+    "action",
+    "export_warning"
+  ],
+  "title": "Media Finder Metadata Retention Contract v1",
+  "type": "object"
+}

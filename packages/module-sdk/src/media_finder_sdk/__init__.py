@@ -10,7 +10,7 @@ from .conformance import (
     assert_release_registration_conforms,
 )
 from .environment import ResolvedModuleEnvironment, resolve_module_environment
-from .errors import JsonScalar, JsonValue, ModuleError, ModuleFailureCategory
+from .errors import JsonScalar, JsonValue, ModuleError, ModuleErrorData, ModuleFailureCategory
 from .manifest import (
     AttributionSpec,
     EnvironmentVariableSpec,
@@ -28,6 +28,7 @@ from .registration import (
     ReleaseProviderRegistration,
     StaticModuleRegistry,
 )
+from .schema import generate_schema_artifacts, write_schema_artifacts
 from .types import (
     Artwork,
     CorrelationResult,
@@ -87,6 +88,7 @@ __all__ = [
     "MetadataSearchQuery",
     "MetadataSearchResult",
     "ModuleError",
+    "ModuleErrorData",
     "ModuleFailureCategory",
     "ModuleKind",
     "ModuleManifest",
@@ -116,7 +118,9 @@ __all__ = [
     "assert_download_registration_conforms",
     "assert_metadata_registration_conforms",
     "assert_release_registration_conforms",
+    "generate_schema_artifacts",
     "load_manifest",
     "parse_manifest",
     "resolve_module_environment",
+    "write_schema_artifacts",
 ]

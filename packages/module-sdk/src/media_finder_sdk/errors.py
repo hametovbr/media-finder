@@ -6,6 +6,11 @@ import re
 from collections.abc import Mapping
 from enum import StrEnum
 from types import MappingProxyType
+from typing import Annotated
+
+from pydantic import Field, field_validator
+
+from .common import PublicModel
 
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | tuple[JsonValue, ...] | Mapping[str, JsonValue]
@@ -69,4 +74,34 @@ class ModuleError(Exception):
         )
 
 
-__all__ = ["JsonScalar", "JsonValue", "ModuleError", "ModuleFailureCategory"]
+class ModuleErrorData(PublicModel):
+    """Serializable safe failure shape for conformance fixtures."""
+
+    category: ModuleFailureCategory
+    code: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]*$")]
+    safe_details: Mapping[str, JsonValue] = Field(default_factory=dict)
+
+    @field_validator("safe_details", mode="before")
+    @classmethod
+    def freeze_safe_details(cls, value: object) -> object:
+        frozen = _freeze(value)
+        if not isinstance(frozen, Mapping):
+            raise ValueError("module_error_safe_details_invalid")
+        return frozen
+
+    @classmethod
+    def from_error(cls, error: ModuleError) -> ModuleErrorData:
+        return cls(
+            category=error.category,
+            code=error.code,
+            safe_details=error.safe_details,
+        )
+
+
+__all__ = [
+    "JsonScalar",
+    "JsonValue",
+    "ModuleError",
+    "ModuleErrorData",
+    "ModuleFailureCategory",
+]

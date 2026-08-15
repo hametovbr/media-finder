@@ -13,7 +13,7 @@
 - [x] 2.4 Implement the manifest, environment, registration, stable error, lifecycle, and immutable DTO foundations in `media-finder-module-sdk`; keep FastAPI, SQLAlchemy, Jinja, httpx, core, and control contracts out of its dependency graph and make the focused tests GREEN.
 - [x] 2.5 Add RED capability tests for `MetadataProvider`, configuration-free metadata retention, `ReleaseProvider`, and `DownloadClient`, including unsupported capability/kind combinations, standardized failures, lifecycle cleanup, and the absence of universal hooks or module lookup.
 - [x] 2.6 Implement the three synchronous specialized protocols, registrations, closeable lifecycle, capability-aware conformance runners, and public fixture types; make all SDK contract tests GREEN in an environment where core is not installed.
-- [ ] 2.7 Add deterministic module manifest/DTO JSON Schema generation and checked v1 artifacts under `schemas/module-sdk/v1`; add semantic drift and byte-stability tests and make them GREEN.
+- [x] 2.7 Add deterministic module manifest/DTO JSON Schema generation and checked v1 artifacts under `schemas/module-sdk/v1`; add semantic drift and byte-stability tests and make them GREEN.
 
 ## 3. Extract First-Party Modules Through the SDK
 

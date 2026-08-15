@@ -1,0 +1,184 @@
+{
+  "$defs": {
+    "MagnetArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "magnet",
+          "default": "magnet",
+          "title": "Kind",
+          "type": "string"
+        },
+        "uri": {
+          "maxLength": 8192,
+          "pattern": "^magnet:\\?",
+          "title": "Uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uri"
+      ],
+      "title": "MagnetArtifact",
+      "type": "object"
+    },
+    "PrivateReleaseSelection": {
+      "contentEncoding": "base64",
+      "description": "Provider-private bounded selection; never exposed to browsers.",
+      "maxLength": 87384,
+      "minLength": 4,
+      "type": "string",
+      "writeOnly": true
+    },
+    "ReleaseSearchFilter": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "title": "Key",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "values"
+      ],
+      "title": "ReleaseSearchFilter",
+      "type": "object"
+    },
+    "ReleaseSearchQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "filters": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ReleaseSearchFilter"
+          },
+          "title": "Filters",
+          "type": "array"
+        },
+        "limit": {
+          "default": 50,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "query": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "title": "ReleaseSearchQuery",
+      "type": "object"
+    },
+    "SafeReleaseSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "guid": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Guid"
+        },
+        "indexer": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Indexer",
+          "type": "string"
+        },
+        "infohash": {
+          "anyOf": [
+            {
+              "pattern": "^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Infohash"
+        },
+        "source_page_url": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Page Url"
+        },
+        "title": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "indexer"
+      ],
+      "title": "SafeReleaseSnapshot",
+      "type": "object"
+    },
+    "TorrentArtifact": {
+      "contentEncoding": "base64",
+      "description": "Bounded in-memory torrent bytes; never persisted or exposed.",
+      "maxLength": 27962028,
+      "minLength": 4,
+      "type": "string",
+      "writeOnly": true
+    }
+  },
+  "$id": "https://schemas.media-finder.dev/module-sdk/v1/release.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "magnet_artifact": {
+      "$ref": "#/$defs/MagnetArtifact"
+    },
+    "safe_snapshot": {
+      "$ref": "#/$defs/SafeReleaseSnapshot"
+    },
+    "search_query": {
+      "$ref": "#/$defs/ReleaseSearchQuery"
+    }
+  },
+  "required": [
+    "search_query",
+    "safe_snapshot",
+    "magnet_artifact"
+  ],
+  "title": "Media Finder Release Provider Contract v1",
+  "type": "object"
+}

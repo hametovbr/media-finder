@@ -1,0 +1,85 @@
+{
+  "$defs": {
+    "JsonScalar": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "JsonValue": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonScalar"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "ModuleFailureCategory": {
+      "description": "Stable coarse categories suitable for host-side translation.",
+      "enum": [
+        "configuration",
+        "invalid-request",
+        "invalid-identity",
+        "unavailable",
+        "timeout",
+        "limit-exceeded",
+        "rejected",
+        "inconclusive",
+        "unsupported"
+      ],
+      "title": "ModuleFailureCategory",
+      "type": "string"
+    }
+  },
+  "$id": "https://schemas.media-finder.dev/module-sdk/v1/error.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Serializable safe failure shape for conformance fixtures.",
+  "properties": {
+    "category": {
+      "$ref": "#/$defs/ModuleFailureCategory"
+    },
+    "code": {
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "title": "Code",
+      "type": "string"
+    },
+    "safe_details": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Safe Details",
+      "type": "object"
+    }
+  },
+  "required": [
+    "category",
+    "code"
+  ],
+  "title": "Media Finder Module Error Contract v1",
+  "type": "object"
+}
