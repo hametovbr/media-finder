@@ -1,9 +1,9 @@
 ## 1. Workspace and public contracts
 
-- [ ] 1.1 Add focused failing workspace/build tests for two independent wheels, packaged UI resources, and the prohibited-import boundary; observe the expected RED before changing package configuration.
-- [ ] 1.2 Convert uv and pnpm configuration to the root backend, `media-finder-control-contracts`, and `media-finder-builtin-ui` workspaces; produce a frozen lock and make the focused wheel/resource tests GREEN.
-- [ ] 1.3 Add focused failing contract tests for immutable DTOs, safe error representation, pagination, locale/status enums, the complete Manual v1 browser document and provider-schema parity, `ControlGateway`, and `BrowserSecurityPort`; implement only framework-independent public types and make them GREEN.
-- [ ] 1.4 Add focused failing tests for a deterministic fake gateway and localhost development host covering catalog, series/specials, duplicate confirmation, integration failure, acquisition states, and both locales; implement the test/dev support and make them GREEN without backend imports.
+- [x] 1.1 Add focused failing workspace/build tests for two independent wheels, packaged UI resources, and the prohibited-import boundary; observe the expected RED before changing package configuration.
+- [x] 1.2 Convert uv and pnpm configuration to the root backend, `media-finder-control-contracts`, and `media-finder-builtin-ui` workspaces; produce a frozen lock and make the focused wheel/resource tests GREEN.
+- [x] 1.3 Add focused failing contract tests for immutable DTOs, safe error representation, pagination, locale/status enums, the complete Manual v1 browser document and provider-schema parity, `ControlGateway`, and `BrowserSecurityPort`; implement only framework-independent public types and make them GREEN.
+- [x] 1.4 Add focused failing tests for a deterministic fake gateway and localhost development host covering catalog, series/specials, duplicate confirmation, integration failure, acquisition states, and both locales; implement the test/dev support and make them GREEN without backend imports.
 
 ## 2. Backend gateway and bounded state
 

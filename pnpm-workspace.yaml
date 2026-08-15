@@ -1,2 +1,2 @@
-allowBuilds:
-  '@fission-ai/openspec': false
+packages:
+  - packages/*

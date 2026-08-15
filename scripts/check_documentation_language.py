@@ -40,6 +40,7 @@ LOCALIZATION_TESTS = {
     "tests/test_naming.py",
     "tests/test_nfo.py",
     "tests/test_ui_browser.py",
+    "tests/test_builtin_ui_fake_host.py",
     "tests/test_ui_catalog.py",
     "tests/test_ui_error_feedback.py",
     "tests/test_ui_foundation.py",

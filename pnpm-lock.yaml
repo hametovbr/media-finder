@@ -21,6 +21,8 @@ importers:
         specifier: 2.9.0
         version: 2.9.0
 
+  packages/builtin-ui: {}
+
 packages:
 
   '@fission-ai/openspec@1.9.0':
