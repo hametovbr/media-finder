@@ -58,9 +58,15 @@ def test_schemas_preserve_semantic_module_boundaries() -> None:
     }
 
     metadata_definitions = schemas["metadata.schema.json"]["$defs"]
-    assert {"MetadataIdentity", "MetadataSearchQuery", "NormalizedMetadata"} <= set(
-        metadata_definitions
-    )
+    assert {
+        "MetadataEditResult",
+        "MetadataIdentity",
+        "MetadataImportDocument",
+        "MetadataSearchQuery",
+        "NormalizedMetadata",
+    } <= set(metadata_definitions)
+    assert metadata_definitions["MetadataImportDocument"]["writeOnly"] is True
+    assert metadata_definitions["EpisodeTableDocument"]["writeOnly"] is True
     release_definitions = schemas["release.schema.json"]["$defs"]
     assert release_definitions["PrivateReleaseSelection"]["writeOnly"] is True
     assert release_definitions["TorrentArtifact"]["maxLength"] > 0
