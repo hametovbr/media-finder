@@ -7,6 +7,7 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/base.css">
   <script src="/static/htmx.min.js" defer></script>
+  <script src="/static/ui.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">{{ _('Skip to content') }}</a>
@@ -35,7 +36,7 @@
           <input type="hidden" name="csrf" value="{{ csrf }}">
           <label>{{ _('Language') }}
             <select name="locale" data-testid="locale-switcher" onchange="this.form.submit()">
-              <option value="en"{% if locale == 'en' %} selected{% endif %}>English</option>
+              <option value="en"{% if locale == 'en' %} selected{% endif %}>{{ _('English') }}</option>
               <option value="ru"{% if locale == 'ru' %} selected{% endif %}>{{ _('Russian') }}</option>
             </select>
           </label>

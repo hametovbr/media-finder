@@ -6,14 +6,16 @@
     {% for item in items %}
     <article class="media-card" data-testid="catalog-card">
       <a href="/items/{{ item.id }}"><h3>{{ item.title }}</h3></a>
-      <p>{{ item.year or _('Year unknown') }} · {{ _(item.kind|capitalize) }} · {{ item.provider }}</p>
+      <p>{{ item.year or _('Year unknown') }} · {{ kind_label(item.kind) }} · {{ item.provider }}</p>
       {% if item.status %}
-        <p data-testid="acquisition-status"><strong>{{ item.status }}</strong>{% if item.status == 'pending' %} — {{ _('Manual reconciliation may be required.') }}{% endif %}</p>
+        <p data-testid="acquisition-status"><strong>{{ status_label(item.status) }}</strong>{% if item.status == 'pending' %} — {{ _('Manual reconciliation may be required.') }}{% endif %}</p>
       {% endif %}
+      {% if archived %}<form action="/ui/items/{{ item.id }}/restore" method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">{{ _('Restore title') }}</button></form>{% endif %}
     </article>
     {% else %}
       <p role="status">{{ _('No titles in this view.') }}</p>
     {% endfor %}
   </div>
+  {% if archived %}<section aria-labelledby="archived-collections-heading"><h3 id="archived-collections-heading">{{ _('Archived collections') }}</h3>{% for collection in archived_collections %}<form action="/ui/collections/{{ collection.id }}/restore" method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><span>{{ collection.name }}</span><button type="submit">{{ _('Restore collection') }}</button></form>{% else %}<p role="status">{{ _('No archived collections.') }}</p>{% endfor %}</section>{% endif %}
 </section>
 {% endblock %}

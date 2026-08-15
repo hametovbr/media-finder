@@ -34,6 +34,16 @@ class UIRepository:
                 )
             )
 
+    def archived_collections(self) -> list[Collection]:
+        with self._sessions() as database:
+            return list(
+                database.scalars(
+                    select(Collection)
+                    .where(Collection.archived_at.is_not(None))
+                    .order_by(Collection.name)
+                )
+            )
+
     def catalog_items(
         self, *, locale: str, archived: bool, collection_filter: str | None
     ) -> list[dict[str, Any]]:

@@ -12,12 +12,11 @@ from urllib.parse import parse_qs
 
 from fastapi import Request
 
+from .ui_i18n import message_for
+
 SUPPORTED_LOCALES = frozenset({"en", "ru"})
 SESSION_COOKIE = "mf_session"
 LOCALE_ROOT = Path(__file__).with_name("locales")
-ERROR_MESSAGES = {
-    "release_search_token_expired": "The release selection expired. Search again.",
-}
 
 
 class SessionSigner:
@@ -66,8 +65,7 @@ def translation(locale: str) -> gettext.NullTranslations:
 
 
 def error_message(code: str, locale: str) -> tuple[str, str]:
-    source = ERROR_MESSAGES.get(code, "A safely hidden error occurred.")
-    return translation(resolve_locale(locale, None)).gettext(source), code
+    return message_for(code, resolve_locale(locale, None)), code
 
 
 async def decode_form(request: Request) -> dict[str, str]:

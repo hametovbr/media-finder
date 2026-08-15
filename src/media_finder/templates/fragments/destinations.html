@@ -1,1 +1,2 @@
-<label>Live destination <select name="destination" data-testid="destination-select">{% for destination in destinations %}<option value="{{ destination.key }}">{{ destination.label }}</option>{% endfor %}</select></label>
+{% if error_code %}<p role="alert" aria-live="assertive" data-error-code="{{ error_code }}">{{ _('The destination changed. Choose one of the current destinations.') }}</p>{% endif %}
+<label>{{ _('Live destination') }} <select name="destination" data-testid="destination-select">{% for destination in destinations %}<option value="{{ destination.key }}">{{ destination.label }}</option>{% endfor %}</select></label>

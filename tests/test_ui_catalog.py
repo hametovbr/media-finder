@@ -84,7 +84,7 @@ def test_catalog_shell_shows_latest_bounded_state_without_progress(catalog_app) 
     )
     assert 'data-testid="catalog-card"' in page.text
     assert "Handmade Series" in page.text
-    assert "pending" in page.text
+    assert "Pending submission" in page.text
     assert "Manual reconciliation may be required." in page.text
     assert "progress" not in page.text.casefold()
 
@@ -140,7 +140,7 @@ def test_item_tabs_are_bounded_htmx_fragments(catalog_app) -> None:
     assert fragment.headers["Vary"] == "HX-Request"
     assert "<html" not in fragment.text
     assert 'aria-live="polite"' in fragment.text
-    assert "pending" in fragment.text
+    assert "Pending submission" in fragment.text
     assert "Manual reconciliation may be required." in fragment.text
     assert "/reconcile" in fragment.text
     assert 'name="csrf"' in fragment.text
@@ -173,3 +173,32 @@ def test_archived_collection_rejects_moves_until_restored(catalog_app) -> None:
         collection = session.get(Collection, ids["collection"])
         assert collection is not None
         assert collection.archived_at is None
+
+
+def test_visible_collection_and_item_controls_cover_move_archive_and_restore(catalog_app) -> None:
+    ids = catalog_app.state.fixture_ids
+    with TestClient(catalog_app) as client:
+        detail = client.get(f"/items/{ids['item']}")
+        assert f'action="/ui/items/{ids["item"]}/move"' in detail.text
+        assert 'data-testid="move-item"' in detail.text
+        assert f'action="/ui/items/{ids["item"]}/archive"' in detail.text
+        csrf = _csrf(detail.text)
+
+        archived_item = client.post(
+            f"/ui/items/{ids['item']}/archive",
+            data={"csrf": csrf},
+            follow_redirects=False,
+        )
+        assert archived_item.status_code == 303
+        archive = client.get("/?archived=1")
+        assert f'action="/ui/items/{ids["item"]}/restore"' in archive.text
+
+        archived_collection = client.post(
+            f"/ui/collections/{ids['collection']}/archive",
+            data={"csrf": csrf},
+            follow_redirects=False,
+        )
+        assert archived_collection.status_code == 303
+        archive = client.get("/?archived=1")
+        assert f'action="/ui/collections/{ids["collection"]}/restore"' in archive.text
+        assert "Animation" in archive.text

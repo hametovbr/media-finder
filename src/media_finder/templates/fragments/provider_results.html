@@ -5,7 +5,7 @@
   <form action="/ui/metadata/confirm" method="post">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="selection_token" data-testid="provider-result-token" value="{{ entry.token }}">
-    <p>{{ entry.result.title }}{% if entry.result.year %} · {{ entry.result.year }}{% endif %} · {{ entry.result.kind.value }}</p>
+    <p>{{ entry.result.title }}{% if entry.result.year %} · {{ entry.result.year }}{% endif %} · {{ kind_label(entry.result.kind.value) }}</p>
     <button type="submit">{{ _('Select and confirm') }}</button>
   </form>
   {% endfor %}
