@@ -7,6 +7,8 @@ results intentionally contain an opaque selection token and a sanitized snapshot
 from __future__ import annotations
 
 import ipaddress
+import json
+import logging
 import re
 import secrets
 from collections import OrderedDict
@@ -18,6 +20,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from .sdk.redaction import redact_urls
+from .sdk.settings import EnvReference, validate_service_base_url
 from .sdk.types import DownloadArtifact, MagnetArtifact, TorrentArtifact
 
 SAFE_GUID = re.compile(r"^[A-Za-z0-9._:-]{1,255}$")
@@ -25,6 +29,26 @@ INFOHASH = re.compile(r"^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$")
 SUSPECT_SECRET_SEGMENT = re.compile(r"^[A-Za-z0-9_-]{24,}$")
 SECRET_MARKERS = ("passkey", "token", "session", "credential", "secret")
 DOWNLOAD_ROUTE_SEGMENTS = {"announce", "download", "downloadfile", "torrent"}
+DEFAULT_MAX_JSON_BYTES = 2 * 1024 * 1024
+DEFAULT_MAX_SEARCH_RESULTS = 1000
+DEFAULT_MAX_TORRENT_BYTES = 16 * 1024 * 1024
+
+
+class _HttpUrlRedactionFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        rendered = record.getMessage()
+        redacted = redact_urls(rendered)
+        if redacted != rendered:
+            record.msg = redacted
+            record.args = ()
+        return True
+
+
+def _install_http_redaction() -> None:
+    for name in ("httpx", "httpcore"):
+        logger = logging.getLogger(name)
+        if not any(isinstance(value, _HttpUrlRedactionFilter) for value in logger.filters):
+            logger.addFilter(_HttpUrlRedactionFilter())
 
 
 class ExpiredSearchToken(ValueError):
@@ -52,9 +76,16 @@ class HttpxProwlarrTransport:
         api_key_ref: str,
         secret_resolver: Callable[[str], str],
         client: httpx.Client,
+        *,
+        max_json_bytes: int = DEFAULT_MAX_JSON_BYTES,
+        max_search_results: int = DEFAULT_MAX_SEARCH_RESULTS,
+        max_torrent_bytes: int = DEFAULT_MAX_TORRENT_BYTES,
     ) -> None:
-        if not api_key_ref.startswith("env:"):
-            raise ValueError("prowlarr_api_key_reference_required")
+        try:
+            api_key_ref = EnvReference(value=api_key_ref).value
+        except ValueError:
+            raise ValueError("prowlarr_api_key_reference_required") from None
+        base_url = validate_service_base_url(base_url, error_code="prowlarr_base_url_invalid")
         origin = _authenticated_origin(base_url)
         if origin is None:
             raise ValueError("prowlarr_base_url_invalid")
@@ -63,24 +94,38 @@ class HttpxProwlarrTransport:
         self._api_key_ref = api_key_ref
         self._secret_resolver = secret_resolver
         self._client = client
+        if min(max_json_bytes, max_search_results, max_torrent_bytes) < 1:
+            raise ValueError("prowlarr_limits_invalid")
+        self._max_json_bytes = max_json_bytes
+        self._max_search_results = max_search_results
+        self._max_torrent_bytes = max_torrent_bytes
+        _install_http_redaction()
 
     def search(self, query: str, filters: dict[str, str]) -> list[dict[str, object]]:
         params = {"query": query, "type": "search", **filters}
         try:
-            response = self._client.get(
+            with self._client.stream(
+                "GET",
                 f"{self._base_url}/api/v1/search",
                 params=params,
                 headers=self._headers(),
                 follow_redirects=False,
-            )
-            if response.is_redirect:
-                raise ProwlarrError("prowlarr_search_failed")
-            response.raise_for_status()
-            payload = response.json()
+            ) as response:
+                if response.is_redirect:
+                    raise ProwlarrError("prowlarr_search_failed")
+                response.raise_for_status()
+                content = _read_bounded(
+                    response, self._max_json_bytes, "prowlarr_response_too_large"
+                )
+            payload = json.loads(content)
+        except ProwlarrError:
+            raise
         except Exception:
             raise ProwlarrError("prowlarr_search_failed") from None
         if not isinstance(payload, list):
             raise ProwlarrError("prowlarr_search_failed")
+        if len(payload) > self._max_search_results:
+            raise ProwlarrError("prowlarr_result_limit_exceeded")
         return [dict(item) for item in payload if isinstance(item, dict)]
 
     def validate(self) -> None:
@@ -100,11 +145,17 @@ class HttpxProwlarrTransport:
         if _authenticated_origin(url) != self._origin:
             raise ProwlarrError("prowlarr_download_origin_rejected") from None
         try:
-            response = self._client.get(url, headers=self._headers(), follow_redirects=False)
-            if response.is_redirect:
-                raise ProwlarrError("prowlarr_download_failed")
-            response.raise_for_status()
-            return response.content
+            with self._client.stream(
+                "GET", url, headers=self._headers(), follow_redirects=False
+            ) as response:
+                if response.is_redirect:
+                    raise ProwlarrError("prowlarr_download_failed")
+                response.raise_for_status()
+                return _read_bounded(
+                    response, self._max_torrent_bytes, "prowlarr_torrent_too_large"
+                )
+        except ProwlarrError:
+            raise
         except Exception:
             raise ProwlarrError("prowlarr_download_failed") from None
 
@@ -130,6 +181,23 @@ def _authenticated_origin(value: str) -> tuple[str, str, int] | None:
     except ValueError:
         return None
     return parsed.scheme, parsed.hostname.casefold(), port
+
+
+def _read_bounded(response: httpx.Response, limit: int, code: str) -> bytes:
+    declared = response.headers.get("content-length")
+    try:
+        if declared is not None and int(declared) > limit:
+            raise ProwlarrError(code)
+    except ValueError:
+        raise ProwlarrError("prowlarr_response_invalid") from None
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in response.iter_bytes():
+        total += len(chunk)
+        if total > limit:
+            raise ProwlarrError(code)
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @dataclass(frozen=True, slots=True)

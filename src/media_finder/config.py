@@ -4,30 +4,21 @@ import os
 import re
 from urllib.parse import urlsplit, urlunsplit
 
-from pydantic import BaseModel, SecretStr, field_validator
+from pydantic import SecretStr
 from sqlalchemy.orm import Session
 
 from .models import AppSetting
+from .sdk.settings import EnvReference
 
-ENV_REFERENCE = re.compile(r"^env:[A-Z][A-Z0-9_]*$")
+__all__ = [
+    "EnvReference",
+    "SettingsRepository",
+    "redact",
+    "resolve_env_reference",
+    "safe_url_origin",
+]
+
 URL = re.compile(r"https?://[^\s]+")
-
-
-class EnvReference(BaseModel):
-    """A persistable pointer to an environment variable, never its value."""
-
-    value: str
-
-    @field_validator("value")
-    @classmethod
-    def validate_reference(cls, value: str) -> str:
-        if not ENV_REFERENCE.fullmatch(value):
-            raise ValueError("must be an env:VARIABLE_NAME reference")
-        return value
-
-    @property
-    def variable_name(self) -> str:
-        return self.value.removeprefix("env:")
 
 
 def resolve_env_reference(reference: EnvReference) -> SecretStr:

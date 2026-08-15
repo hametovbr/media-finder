@@ -8,7 +8,6 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
-from typing import cast
 
 import uvicorn
 from fastapi import FastAPI
@@ -16,7 +15,7 @@ from fastapi import FastAPI
 from .api import create_app as create_processor_app
 from .db import migrate_to_head
 from .maintenance import MaintenanceCoordinator, MaintenanceRunner
-from .modules.tmdb import TmdbProvider
+from .modules.registry import FIRST_PARTY_MODULES
 from .sdk.protocols import MetadataProvider
 from .ui import create_ui_app
 
@@ -49,9 +48,7 @@ def create_application() -> FastAPI:
         session_secret_reference=UI_SECRET_REFERENCE,
         secure_cookie=_secure_cookie(),
     )
-    providers: dict[str, MetadataProvider] = {
-        "tmdb": cast(MetadataProvider, TmdbProvider.retention_only())
-    }
+    providers: dict[str, MetadataProvider] = FIRST_PARTY_MODULES.retention_providers()
     processor = create_processor_app(
         url,
         integration_token_reference=INTEGRATION_TOKEN_REFERENCE,

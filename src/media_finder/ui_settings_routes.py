@@ -6,8 +6,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from .acquisition import create_download_client_instance
-from .modules.manual import ManualProvider
-from .modules.registry import DOWNLOAD_CLIENT_CONFIG_MODELS
+from .modules.registry import FIRST_PARTY_MODULES
 from .sdk.settings import describe_settings
 from .ui_context import UIContext
 from .ui_i18n import module_translation
@@ -27,8 +26,8 @@ def settings_router(context: UIContext) -> APIRouter:
             for key, provider in context.runtime.supported_providers.items()
         }
         client_fields = {
-            key: describe_settings(config_model)
-            for key, config_model in DOWNLOAD_CLIENT_CONFIG_MODELS.items()
+            key: describe_settings(registration.config_model)
+            for key, registration in FIRST_PARTY_MODULES.download_clients.items()
         }
         clients = context.repository.clients()
         response = context.render(
@@ -116,7 +115,7 @@ def settings_router(context: UIContext) -> APIRouter:
     async def about_page(request: Request) -> HTMLResponse:
         session, fresh = context.session_for(request)
         locale = context.locale_for(request, session)
-        attributions = [ManualProvider().attribution()]
+        attributions = [factory() for factory in FIRST_PARTY_MODULES.static_attributions]
         attributions.extend(context.runtime.configured_provider_attributions())
         response = context.render(
             "about.html",

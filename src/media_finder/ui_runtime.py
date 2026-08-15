@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -11,16 +12,13 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 
 from .acquisition import ClientLoader
-from .config import EnvReference, resolve_env_reference
+from .config import resolve_env_reference
 from .models import AppSetting, DownloadClientInstance
-from .modules.qbittorrent import (
-    HttpxQbittorrentTransport,
-    QbittorrentClient,
-    QbittorrentConfig,
-)
-from .modules.tmdb import HttpxTmdbTransport, TmdbConfig, TmdbProvider
+from .modules.registry import FIRST_PARTY_MODULES
 from .prowlarr import HttpxProwlarrTransport, ProwlarrAdapter, SearchResultCache
 from .sdk.protocols import DownloadClient, MetadataProvider
+from .sdk.registration import StaticModuleRegistry
+from .sdk.settings import EnvReference, validate_service_base_url
 from .sdk.types import Attribution
 
 
@@ -53,8 +51,10 @@ class ProwlarrSettings(BaseModel):
     @field_validator("base_url")
     @classmethod
     def safe_origin(cls, value: HttpUrl) -> HttpUrl:
-        if value.username or value.password or value.query or value.fragment:
-            raise ValueError("prowlarr_base_url_invalid")
+        try:
+            validate_service_base_url(str(value), error_code="prowlarr_base_url_invalid")
+        except ValueError:
+            raise ValueError("prowlarr_base_url_invalid") from None
         return value
 
     @field_validator("api_key_ref")
@@ -75,31 +75,37 @@ class DefaultRuntimeFactory:
         *,
         http_client_factory: Callable[[], httpx.Client] = httpx.Client,
         secret_resolver: Callable[[str], str] = _resolve_secret,
+        registry: StaticModuleRegistry = FIRST_PARTY_MODULES,
     ) -> None:
-        self._client = http_client_factory()
+        self._http_client_factory = http_client_factory
         self._secret_resolver = secret_resolver
         self._prowlarr: dict[tuple[str, str], ProwlarrAdapter] = {}
+        self._metadata: dict[tuple[str, str], MetadataProvider] = {}
+        self._download_clients: dict[tuple[str, str], DownloadClient] = {}
+        self._http_clients: list[httpx.Client] = []
+        self._registry = registry
 
     def close(self) -> None:
-        self._client.close()
+        for client in self._http_clients:
+            client.close()
 
     def metadata_provider(
         self, key: str, config: Mapping[str, object]
     ) -> RuntimeResult[MetadataProvider]:
-        if key != "tmdb":
+        registration = self._registry.metadata_providers.get(key)
+        if registration is None:
             return RuntimeResult(None, "metadata_provider_not_found")
         try:
-            parsed = TmdbConfig.model_validate(config)
-            provider = TmdbProvider(
-                parsed,
-                HttpxTmdbTransport(
-                    parsed.base_url,
-                    parsed.api_token.value,
-                    self._secret_resolver,
-                    self._client,
-                ),
+            parsed = registration.config_model.model_validate(config)
+            cache_key = (key, json.dumps(parsed.model_dump(mode="json"), sort_keys=True))
+            existing = self._metadata.get(cache_key)
+            if existing is not None:
+                return RuntimeResult(existing)
+            provider = registration.build(
+                parsed.model_dump(mode="json"), self._new_http_client, self._secret_resolver
             )
-            return RuntimeResult(cast(MetadataProvider, provider))
+            self._metadata[cache_key] = provider
+            return RuntimeResult(provider)
         except Exception:
             return RuntimeResult(None, "metadata_provider_configuration_invalid")
 
@@ -109,11 +115,12 @@ class DefaultRuntimeFactory:
             key = (str(parsed.base_url), parsed.api_key_ref)
             adapter = self._prowlarr.get(key)
             if adapter is None:
+                client = self._new_http_client()
                 transport = HttpxProwlarrTransport(
                     str(parsed.base_url),
                     parsed.api_key_ref,
                     self._secret_resolver,
-                    self._client,
+                    client,
                 )
                 transport.validate()
                 adapter = ProwlarrAdapter(transport, SearchResultCache())
@@ -123,22 +130,30 @@ class DefaultRuntimeFactory:
             return RuntimeResult(None, "prowlarr_configuration_invalid")
 
     def download_client(self, instance: DownloadClientInstance) -> RuntimeResult[DownloadClient]:
-        if instance.module_key != "qbittorrent":
+        registration = self._registry.download_clients.get(instance.module_key)
+        if registration is None:
             return RuntimeResult(None, "download_client_module_unknown")
         try:
-            parsed = QbittorrentConfig.model_validate(instance.config_payload)
-            return RuntimeResult(
-                cast(
-                    DownloadClient,
-                    QbittorrentClient(
-                        parsed,
-                        HttpxQbittorrentTransport(str(parsed.base_url), self._client),
-                        self._secret_resolver,
-                    ),
-                )
+            parsed = registration.config_model.model_validate(instance.config_payload)
+            cache_key = (
+                instance.id,
+                json.dumps(parsed.model_dump(mode="json"), sort_keys=True),
             )
+            existing = self._download_clients.get(cache_key)
+            if existing is not None:
+                return RuntimeResult(existing)
+            client = registration.build(
+                parsed.model_dump(mode="json"), self._new_http_client, self._secret_resolver
+            )
+            self._download_clients[cache_key] = client
+            return RuntimeResult(client)
         except Exception:
             return RuntimeResult(None, "download_client_configuration_invalid")
+
+    def _new_http_client(self) -> httpx.Client:
+        client = self._http_client_factory()
+        self._http_clients.append(client)
+        return client
 
 
 class RuntimeResolver:

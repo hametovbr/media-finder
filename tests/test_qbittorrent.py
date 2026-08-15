@@ -9,7 +9,7 @@ from media_finder.modules.qbittorrent import (
     QbittorrentClient,
     QbittorrentConfig,
 )
-from media_finder.sdk.conformance import assert_client_conforms
+from media_finder.sdk.conformance import ClientConformanceFixture, assert_client_conforms
 from media_finder.sdk.errors import ModuleError
 from media_finder.sdk.types import MagnetArtifact, TorrentArtifact
 
@@ -75,7 +75,15 @@ def build_client(
 def test_qbittorrent_client_conforms_and_maps_native_fields_exactly() -> None:
     client, transport = build_client()
 
-    assert_client_conforms(client)
+    assert_client_conforms(
+        client,
+        ClientConformanceFixture(
+            destination="anime",
+            correlation="mf-acq-fixture",
+            magnet=MagnetArtifact(uri="magnet:?xt=urn:btih:" + "a" * 40),
+            torrent=TorrentArtifact(content=b"fixture"),
+        ),
+    )
     destinations = client.list_destinations()
     assert [(item.key, item.label) for item in destinations] == [
         ("anime", "anime"),

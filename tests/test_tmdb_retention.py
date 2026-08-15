@@ -1,10 +1,14 @@
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 
+import httpx
 import pytest
+from pydantic import ValidationError
 
 from media_finder.domain import CatalogService
 from media_finder.maintenance import MaintenanceCoordinator, MaintenanceRunner
-from media_finder.modules.tmdb import TmdbConfig, TmdbProvider
+from media_finder.modules.tmdb import HttpxTmdbTransport, TmdbConfig, TmdbProvider
 from media_finder.sdk.errors import ModuleError
 from media_finder.sdk.types import (
     MediaKind,
@@ -64,27 +68,13 @@ class SeriesTransport:
 
     def get_json(self, path: str, params: dict[str, str]) -> dict:
         self.calls.append((path, params))
-        return {
-            "id": 900,
-            "name": "Fixture Series",
-            "first_air_date": "2020-01-01",
-            "overview": "Series plot",
-            "seasons": [
-                {
-                    "season_number": 0,
-                    "name": "Specials",
-                    "episodes": [
-                        {
-                            "episode_number": 1,
-                            "name": "A Special",
-                            "id": 901,
-                            "air_date": "2020-02-01",
-                        }
-                    ],
-                },
-                {"season_number": 1, "name": "Season 1", "episodes": []},
-            ],
-        }
+        fixture = {
+            "/tv/900": "tv-details.json",
+            "/tv/900/season/0": "tv-season-0.json",
+            "/tv/900/season/1": "tv-season-1.json",
+        }[path]
+        path_value = Path("src/media_finder/modules/tmdb/fixtures") / fixture
+        return json.loads(path_value.read_text(encoding="utf-8"))
 
 
 def test_tmdb_search_fetch_normalize_locale_attribution_and_provenance() -> None:
@@ -149,12 +139,55 @@ def test_tmdb_normalizes_series_specials_in_season_zero() -> None:
     transport = SeriesTransport()
     provider = TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), transport)
     raw = provider.fetch("series", "900", "en-US")
-    assert transport.calls == [("/tv/900", {"language": "en-US"})]
+    assert transport.calls == [
+        ("/tv/900", {"language": "en-US"}),
+        ("/tv/900/season/0", {"language": "en-US"}),
+        ("/tv/900/season/1", {"language": "en-US"}),
+    ]
     normalized = provider.normalize(raw, "series", "900", "en-US")
     assert normalized.kind.value == "series"
     assert normalized.seasons[0].number == 0
     assert normalized.seasons[0].episodes[0].provider_ids == {"tmdb": "901"}
     assert normalized.seasons[0].episodes[0].ordering == 1
+    assert normalized.seasons[0].episodes[0].runtime_minutes == 24
+    assert [episode.number for episode in normalized.seasons[1].episodes] == [1, 2]
+    assert [(art.kind, str(art.url)) for art in normalized.artwork] == [
+        ("poster", "https://image.tmdb.org/t/p/original/series-poster.jpg"),
+        ("backdrop", "https://image.tmdb.org/t/p/original/series-backdrop.jpg"),
+    ]
+
+
+def test_tmdb_rejects_unsafe_base_urls_and_non_typed_endpoints_before_bearer_resolution() -> None:
+    for value in (
+        "https://user:password@api.themoviedb.org/3",
+        "https://api.themoviedb.org/3?token=secret",
+        "https://api.themoviedb.org/3#fragment",
+        "https://api.themoviedb.org/passkey/secret/3",
+    ):
+        with pytest.raises(ValidationError):
+            TmdbConfig(api_token="env:TMDB_TOKEN", base_url=value)
+
+    resolved: list[str] = []
+    transport = HttpxTmdbTransport(
+        "https://metadata.example.test/tmdb/3",
+        "env:TMDB_TOKEN",
+        lambda reference: resolved.append(reference) or "bearer-secret",
+        httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={}))),
+    )
+    with pytest.raises(ValueError, match="tmdb_endpoint_invalid"):
+        transport.get_json("https://attacker.example.test/steal", {})
+    assert resolved == []
+
+
+def test_tmdb_rejects_non_numeric_identity_before_transport() -> None:
+    transport = SeriesTransport()
+    provider = TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), transport)
+
+    with pytest.raises(ModuleError) as rejected:
+        provider.fetch("series", "../../configuration", "en-US")
+
+    assert rejected.value.code == "metadata_identity_invalid"
+    assert transport.calls == []
 
 
 def test_generic_purge_preserves_envelope_overrides_identity_and_acquisition(database) -> None:
@@ -232,6 +265,71 @@ def test_generic_refresh_executes_provider_and_persists_new_revision(database) -
     assert item.revisions[-1].effective_payload["plot"] == "User plot"
     MaintenanceCoordinator({"tmdb": provider}).run(database, datetime(2024, 6, 2, tzinfo=UTC))
     assert len(item.revisions) == 2
+
+    MaintenanceCoordinator({"tmdb": provider}).run(database, datetime(2024, 7, 1, tzinfo=UTC))
+    database.refresh(original)
+    assert original.maintenance_status == "purged"
+    assert original.expired_at is not None
+    assert original.raw_payload is None
+    assert len(item.revisions) == 2
+
+
+class UnexpectedFailureProvider:
+    def plan_retention(self, policy: RetentionPolicy, now: datetime) -> RetentionAction:
+        return RetentionAction(kind=RetentionActionKind.REFRESH)
+
+    def fetch(self, kind: str, external_id: str, locale: str) -> dict:
+        return {"id": external_id}
+
+    def normalize(
+        self, payload: dict, kind: str, external_id: str, locale: str
+    ) -> NormalizedMetadata:
+        raise ValueError("untrusted validation details must not escape")
+
+    def retention_for(self, created_at: datetime) -> RetentionPolicy:
+        return RetentionPolicy()
+
+
+def test_unexpected_revision_failure_is_safe_and_does_not_block_later_purge(database) -> None:
+    service = CatalogService(database)
+    created = datetime(2024, 1, 1, tzinfo=UTC)
+    normalized = NormalizedMetadata(
+        kind=MediaKind.MOVIE,
+        titles={"en-US": "Fixture"},
+        provenance=Provenance(provider_key="unexpected", external_id="failed", locale="en-US"),
+    )
+    failed_item, _ = service.get_or_create_item("unexpected", "failed", "movie")
+    failed = service.add_provider_revision(
+        failed_item,
+        {"id": "failed"},
+        normalized,
+        {},
+        RetentionPolicy(refresh_after=created),
+        created,
+    )
+
+    tmdb = TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), FixtureTransport())
+    purge_item, _ = service.get_or_create_item("tmdb", "129", "movie")
+    raw = tmdb.fetch("movie", "129", "en-US")
+    purge = service.add_provider_revision(
+        purge_item,
+        raw,
+        tmdb.normalize(raw, "movie", "129", "en-US"),
+        {},
+        tmdb.retention_for(created),
+        created,
+    )
+
+    MaintenanceCoordinator({"unexpected": UnexpectedFailureProvider(), "tmdb": tmdb}).run(
+        database, datetime(2024, 7, 1, tzinfo=UTC)
+    )
+
+    database.refresh(failed)
+    database.refresh(purge)
+    assert failed.maintenance_status == "failed"
+    assert failed.maintenance_error_code == "metadata_provider_maintenance_failed"
+    assert "untrusted" not in str(failed.maintenance_error_code)
+    assert purge.maintenance_status == "purged"
 
 
 class PublicOnlyFailingRefreshProvider:

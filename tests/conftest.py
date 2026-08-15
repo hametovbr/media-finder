@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from media_finder.db import create_database, migrate_to_head, session_factory
+from media_finder.sdk.errors import ModuleError
 from media_finder.sdk.types import (
     Attribution,
     CorrelationResult,
@@ -64,6 +65,8 @@ class FakeProvider:
         ]
 
     def fetch(self, kind: str, external_id: str, locale: str) -> dict:
+        if external_id == "invalid":
+            raise ModuleError(code="fixture_identity_invalid", message="Fixture identity invalid")
         return {"title": "Fixture"}
 
     def normalize(self, payload, kind: str, external_id: str, locale: str) -> NormalizedMetadata:

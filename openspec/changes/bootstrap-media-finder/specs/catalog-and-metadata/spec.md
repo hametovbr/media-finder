@@ -89,7 +89,7 @@ The Manual provider SHALL support creating and editing movies and series, season
 - **THEN** its metadata remains exportable without a provider-expiry error
 
 ### Requirement: TMDB metadata provider
-The TMDB provider SHALL search and fetch movies and series in a requested metadata locale, preserve provider provenance, and expose required attribution for About/Credits.
+The TMDB provider SHALL search and fetch movies and series in a requested metadata locale, fetch every advertised TV season including Season 00, preserve provider provenance, normalize real TMDB episode payloads and artwork URLs, and expose required attribution for About/Credits. Its authenticated transport SHALL accept only validated TMDB endpoint shapes and SHALL reject endpoint components that could redirect or disclose its bearer token.
 
 #### Scenario: Search TMDB in a locale
 - **WHEN** a user searches TMDB with a supported metadata locale
@@ -98,6 +98,10 @@ The TMDB provider SHALL search and fetch movies and series in a requested metada
 #### Scenario: Display attribution
 - **WHEN** the About/Credits view is rendered with TMDB configured
 - **THEN** it displays the official TMDB attribution and notice supplied by the module
+
+#### Scenario: Fetch a TV hierarchy
+- **WHEN** TMDB advertises regular seasons and Season 00 for a series
+- **THEN** the provider fetches each season detail and normalizes its real episode hierarchy and available poster and backdrop artwork
 
 ### Requirement: Independent interface locales
 The system SHALL offer English and Russian UI localization, choose the browser locale with English fallback, permit a cookie-based UI locale override, and choose metadata locale independently while defaulting it to the current UI locale.

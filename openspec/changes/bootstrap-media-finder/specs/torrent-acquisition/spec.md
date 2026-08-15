@@ -12,7 +12,7 @@ The system SHALL search Prowlarr only after a user supplies or confirms a free-f
 - **THEN** the system presents only torrent results
 
 ### Requirement: Ephemeral release artifacts
-Search results SHALL live only in an in-memory TTL cache, and the browser SHALL receive a safe opaque token. Magnet URIs, torrent bytes, download URLs, and passkey-bearing URL components SHALL NOT be persisted or logged.
+Search results SHALL live only in a bounded in-memory TTL cache, and the browser SHALL receive a safe opaque token. Prowlarr JSON payloads, returned result counts, UI form bodies, and resolved torrent bytes SHALL have enforced bounds with stable safe errors. Magnet URIs, torrent bytes, complete download URLs, and passkey-bearing URL components SHALL NOT be persisted or logged, including by underlying HTTP client loggers.
 
 #### Scenario: Search token expires
 - **WHEN** a user submits an expired opaque result token
@@ -21,6 +21,10 @@ Search results SHALL live only in an in-memory TTL cache, and the browser SHALL 
 #### Scenario: Resolve a selected torrent
 - **WHEN** a valid result token is selected
 - **THEN** the Prowlarr adapter resolves a magnet URI or torrent bytes in memory and does not write the artifact to disk or the database
+
+#### Scenario: Reject oversized integration input
+- **WHEN** a UI form, Prowlarr response, result set, or torrent artifact exceeds its declared bound
+- **THEN** the system rejects it with a stable safe code without persisting or logging sensitive content and a selected release token remains one-use
 
 ### Requirement: Live destination selection
 The system SHALL support named download-client instances and SHALL reload destinations from the selected client immediately before submission. The user SHALL explicitly select a current destination.
@@ -58,7 +62,7 @@ A source-page URL SHALL be accepted only from a dedicated public-page field with
 - **THEN** the snapshot may persist both normalized identifiers without persisting the release artifact or resolution URL
 
 ### Requirement: Exact client correlation
-The system SHALL submit the exact correlation token `mf-acq-<acquisition-uuid>`. The qBittorrent module SHALL store the chosen destination as category and the exact correlation token as a tag.
+The system SHALL submit the exact correlation token `mf-acq-<acquisition-uuid>`. The qBittorrent module SHALL store the chosen destination as category and the exact correlation token as a tag. Authenticated HTTP sessions SHALL be isolated between TMDB, Prowlarr, and every qBittorrent instance so a cookie from one service or port cannot reach another.
 
 #### Scenario: Submit to qBittorrent
 - **WHEN** qBittorrent accepts a selected artifact

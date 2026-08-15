@@ -116,6 +116,7 @@ jobs:
           tests/test_sdk.py
           tests/test_tmdb_retention.py
           tests/test_qbittorrent.py
+          tests/test_transport_hardening.py
 
   browser:
     runs-on: ubuntu-latest

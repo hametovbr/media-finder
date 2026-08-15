@@ -17,6 +17,12 @@ from .ui_i18n import message_for
 SUPPORTED_LOCALES = frozenset({"en", "ru"})
 SESSION_COOKIE = "mf_session"
 LOCALE_ROOT = Path(__file__).with_name("locales")
+MAX_UI_FORM_BYTES = 1024 * 1024
+
+
+class FormBodyTooLarge(ValueError):
+    def __init__(self) -> None:
+        super().__init__("ui_form_too_large")
 
 
 class SessionSigner:
@@ -69,8 +75,30 @@ def error_message(code: str, locale: str) -> tuple[str, str]:
 
 
 async def decode_form(request: Request) -> dict[str, str]:
+    cached = getattr(request.state, "media_finder_decoded_form", None)
+    if isinstance(cached, dict):
+        return dict(cached)
     content_type = request.headers.get("content-type", "")
     if not content_type.startswith("application/x-www-form-urlencoded"):
         return {}
-    values = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
-    return {key: items[-1] for key, items in values.items() if items}
+    declared = request.headers.get("content-length")
+    try:
+        if declared is not None and int(declared) > MAX_UI_FORM_BYTES:
+            raise FormBodyTooLarge
+    except ValueError:
+        raise FormBodyTooLarge from None
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > MAX_UI_FORM_BYTES:
+            raise FormBodyTooLarge
+        chunks.append(chunk)
+    try:
+        encoded = b"".join(chunks).decode("utf-8")
+    except UnicodeDecodeError:
+        return {}
+    values = parse_qs(encoded, keep_blank_values=True)
+    decoded = {key: items[-1] for key, items in values.items() if items}
+    request.state.media_finder_decoded_form = decoded
+    return dict(decoded)

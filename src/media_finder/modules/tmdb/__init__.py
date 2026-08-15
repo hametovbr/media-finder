@@ -1,18 +1,22 @@
 """TMDB metadata integration with package-owned retention policy."""
 
+import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from email.utils import format_datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from dateutil.relativedelta import relativedelta
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
-from ...config import EnvReference, safe_url_origin
 from ...sdk.errors import ModuleError
 from ...sdk.protocols import JsonTransport
+from ...sdk.redaction import safe_url_origin
+from ...sdk.settings import EnvReference
 from ...sdk.types import (
+    Artwork,
     Attribution,
     Episode,
     ExportHeader,
@@ -29,13 +33,24 @@ from ...sdk.types import (
     Season,
 )
 
+TMDB_ENDPOINT = re.compile(
+    r"^(?:/configuration|/search/(?:movie|tv)|/(?:movie|tv)/[0-9]{1,20}|/tv/[0-9]{1,20}/season/[0-9]{1,4})$"
+)
+TMDB_ID = re.compile(r"^[0-9]{1,20}$")
+SAFE_BASE_PATH = re.compile(r"^/[A-Za-z0-9._~/-]*$")
+SECRET_PATH_MARKERS = ("credential", "passkey", "secret", "session", "token")
+IMAGE_PATH = re.compile(r"^/[A-Za-z0-9._/-]+$")
+IMAGE_BASE_URL = "https://image.tmdb.org/t/p/original"
+
 
 class TmdbConfig(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", validate_default=True)
+
     api_token: EnvReference = Field(
         title="module.tmdb.settings.api_token", json_schema_extra={"secret": True, "order": 1}
     )
-    base_url: str = Field(
-        default="https://api.themoviedb.org/3",
+    base_url: HttpUrl = Field(
+        default=HttpUrl("https://api.themoviedb.org/3"),
         title="module.tmdb.settings.base_url",
         json_schema_extra={"order": 2},
     )
@@ -44,6 +59,26 @@ class TmdbConfig(BaseModel):
     @classmethod
     def parse_reference(cls, value: object) -> object:
         return EnvReference(value=value) if isinstance(value, str) else value
+
+    @field_validator("base_url")
+    @classmethod
+    def require_safe_endpoint(cls, value: HttpUrl) -> HttpUrl:
+        path = value.path or "/"
+        secret_path = any(
+            marker in segment.casefold()
+            for segment in path.split("/")
+            for marker in SECRET_PATH_MARKERS
+        )
+        if (
+            value.username
+            or value.password
+            or value.query
+            or value.fragment
+            or not SAFE_BASE_PATH.fullmatch(path)
+            or secret_path
+        ):
+            raise ValueError("tmdb_base_url_invalid")
+        return value
 
 
 class HttpxTmdbTransport:
@@ -56,12 +91,14 @@ class HttpxTmdbTransport:
         secret_resolver: Callable[[str], str],
         client: httpx.Client,
     ) -> None:
-        self._base_url = base_url.rstrip("/")
-        self._api_token_ref = api_token_ref
+        self._base_url = _validated_tmdb_base_url(base_url)
+        self._api_token_ref = EnvReference(value=api_token_ref).value
         self._secret_resolver = secret_resolver
         self._client = client
 
     def get_json(self, path: str, params: dict[str, str]) -> dict[str, Any]:
+        if TMDB_ENDPOINT.fullmatch(path) is None:
+            raise ValueError("tmdb_endpoint_invalid")
         response = self._client.get(
             f"{self._base_url}{path}",
             params=params,
@@ -133,8 +170,29 @@ class TmdbProvider:
         return results
 
     def fetch(self, kind: str, external_id: str, locale: str) -> dict[str, Any]:
+        if kind not in {MediaKind.MOVIE.value, MediaKind.SERIES.value}:
+            raise ModuleError(code="metadata_kind_invalid", message="The media kind is invalid.")
+        if TMDB_ID.fullmatch(external_id) is None:
+            raise ModuleError(
+                code="metadata_identity_invalid", message="The provider identity is invalid."
+            )
         path_kind = "tv" if kind == "series" else "movie"
-        return self._request(f"/{path_kind}/{external_id}", {"language": locale})
+        payload = self._request(f"/{path_kind}/{external_id}", {"language": locale})
+        if kind == MediaKind.SERIES.value:
+            season_details: list[dict[str, Any]] = []
+            for summary in payload.get("seasons", []):
+                if not isinstance(summary, dict) or not isinstance(
+                    summary.get("season_number"), int
+                ):
+                    continue
+                number = summary["season_number"]
+                if number < 0 or number > 9999:
+                    continue
+                detail = self._request(f"/tv/{external_id}/season/{number}", {"language": locale})
+                season_details.append(detail)
+            payload = dict(payload)
+            payload["seasons"] = season_details
+        return payload
 
     def normalize(
         self, payload: dict[str, Any], kind: str, external_id: str, locale: str
@@ -155,6 +213,7 @@ class TmdbProvider:
                         air_date=date.fromisoformat(episode["air_date"])
                         if episode.get("air_date")
                         else None,
+                        runtime_minutes=episode.get("runtime") or None,
                         provider_ids={"tmdb": str(episode["id"])} if episode.get("id") else {},
                         ordering=int(episode.get("order", episode["episode_number"])),
                     )
@@ -178,6 +237,14 @@ class TmdbProvider:
             genres=tuple(value["name"] for value in payload.get("genres", [])),
             countries=tuple(value["name"] for value in payload.get("production_countries", [])),
             studios=tuple(value["name"] for value in payload.get("production_companies", [])),
+            artwork=tuple(
+                artwork
+                for artwork in (
+                    self._artwork("poster", payload.get("poster_path"), locale),
+                    self._artwork("backdrop", payload.get("backdrop_path"), locale),
+                )
+                if artwork is not None
+            ),
             seasons=seasons,
             provenance=Provenance(
                 provider_key="tmdb",
@@ -269,6 +336,38 @@ class TmdbProvider:
             for key in ("title", "name", "overview", "release_date", "first_air_date", "runtime")
         )
         return min(1.0, present / 4)
+
+    @staticmethod
+    def _artwork(kind: str, path: object, locale: str) -> Artwork | None:
+        if not isinstance(path, str) or IMAGE_PATH.fullmatch(path) is None or ".." in path:
+            return None
+        return Artwork(kind=kind, url=HttpUrl(f"{IMAGE_BASE_URL}{path}"), language=locale)
+
+
+def _validated_tmdb_base_url(value: str) -> str:
+    try:
+        parsed = urlsplit(value)
+        path = parsed.path or "/"
+        secret_path = any(
+            marker in segment.casefold()
+            for segment in path.split("/")
+            for marker in SECRET_PATH_MARKERS
+        )
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or SAFE_BASE_PATH.fullmatch(path) is None
+            or secret_path
+        ):
+            raise ValueError
+        _ = parsed.port
+    except (UnicodeError, ValueError):
+        raise ValueError("tmdb_base_url_invalid") from None
+    return value.rstrip("/")
 
 
 __all__ = ["HttpxTmdbTransport", "TmdbConfig", "TmdbProvider"]

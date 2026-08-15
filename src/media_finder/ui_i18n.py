@@ -11,6 +11,7 @@ LOCALE_ROOT = Path(__file__).with_name("locales")
 
 _SOURCES = {
     "csrf_invalid": "Request rejected.",
+    "ui_form_too_large": "The submitted form is too large.",
     "collection_name_required": "A collection name is required.",
     "media_item_not_found": "Title not found.",
     "collection_unavailable": "The collection is unavailable.",
@@ -32,6 +33,9 @@ _SOURCES = {
     "prowlarr_base_url_invalid": "The Prowlarr base URL is invalid.",
     "prowlarr_download_origin_rejected": "The torrent download origin was rejected.",
     "prowlarr_download_failed": "The torrent download failed.",
+    "prowlarr_response_too_large": "The torrent search response is too large.",
+    "prowlarr_result_limit_exceeded": "The torrent search returned too many results.",
+    "prowlarr_torrent_too_large": "The torrent artifact is too large.",
     "release_search_query_required": "Enter a search query.",
     "release_search_token_expired": "The release selection expired. Search again.",
     "download_client_unavailable": "The download client is unavailable.",

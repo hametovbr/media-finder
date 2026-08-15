@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Protocol
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .domain import CatalogService
@@ -25,13 +25,7 @@ class MaintenanceCoordinator:
 
     def run(self, session: Session, now: datetime) -> None:
         revisions = session.scalars(
-            select(MetadataRevision).where(
-                MetadataRevision.expired_at.is_(None),
-                or_(
-                    MetadataRevision.maintenance_status.is_(None),
-                    MetadataRevision.maintenance_status != "refreshed",
-                ),
-            )
+            select(MetadataRevision).where(MetadataRevision.expired_at.is_(None))
         ).all()
         session.info["retention_purge"] = True
         try:
@@ -43,8 +37,17 @@ class MaintenanceCoordinator:
                     refresh_after=revision.refresh_after,
                     expires_at=revision.expires_at,
                 )
-                action = provider.plan_retention(policy, now)
+                try:
+                    action = provider.plan_retention(policy, now)
+                except Exception:
+                    self._record_failure(revision, now, "metadata_provider_maintenance_failed")
+                    continue
                 if action.kind is RetentionActionKind.NONE:
+                    continue
+                if (
+                    action.kind is RetentionActionKind.REFRESH
+                    and revision.maintenance_status == RetentionExecutionStatus.REFRESHED.value
+                ):
                     continue
                 revision.maintenance_attempted_at = now
                 revision.maintenance_error_code = None
@@ -68,8 +71,10 @@ class MaintenanceCoordinator:
                         )
                         retention = provider.retention_for(now)
                     except ModuleError as error:
-                        revision.maintenance_status = RetentionExecutionStatus.FAILED.value
-                        revision.maintenance_error_code = error.code
+                        self._record_failure(revision, now, error.code)
+                        continue
+                    except Exception:
+                        self._record_failure(revision, now, "metadata_provider_maintenance_failed")
                         continue
                     CatalogService(session).add_provider_revision(
                         revision.media_item,
@@ -83,6 +88,12 @@ class MaintenanceCoordinator:
             session.commit()
         finally:
             session.info.pop("retention_purge", None)
+
+    @staticmethod
+    def _record_failure(revision: MetadataRevision, now: datetime, code: str) -> None:
+        revision.maintenance_attempted_at = now
+        revision.maintenance_status = RetentionExecutionStatus.FAILED.value
+        revision.maintenance_error_code = code
 
 
 class Coordinator(Protocol):

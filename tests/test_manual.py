@@ -24,7 +24,9 @@ def movie_document(external_id: str | None = None) -> dict:
 
 
 def test_complete_json_import_preserves_or_allocates_uuid4_atomically(database) -> None:
-    provider = ManualCatalogService(CatalogService(database), ManualProvider())
+    manual_module = ManualProvider()
+    assert manual_module.search("The Snow Queen", "en") == []
+    provider = ManualCatalogService(CatalogService(database), manual_module)
     supplied = uuid4()
     item = provider.import_json(movie_document(str(supplied)))
     assert item.external_id == str(supplied)

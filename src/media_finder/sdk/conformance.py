@@ -1,10 +1,19 @@
 """Small public conformance assertions usable by third-party module fixtures."""
 
 import inspect
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 
+from .errors import ModuleError
 from .protocols import DownloadClient, MetadataProvider
-from .types import ExportWarning, MagnetArtifact, RetentionPolicy, TorrentArtifact
+from .types import (
+    ExportWarning,
+    MagnetArtifact,
+    MediaKind,
+    RetentionActionKind,
+    TorrentArtifact,
+)
 
 FORBIDDEN_ARGUMENTS = {
     "database",
@@ -21,6 +30,30 @@ FORBIDDEN_ARGUMENTS = {
     "artifact_path",
     "writable_path",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderConformanceFixture:
+    query: str
+    locale: str
+    kind: MediaKind
+    external_id: str
+    raw_payload: dict[str, Any]
+    expected_title: str
+    created_at: datetime
+    retention_check_at: datetime
+    expected_retention_action: RetentionActionKind
+    expected_error_code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ClientConformanceFixture:
+    destination: str
+    correlation: str
+    magnet: MagnetArtifact | None = None
+    torrent: TorrentArtifact | None = None
+    error_destination: str | None = None
+    expected_error_code: str | None = None
 
 
 def _assert_boundary(module: object) -> None:
@@ -44,27 +77,73 @@ def _assert_boundary(module: object) -> None:
         assert not forbidden, f"{name} exposes forbidden dependencies: {sorted(forbidden)}"
 
 
-def assert_provider_conforms(provider: MetadataProvider) -> None:
+def assert_provider_conforms(
+    provider: MetadataProvider, fixture: ProviderConformanceFixture
+) -> None:
     assert isinstance(provider, MetadataProvider)
     _assert_boundary(provider)
     provider.validate_config()
     assert provider.manifest.contract_version == "1"
     assert provider.attribution().provider_key == provider.manifest.key
-    warning = provider.export_warning(RetentionPolicy(), datetime.now(UTC))
+    if "search" in provider.manifest.capabilities:
+        search_results = provider.search(fixture.query, fixture.locale)
+        assert any(
+            result.external_id == fixture.external_id
+            and result.kind is fixture.kind
+            and result.locale == fixture.locale
+            for result in search_results
+        )
+    payload = (
+        provider.fetch(fixture.kind.value, fixture.external_id, fixture.locale)
+        if "fetch" in provider.manifest.capabilities
+        else fixture.raw_payload
+    )
+    normalized = provider.normalize(
+        payload, fixture.kind.value, fixture.external_id, fixture.locale
+    )
+    assert normalized.kind is fixture.kind
+    assert normalized.provenance.provider_key == provider.manifest.key
+    assert normalized.provenance.external_id == fixture.external_id
+    assert normalized.provenance.locale == fixture.locale
+    assert fixture.expected_title in normalized.titles.values()
+    policy = provider.retention_for(fixture.created_at)
+    action = provider.plan_retention(policy, fixture.retention_check_at)
+    assert action.kind is fixture.expected_retention_action
+    warning = provider.export_warning(policy, fixture.retention_check_at)
     assert warning is None or isinstance(warning, ExportWarning)
+    if fixture.expected_error_code is not None:
+        try:
+            provider.fetch(fixture.kind.value, "invalid", fixture.locale)
+        except ModuleError as error:
+            assert error.code == fixture.expected_error_code
+        else:
+            raise AssertionError("provider fixture expected a standardized error")
 
 
-def assert_client_conforms(client: DownloadClient) -> None:
+def assert_client_conforms(client: DownloadClient, fixture: ClientConformanceFixture) -> None:
     assert isinstance(client, DownloadClient)
     _assert_boundary(client)
     client.validate_config()
     destinations = client.list_destinations()
     assert destinations
-    destination = destinations[0].key
-    for artifact in (
-        MagnetArtifact(uri="magnet:?xt=urn:btih:fixture"),
-        TorrentArtifact(content=b"fixture"),
-    ):
-        result = client.submit(artifact, destination, "mf-acq-fixture")
-        assert result.correlation == "mf-acq-fixture"
-        assert client.find_by_correlation("mf-acq-fixture").correlation == "mf-acq-fixture"
+    assert fixture.destination in {destination.key for destination in destinations}
+    artifacts: list[MagnetArtifact | TorrentArtifact] = []
+    if "magnet" in client.manifest.capabilities:
+        assert fixture.magnet is not None
+        artifacts.append(fixture.magnet)
+    if "torrent" in client.manifest.capabilities:
+        assert fixture.torrent is not None
+        artifacts.append(fixture.torrent)
+    assert artifacts
+    for artifact in artifacts:
+        result = client.submit(artifact, fixture.destination, fixture.correlation)
+        assert result.correlation == fixture.correlation
+        assert client.find_by_correlation(fixture.correlation).correlation == fixture.correlation
+    if fixture.expected_error_code is not None:
+        assert fixture.error_destination is not None
+        try:
+            client.submit(artifacts[0], fixture.error_destination, fixture.correlation)
+        except ModuleError as error:
+            assert error.code == fixture.expected_error_code
+        else:
+            raise AssertionError("client fixture expected a standardized error")

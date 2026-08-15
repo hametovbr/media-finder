@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable
 from typing import Annotated, Protocol
 
@@ -10,6 +9,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 from ...sdk.errors import ModuleError
+from ...sdk.settings import EnvReference, validate_service_base_url
 from ...sdk.types import (
     CorrelationResult,
     DownloadArtifact,
@@ -20,9 +20,6 @@ from ...sdk.types import (
     SubmissionResult,
     TorrentArtifact,
 )
-
-ENV_REFERENCE = re.compile(r"^env:[A-Z_][A-Z0-9_]*$")
-SECRET_VALUE_MARKERS = ("credential", "passkey", "secret", "session", "token")
 
 
 class QbittorrentTransport(Protocol):
@@ -37,7 +34,9 @@ class HttpxQbittorrentTransport:
     """Synchronous qBittorrent Web API transport with no persisted credentials."""
 
     def __init__(self, base_url: str, client: httpx.Client) -> None:
-        self._base_url = base_url.rstrip("/")
+        self._base_url = validate_service_base_url(
+            base_url, error_code="qbittorrent_base_url_invalid"
+        )
         self._client = client
 
     def authenticate(self, username: str, password: str) -> None:
@@ -110,21 +109,19 @@ class QbittorrentConfig(BaseModel):
     @field_validator("base_url")
     @classmethod
     def require_non_secret_endpoint(cls, value: HttpUrl) -> HttpUrl:
-        secret_path = any(
-            marker in segment.casefold()
-            for segment in (value.path or "").split("/")
-            for marker in SECRET_VALUE_MARKERS
-        )
-        if value.username or value.password or value.query or value.fragment or secret_path:
-            raise ValueError("base URL must not contain credentials, query, or fragment")
+        try:
+            validate_service_base_url(str(value), error_code="qbittorrent_base_url_invalid")
+        except ValueError:
+            raise ValueError("qbittorrent_base_url_invalid") from None
         return value
 
     @field_validator("username_ref", "password_ref")
     @classmethod
     def require_environment_reference(cls, value: str) -> str:
-        if ENV_REFERENCE.fullmatch(value) is None:
-            raise ValueError("a valid env:NAME reference is required")
-        return value
+        try:
+            return EnvReference(value=value).value
+        except ValueError:
+            raise ValueError("a valid env:NAME reference is required") from None
 
 
 class QbittorrentClient:

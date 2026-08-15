@@ -5,17 +5,18 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from .acquisition import ClientLoader
 from .config import EnvReference, resolve_env_reference
 from .db import create_database, session_factory
-from .modules.tmdb import TmdbProvider
+from .modules.registry import FIRST_PARTY_MODULES
 from .prowlarr import ProwlarrAdapter
 from .sdk.protocols import MetadataProvider
 from .ui_acquisition_routes import acquisition_router
@@ -24,7 +25,7 @@ from .ui_context import UIContext
 from .ui_metadata_routes import metadata_router
 from .ui_repository import UIRepository
 from .ui_runtime import DefaultRuntimeFactory, RuntimeFactory, RuntimeResolver
-from .ui_security import SessionSigner, error_message, resolve_locale
+from .ui_security import FormBodyTooLarge, SessionSigner, error_message, resolve_locale
 from .ui_settings_routes import settings_router
 
 __all__ = ["SessionSigner", "create_ui_app", "error_message", "resolve_locale"]
@@ -51,7 +52,7 @@ def create_ui_app(
 
     selected_factory = runtime_factory
     provider_registry: dict[str, MetadataProvider] = dict(
-        providers or {"tmdb": cast(MetadataProvider, TmdbProvider.retention_only())}
+        providers or FIRST_PARTY_MODULES.retention_providers()
     )
     if (
         selected_factory is None
@@ -94,6 +95,10 @@ def create_ui_app(
         signer=signer,
         secure_cookie=secure_cookie,
     )
+
+    @app.exception_handler(FormBodyTooLarge)
+    async def form_too_large(request: Request, _: FormBodyTooLarge) -> HTMLResponse:
+        return context.ui_error(request, "ui_form_too_large", 413)
 
     # Compatibility-only inspection hooks; route families depend on UIContext.
     app.state.engine = engine

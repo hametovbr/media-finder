@@ -491,3 +491,15 @@ msgstr "Удалить эпизод"
 
 msgid "Retry acquisition"
 msgstr "Повторить получение"
+
+msgid "The submitted form is too large."
+msgstr "Отправленная форма слишком велика."
+
+msgid "The torrent search response is too large."
+msgstr "Ответ поиска торрентов слишком велик."
+
+msgid "The torrent search returned too many results."
+msgstr "Поиск торрентов вернул слишком много результатов."
+
+msgid "The torrent artifact is too large."
+msgstr "Торрент-файл слишком велик."
