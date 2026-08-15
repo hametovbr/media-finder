@@ -117,9 +117,7 @@ def settings_router(context: UIContext) -> APIRouter:
         session, fresh = context.session_for(request)
         locale = context.locale_for(request, session)
         attributions = [ManualProvider().attribution()]
-        attributions.extend(
-            provider.attribution() for provider in context.runtime.metadata_providers().values()
-        )
+        attributions.extend(context.runtime.configured_provider_attributions())
         response = context.render(
             "about.html",
             locale=locale,

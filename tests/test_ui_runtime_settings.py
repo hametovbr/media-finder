@@ -338,3 +338,45 @@ def test_default_factory_returns_safe_codes_for_invalid_or_unknown_modules() -> 
     assert factory.prowlarr({"base_url": "not-a-url"}).error_code == (
         "prowlarr_configuration_invalid"
     )
+
+
+def test_about_keeps_configured_tmdb_attribution_during_live_outage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_url = f"sqlite:///{tmp_path / 'tmdb-outage.db'}"
+    migrate_to_head(database_url)
+    monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long test session secret")
+    monkeypatch.setenv("TMDB_API_TOKEN", "tmdb-secret")
+
+    def failing_client() -> httpx.Client:
+        def timeout(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("upstream unavailable", request=request)
+
+        return httpx.Client(transport=httpx.MockTransport(timeout))
+
+    app = create_ui_app(
+        database_url,
+        session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
+        http_client_factory=failing_client,
+    )
+    with TestClient(app) as client:
+        csrf = _csrf(client.get("/").text)
+        saved = client.post(
+            "/ui/settings/providers/tmdb",
+            data={
+                "csrf": csrf,
+                "api_token": "env:TMDB_API_TOKEN",
+                "base_url": "https://api.themoviedb.org/3",
+            },
+            follow_redirects=False,
+        )
+        assert saved.status_code == 303
+
+        readiness = client.get("/settings")
+        assert 'data-readiness="tmdb:not-ready"' in readiness.text
+        about = client.get("/about")
+
+    assert "User-provided metadata" in about.text
+    assert "This product uses the TMDB API but is not endorsed or certified by TMDB." in (
+        about.text
+    )

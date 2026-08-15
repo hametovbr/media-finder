@@ -21,6 +21,7 @@ from .modules.qbittorrent import (
 from .modules.tmdb import HttpxTmdbTransport, TmdbConfig, TmdbProvider
 from .prowlarr import HttpxProwlarrTransport, ProwlarrAdapter, SearchResultCache
 from .sdk.protocols import DownloadClient, MetadataProvider
+from .sdk.types import Attribution
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +187,15 @@ class RuntimeResolver:
             if result.value is not None:
                 configured[key] = result.value
         return configured
+
+    def configured_provider_attributions(self) -> list[Attribution]:
+        """Return attribution for configured modules without probing live services."""
+
+        return [
+            provider.attribution()
+            for key, provider in self._providers.items()
+            if self._factory is None or self._setting(f"metadata_provider:{key}") is not None
+        ]
 
     def prowlarr(self) -> RuntimeResult[ProwlarrAdapter]:
         if self._factory is None:
