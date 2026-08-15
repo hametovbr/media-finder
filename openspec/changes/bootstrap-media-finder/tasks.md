@@ -17,12 +17,12 @@
 
 ## 3. Torrent acquisition
 
-- [ ] 3.1 Implement the Prowlarr torrent-only adapter, filters, safe normalized results, and bounded in-memory opaque-token cache.
-- [ ] 3.2 Implement safe GUID/infohash validation plus source-page origin/path sanitization and tests proving uncertain identifiers, secret path segments, artifacts, credentials, queries, fragments, and passkeys never reach persistence or logs.
-- [ ] 3.3 Implement named download-client instances and live destination validation.
-- [ ] 3.4 Implement the qBittorrent module for magnet and in-memory torrent submission, category mapping, exact tags, and correlation lookup.
-- [ ] 3.5 Implement transactional pending Acquisition creation, pinned revisions, idempotent submission, submitted/failed outcomes, and timeout lookup.
-- [ ] 3.6 Implement explicit manual pending reconciliation and restart tests that prove no automatic resubmission.
+- [x] 3.1 Implement the Prowlarr torrent-only adapter, filters, safe normalized results, and bounded in-memory opaque-token cache.
+- [x] 3.2 Implement safe GUID/infohash validation plus source-page origin/path sanitization and tests proving uncertain identifiers, secret path segments, artifacts, credentials, queries, fragments, and passkeys never reach persistence or logs.
+- [x] 3.3 Implement named download-client instances and live destination validation.
+- [x] 3.4 Implement the qBittorrent module for magnet and in-memory torrent submission, category mapping, exact tags, and correlation lookup.
+- [x] 3.5 Implement transactional pending Acquisition creation, pinned revisions, idempotent submission, submitted/failed outcomes, and timeout lookup.
+- [x] 3.6 Implement explicit manual pending reconciliation and restart tests that prove no automatic resubmission.
 
 ## 4. Processor-facing APIs
 

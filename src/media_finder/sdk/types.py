@@ -184,6 +184,7 @@ class CorrelationResult(PublicModel):
     found: bool
     correlation: str
     external_task_id: str | None = None
+    conclusive: bool = True
 
 
 JsonObject = dict[str, Any]
