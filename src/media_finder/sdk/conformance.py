@@ -30,6 +30,7 @@ FORBIDDEN_ARGUMENTS = {
     "artifact_path",
     "writable_path",
 }
+ESSENTIAL_PROVIDER_CAPABILITIES = frozenset({"search", "fetch", "normalize"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,19 +86,17 @@ def assert_provider_conforms(
     provider.validate_config()
     assert provider.manifest.contract_version == "1"
     assert provider.attribution().provider_key == provider.manifest.key
-    if "search" in provider.manifest.capabilities:
-        search_results = provider.search(fixture.query, fixture.locale)
-        assert any(
-            result.external_id == fixture.external_id
-            and result.kind is fixture.kind
-            and result.locale == fixture.locale
-            for result in search_results
-        )
-    payload = (
-        provider.fetch(fixture.kind.value, fixture.external_id, fixture.locale)
-        if "fetch" in provider.manifest.capabilities
-        else fixture.raw_payload
+    missing = ESSENTIAL_PROVIDER_CAPABILITIES - provider.manifest.capabilities
+    assert not missing, f"essential provider capabilities missing: {sorted(missing)}"
+    search_results = provider.search(fixture.query, fixture.locale)
+    assert any(
+        result.external_id == fixture.external_id
+        and result.kind is fixture.kind
+        and result.locale == fixture.locale
+        for result in search_results
     )
+    payload = provider.fetch(fixture.kind.value, fixture.external_id, fixture.locale)
+    assert payload == fixture.raw_payload
     normalized = provider.normalize(
         payload, fixture.kind.value, fixture.external_id, fixture.locale
     )

@@ -46,7 +46,7 @@ class FakeProvider:
         version="1.0.0",
         contract_version="1",
         name_key="fixture.provider",
-        capabilities=frozenset({"movie"}),
+        capabilities=frozenset({"movie", "search", "fetch", "normalize"}),
     )
     config_model = EmptyConfig
 

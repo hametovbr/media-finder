@@ -2,6 +2,7 @@
 
 import csv
 import io
+from collections.abc import Mapping
 from datetime import date
 from typing import Any, Literal
 from uuid import UUID
@@ -95,19 +96,49 @@ class ManualProvider:
         version="1.0.0",
         contract_version="1",
         name_key="module.manual.name",
-        capabilities=frozenset({"movie", "series", "json_import", "episode_csv_import"}),
+        capabilities=frozenset(
+            {"movie", "series", "search", "fetch", "normalize", "json_import", "episode_csv_import"}
+        ),
         translation_keys={"module.manual.name": "Manual"},
     )
     config_model = ManualConfig
+
+    def __init__(
+        self,
+        fixtures: Mapping[tuple[str, str, str], dict[str, Any]] | None = None,
+    ) -> None:
+        self._fixtures = {key: dict(payload) for key, payload in (fixtures or {}).items()}
 
     def validate_config(self) -> None:
         ManualConfig()
 
     def search(self, query: str, locale: str) -> list[MetadataSearchResult]:
-        return []
+        needle = query.casefold().strip()
+        results: list[MetadataSearchResult] = []
+        for (kind, external_id, fixture_locale), payload in self._fixtures.items():
+            if fixture_locale != locale:
+                continue
+            document = ManualDocumentV1.model_validate(payload)
+            title = document.titles.get(locale) or next(iter(document.titles.values()))
+            if needle and needle not in title.casefold():
+                continue
+            results.append(
+                MetadataSearchResult(
+                    provider_key="manual",
+                    external_id=external_id,
+                    kind=MediaKind(kind),
+                    title=title,
+                    year=document.year,
+                    locale=locale,
+                )
+            )
+        return results
 
     def fetch(self, kind: str, external_id: str, locale: str) -> dict[str, Any]:
-        raise ManualImportError("Manual metadata is read from immutable catalog revisions")
+        payload = self._fixtures.get((kind, external_id, locale))
+        if payload is None:
+            raise ManualImportError("Manual metadata identity was not found")
+        return dict(payload)
 
     def normalize(
         self, payload: dict[str, Any], kind: str, external_id: str, locale: str

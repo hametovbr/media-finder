@@ -86,8 +86,7 @@ class DefaultRuntimeFactory:
         self._registry = registry
 
     def close(self) -> None:
-        for client in self._http_clients:
-            client.close()
+        self._discard_http_clients_since(0)
 
     def metadata_provider(
         self, key: str, config: Mapping[str, object]
@@ -95,6 +94,7 @@ class DefaultRuntimeFactory:
         registration = self._registry.metadata_providers.get(key)
         if registration is None:
             return RuntimeResult(None, "metadata_provider_not_found")
+        client_checkpoint = len(self._http_clients)
         try:
             parsed = registration.config_model.model_validate(config)
             cache_key = (key, json.dumps(parsed.model_dump(mode="json"), sort_keys=True))
@@ -107,9 +107,11 @@ class DefaultRuntimeFactory:
             self._metadata[cache_key] = provider
             return RuntimeResult(provider)
         except Exception:
+            self._discard_http_clients_since(client_checkpoint)
             return RuntimeResult(None, "metadata_provider_configuration_invalid")
 
     def prowlarr(self, config: Mapping[str, object]) -> RuntimeResult[ProwlarrAdapter]:
+        client_checkpoint = len(self._http_clients)
         try:
             parsed = ProwlarrSettings.model_validate(config)
             key = (str(parsed.base_url), parsed.api_key_ref)
@@ -127,12 +129,14 @@ class DefaultRuntimeFactory:
                 self._prowlarr[key] = adapter
             return RuntimeResult(adapter)
         except Exception:
+            self._discard_http_clients_since(client_checkpoint)
             return RuntimeResult(None, "prowlarr_configuration_invalid")
 
     def download_client(self, instance: DownloadClientInstance) -> RuntimeResult[DownloadClient]:
         registration = self._registry.download_clients.get(instance.module_key)
         if registration is None:
             return RuntimeResult(None, "download_client_module_unknown")
+        client_checkpoint = len(self._http_clients)
         try:
             parsed = registration.config_model.model_validate(instance.config_payload)
             cache_key = (
@@ -148,12 +152,19 @@ class DefaultRuntimeFactory:
             self._download_clients[cache_key] = client
             return RuntimeResult(client)
         except Exception:
+            self._discard_http_clients_since(client_checkpoint)
             return RuntimeResult(None, "download_client_configuration_invalid")
 
     def _new_http_client(self) -> httpx.Client:
         client = self._http_client_factory()
         self._http_clients.append(client)
         return client
+
+    def _discard_http_clients_since(self, checkpoint: int) -> None:
+        discarded = self._http_clients[checkpoint:]
+        del self._http_clients[checkpoint:]
+        for client in discarded:
+            client.close()
 
 
 class RuntimeResolver:

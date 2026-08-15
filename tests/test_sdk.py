@@ -96,19 +96,22 @@ class RealProviderTransport:
 
 def test_real_metadata_providers_conform_without_application_dependencies() -> None:
     created = datetime(2026, 1, 1, tzinfo=UTC)
+    manual_payload = {
+        "schema_version": "1",
+        "kind": "movie",
+        "locale": "en-US",
+        "titles": {"en-US": "Fixture"},
+    }
     assert_provider_conforms(
-        ManualProvider(),
+        ManualProvider(
+            fixtures={("movie", "47e26ca2-f393-4a00-b33a-902d41d49714", "en-US"): manual_payload}
+        ),
         ProviderConformanceFixture(
             query="Fixture",
             locale="en-US",
             kind=MediaKind.MOVIE,
             external_id="47e26ca2-f393-4a00-b33a-902d41d49714",
-            raw_payload={
-                "schema_version": "1",
-                "kind": "movie",
-                "locale": "en-US",
-                "titles": {"en-US": "Fixture"},
-            },
+            raw_payload=manual_payload,
             expected_title="Fixture",
             created_at=created,
             retention_check_at=created,
@@ -273,19 +276,22 @@ def test_fixture_driven_conformance_is_capability_aware_and_third_party_safe(fak
     assert client.correlation == "mf-acq-third-party"
 
 
-def test_provider_conformance_does_not_call_unadvertised_search(fake_provider) -> None:
-    fake_provider.search = lambda _query, _locale: pytest.fail("unadvertised search was called")
-    assert_provider_conforms(
-        fake_provider,
-        ProviderConformanceFixture(
-            query="Fixture",
-            locale="en-US",
-            kind=MediaKind.MOVIE,
-            external_id="1",
-            raw_payload={"title": "Fixture"},
-            expected_title="Fixture",
-            created_at=datetime(2026, 1, 1, tzinfo=UTC),
-            retention_check_at=datetime(2026, 1, 1, tzinfo=UTC),
-            expected_retention_action=RetentionActionKind.NONE,
-        ),
+def test_provider_conformance_rejects_missing_essential_capabilities(fake_provider) -> None:
+    fake_provider.manifest = fake_provider.manifest.model_copy(
+        update={"capabilities": frozenset({"movie", "normalize"})}
     )
+    with pytest.raises(AssertionError, match="essential provider capabilities"):
+        assert_provider_conforms(
+            fake_provider,
+            ProviderConformanceFixture(
+                query="Fixture",
+                locale="en-US",
+                kind=MediaKind.MOVIE,
+                external_id="1",
+                raw_payload={"title": "Fixture"},
+                expected_title="Fixture",
+                created_at=datetime(2026, 1, 1, tzinfo=UTC),
+                retention_check_at=datetime(2026, 1, 1, tzinfo=UTC),
+                expected_retention_action=RetentionActionKind.NONE,
+            ),
+        )

@@ -86,7 +86,13 @@ class CatalogService:
             self.add_revision(item, RevisionInput.from_normalized(normalized))
         return item
 
-    def add_revision(self, item: MediaItem, revision_input: RevisionInput) -> MetadataRevision:
+    def add_revision(
+        self,
+        item: MediaItem,
+        revision_input: RevisionInput,
+        *,
+        commit: bool = True,
+    ) -> MetadataRevision:
         normalized = revision_input.normalized
         payload = normalized.model_dump(mode="json")
         overrides = revision_input.overrides or {}
@@ -123,7 +129,8 @@ class CatalogService:
         item.current_revision_id = revision.id
         item.normalized_title = next(iter(normalized.titles.values())).casefold()
         item.year = normalized.year
-        self.session.commit()
+        if commit:
+            self.session.commit()
         return revision
 
     def add_provider_revision(
@@ -134,6 +141,8 @@ class CatalogService:
         overrides: dict[str, Any],
         retention: RetentionPolicy,
         created_at: datetime,
+        *,
+        commit: bool = True,
     ) -> MetadataRevision:
         if (
             normalized.provenance.provider_key != item.provider_key
@@ -150,6 +159,7 @@ class CatalogService:
                 retention=retention,
                 created_at=created_at,
             ),
+            commit=commit,
         )
 
     def find_similar(

@@ -2,9 +2,10 @@ import logging
 
 import httpx
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from media_finder.models import DownloadClientInstance
+from media_finder.modules.manual import ManualProvider
 from media_finder.modules.qbittorrent import HttpxQbittorrentTransport, QbittorrentConfig
 from media_finder.prowlarr import (
     ExpiredSearchToken,
@@ -12,6 +13,11 @@ from media_finder.prowlarr import (
     ProwlarrAdapter,
     ProwlarrError,
     SearchResultCache,
+)
+from media_finder.sdk.registration import (
+    DownloadClientRegistration,
+    MetadataProviderRegistration,
+    StaticModuleRegistry,
 )
 from media_finder.ui_runtime import DefaultRuntimeFactory
 
@@ -82,7 +88,7 @@ def test_runtime_http_sessions_are_isolated_per_service_and_qb_instance() -> Non
         "tmdb",
         {
             "api_token": "env:TMDB_TOKEN",
-            "base_url": "https://services.example.test:8443/tmdb/3",
+            "base_url": "https://api.themoviedb.org/3",
         },
     ).value
     assert provider is not None
@@ -119,6 +125,70 @@ def test_runtime_http_sessions_are_isolated_per_service_and_qb_instance() -> Non
     assert len({id(client) for client in created}) == 4
     assert all(cookie is None for _, _, _, cookie in authentication_requests)
     factory.close()
+
+
+class EmptyIntegrationConfig(BaseModel):
+    pass
+
+
+def test_failed_runtime_construction_closes_and_forgets_every_created_http_client() -> None:
+    created: list[httpx.Client] = []
+
+    def clients() -> httpx.Client:
+        client = httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(500, json={})))
+        created.append(client)
+        return client
+
+    def fail_builder(payload, http_client, secret_resolver):
+        del payload, secret_resolver
+        http_client()
+        raise RuntimeError("construction failed")
+
+    registry = StaticModuleRegistry(
+        metadata_providers={
+            "broken": MetadataProviderRegistration(
+                key="broken",
+                config_model=EmptyIntegrationConfig,
+                retention_factory=ManualProvider,
+                build=fail_builder,
+            )
+        },
+        download_clients={
+            "broken": DownloadClientRegistration(
+                key="broken", config_model=EmptyIntegrationConfig, build=fail_builder
+            )
+        },
+    )
+    factory = DefaultRuntimeFactory(
+        http_client_factory=clients, secret_resolver=_secrets, registry=registry
+    )
+
+    for _ in range(2):
+        assert (
+            factory.prowlarr(
+                {
+                    "base_url": "https://services.example.test/prowlarr",
+                    "api_key_ref": "env:PROWLARR_KEY",
+                }
+            ).error_code
+            == "prowlarr_configuration_invalid"
+        )
+        assert factory.metadata_provider("broken", {}).error_code == (
+            "metadata_provider_configuration_invalid"
+        )
+        instance = DownloadClientInstance(
+            id="broken",
+            name="Broken",
+            module_key="broken",
+            config_payload={},
+        )
+        assert factory.download_client(instance).error_code == (
+            "download_client_configuration_invalid"
+        )
+
+    assert len(created) == 6
+    assert all(client.is_closed for client in created)
+    assert factory._http_clients == []
 
 
 def test_prowlarr_bounds_json_result_count_and_torrent_bytes_with_one_use_token() -> None:

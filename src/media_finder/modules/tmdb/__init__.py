@@ -37,10 +37,9 @@ TMDB_ENDPOINT = re.compile(
     r"^(?:/configuration|/search/(?:movie|tv)|/(?:movie|tv)/[0-9]{1,20}|/tv/[0-9]{1,20}/season/[0-9]{1,4})$"
 )
 TMDB_ID = re.compile(r"^[0-9]{1,20}$")
-SAFE_BASE_PATH = re.compile(r"^/[A-Za-z0-9._~/-]*$")
-SECRET_PATH_MARKERS = ("credential", "passkey", "secret", "session", "token")
 IMAGE_PATH = re.compile(r"^/[A-Za-z0-9._/-]+$")
 IMAGE_BASE_URL = "https://image.tmdb.org/t/p/original"
+OFFICIAL_API_BASE_URL = "https://api.themoviedb.org/3"
 
 
 class TmdbConfig(BaseModel):
@@ -63,21 +62,10 @@ class TmdbConfig(BaseModel):
     @field_validator("base_url")
     @classmethod
     def require_safe_endpoint(cls, value: HttpUrl) -> HttpUrl:
-        path = value.path or "/"
-        secret_path = any(
-            marker in segment.casefold()
-            for segment in path.split("/")
-            for marker in SECRET_PATH_MARKERS
-        )
-        if (
-            value.username
-            or value.password
-            or value.query
-            or value.fragment
-            or not SAFE_BASE_PATH.fullmatch(path)
-            or secret_path
-        ):
-            raise ValueError("tmdb_base_url_invalid")
+        try:
+            _validated_tmdb_base_url(str(value))
+        except ValueError:
+            raise ValueError("tmdb_base_url_invalid") from None
         return value
 
 
@@ -120,7 +108,17 @@ class TmdbProvider:
         version="1.0.0",
         contract_version="1",
         name_key="module.tmdb.name",
-        capabilities=frozenset({"movie", "series", "search", "localized_metadata", "retention"}),
+        capabilities=frozenset(
+            {
+                "movie",
+                "series",
+                "search",
+                "fetch",
+                "normalize",
+                "localized_metadata",
+                "retention",
+            }
+        ),
         translation_keys={
             "module.tmdb.name": "TMDB",
             "module.tmdb.settings.api_token": "API token environment reference",
@@ -347,27 +345,20 @@ class TmdbProvider:
 def _validated_tmdb_base_url(value: str) -> str:
     try:
         parsed = urlsplit(value)
-        path = parsed.path or "/"
-        secret_path = any(
-            marker in segment.casefold()
-            for segment in path.split("/")
-            for marker in SECRET_PATH_MARKERS
-        )
         if (
-            parsed.scheme not in {"http", "https"}
-            or not parsed.hostname
+            parsed.scheme != "https"
+            or parsed.hostname != "api.themoviedb.org"
+            or parsed.netloc != "api.themoviedb.org"
             or parsed.username is not None
             or parsed.password is not None
             or parsed.query
             or parsed.fragment
-            or SAFE_BASE_PATH.fullmatch(path) is None
-            or secret_path
+            or parsed.path.rstrip("/") != "/3"
         ):
             raise ValueError
-        _ = parsed.port
     except (UnicodeError, ValueError):
         raise ValueError("tmdb_base_url_invalid") from None
-    return value.rstrip("/")
+    return OFFICIAL_API_BASE_URL
 
 
 __all__ = ["HttpxTmdbTransport", "TmdbConfig", "TmdbProvider"]

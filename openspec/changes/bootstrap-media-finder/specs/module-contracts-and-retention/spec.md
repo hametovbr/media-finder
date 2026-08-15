@@ -23,11 +23,15 @@ Every module SHALL provide a manifest, typed configuration schema, translations,
 - **THEN** core renders generic localized controls without loading module templates or scripts
 
 ### Requirement: Metadata-provider contract
-A metadata-provider module SHALL expose configuration validation, search, fetch, normalization, attribution, standardized errors, provider-owned retention hooks, and a typed export-warning hook without direct database or UI-template access. The export-warning hook SHALL return only deeply immutable, allowlisted, validated response-header values or no warning. Core SHALL defensively revalidate a returned warning before consuming it.
+A metadata-provider module SHALL expose configuration validation, successful search, successful identity-based fetch, normalization, attribution, standardized errors, provider-owned retention hooks, and a typed export-warning hook without direct database or UI-template access. Every provider manifest SHALL advertise `search`, `fetch`, and `normalize` as essential capabilities. The export-warning hook SHALL return only deeply immutable, allowlisted, validated response-header values or no warning. Core SHALL defensively revalidate a returned warning before consuming it.
 
 #### Scenario: Conform an external provider
 - **WHEN** a test provider implements the public metadata contract using only its fixtures and public types
-- **THEN** the shared capability-aware conformance suite validates search, fetch, normalization, locale, identity, standardized errors, attribution, and retention without knowledge of the provider internals
+- **THEN** the shared conformance suite unconditionally validates successful search, fetch, normalization, locale, identity, standardized errors, attribution, and retention without knowledge of the provider internals or accepting omitted essential capability declarations
+
+#### Scenario: Conform the Manual provider
+- **WHEN** the Manual provider is supplied an in-memory conformance fixture identity
+- **THEN** it searches and fetches that fixture through the same public protocol without database or UI access
 
 #### Scenario: Supply an export warning
 - **WHEN** a provider has a retention deadline that external processors need to know
@@ -57,7 +61,7 @@ Each metadata provider SHALL determine whether and when its derived payload need
 
 #### Scenario: One retention subject fails unexpectedly
 - **WHEN** a provider or normalized-payload validation unexpectedly fails for one revision
-- **THEN** core records a standardized safe failure for that revision and continues maintenance for later revisions, including mandatory purges
+- **THEN** core rolls back only that revision's savepoint, records a standardized safe failure in an isolated savepoint, and continues maintenance for later revisions, including mandatory purges, without erasing earlier outcomes
 
 #### Scenario: Purge an expired provider payload
 - **WHEN** a provider retention hook returns a purge action

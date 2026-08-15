@@ -159,6 +159,9 @@ def test_tmdb_normalizes_series_specials_in_season_zero() -> None:
 
 def test_tmdb_rejects_unsafe_base_urls_and_non_typed_endpoints_before_bearer_resolution() -> None:
     for value in (
+        "http://api.themoviedb.org/3",
+        "https://metadata.example.test/3",
+        "https://api.themoviedb.org/4",
         "https://user:password@api.themoviedb.org/3",
         "https://api.themoviedb.org/3?token=secret",
         "https://api.themoviedb.org/3#fragment",
@@ -169,7 +172,7 @@ def test_tmdb_rejects_unsafe_base_urls_and_non_typed_endpoints_before_bearer_res
 
     resolved: list[str] = []
     transport = HttpxTmdbTransport(
-        "https://metadata.example.test/tmdb/3",
+        "https://api.themoviedb.org/3",
         "env:TMDB_TOKEN",
         lambda reference: resolved.append(reference) or "bearer-secret",
         httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={}))),
@@ -177,6 +180,19 @@ def test_tmdb_rejects_unsafe_base_urls_and_non_typed_endpoints_before_bearer_res
     with pytest.raises(ValueError, match="tmdb_endpoint_invalid"):
         transport.get_json("https://attacker.example.test/steal", {})
     assert resolved == []
+
+    for value in (
+        "http://api.themoviedb.org/3",
+        "https://metadata.example.test/3",
+        "https://api.themoviedb.org/4",
+    ):
+        with pytest.raises(ValueError, match="tmdb_base_url_invalid"):
+            HttpxTmdbTransport(
+                value,
+                "env:TMDB_TOKEN",
+                lambda _reference: "bearer-secret",
+                httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200))),
+            )
 
 
 def test_tmdb_rejects_non_numeric_identity_before_transport() -> None:
@@ -330,6 +346,59 @@ def test_unexpected_revision_failure_is_safe_and_does_not_block_later_purge(data
     assert failed.maintenance_error_code == "metadata_provider_maintenance_failed"
     assert "untrusted" not in str(failed.maintenance_error_code)
     assert purge.maintenance_status == "purged"
+
+
+class MismatchedIdentityProvider(UnexpectedFailureProvider):
+    def normalize(
+        self, payload: dict, kind: str, external_id: str, locale: str
+    ) -> NormalizedMetadata:
+        return NormalizedMetadata(
+            kind=MediaKind(kind),
+            titles={locale: "Mismatched"},
+            provenance=Provenance(provider_key="mismatch", external_id="different", locale=locale),
+        )
+
+
+def test_revision_savepoint_records_domain_failure_without_erasing_later_purge(database) -> None:
+    service = CatalogService(database)
+    created = datetime(2024, 1, 1, tzinfo=UTC)
+    failed_item, _ = service.get_or_create_item("mismatch", "failed", "movie")
+    failed = service.add_provider_revision(
+        failed_item,
+        {"id": "failed"},
+        NormalizedMetadata(
+            kind=MediaKind.MOVIE,
+            titles={"en-US": "Fixture"},
+            provenance=Provenance(provider_key="mismatch", external_id="failed", locale="en-US"),
+        ),
+        {},
+        RetentionPolicy(refresh_after=created),
+        created,
+    )
+
+    tmdb = TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), FixtureTransport())
+    purge_item, _ = service.get_or_create_item("tmdb", "130", "movie")
+    raw = tmdb.fetch("movie", "130", "en-US") | {"id": 130}
+    purge = service.add_provider_revision(
+        purge_item,
+        raw,
+        tmdb.normalize(raw, "movie", "130", "en-US"),
+        {},
+        tmdb.retention_for(created),
+        created.replace(day=2),
+    )
+
+    MaintenanceCoordinator({"mismatch": MismatchedIdentityProvider(), "tmdb": tmdb}).run(
+        database, datetime(2024, 7, 2, tzinfo=UTC)
+    )
+
+    database.refresh(failed)
+    database.refresh(purge)
+    assert failed.maintenance_status == "failed"
+    assert failed.maintenance_error_code == "metadata_provider_maintenance_failed"
+    assert len(failed_item.revisions) == 1
+    assert purge.maintenance_status == "purged"
+    assert purge.expired_at is not None
 
 
 class PublicOnlyFailingRefreshProvider:

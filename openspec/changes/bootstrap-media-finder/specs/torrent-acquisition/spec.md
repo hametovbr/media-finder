@@ -68,6 +68,10 @@ The system SHALL submit the exact correlation token `mf-acq-<acquisition-uuid>`.
 - **WHEN** qBittorrent accepts a selected artifact
 - **THEN** the torrent uses the selected category and an exact `mf-acq-<uuid>` tag, and the Acquisition becomes `submitted`
 
+#### Scenario: Live integration construction fails
+- **WHEN** Prowlarr validation or a metadata-provider or download-client builder fails after creating one or more HTTP clients
+- **THEN** the runtime immediately closes and forgets every client created by that failed attempt, including across repeated failures
+
 ### Requirement: Bounded acquisition states
 The MVP SHALL expose only `pending`, `submitted`, and `failed` acquisition states and SHALL NOT track progress after successful submission.
 

@@ -89,7 +89,7 @@ The Manual provider SHALL support creating and editing movies and series, season
 - **THEN** its metadata remains exportable without a provider-expiry error
 
 ### Requirement: TMDB metadata provider
-The TMDB provider SHALL search and fetch movies and series in a requested metadata locale, fetch every advertised TV season including Season 00, preserve provider provenance, normalize real TMDB episode payloads and artwork URLs, and expose required attribution for About/Credits. Its authenticated transport SHALL accept only validated TMDB endpoint shapes and SHALL reject endpoint components that could redirect or disclose its bearer token.
+The TMDB provider SHALL search and fetch movies and series in a requested metadata locale, fetch every advertised TV season including Season 00, preserve provider provenance, normalize real TMDB episode payloads and artwork URLs, and expose required attribution for About/Credits. Its authenticated transport SHALL accept only the canonical HTTPS `api.themoviedb.org/3` base and validated TMDB endpoint shapes and SHALL reject every alternative origin, plaintext scheme, credential, query, fragment, or path that could redirect or disclose its bearer token.
 
 #### Scenario: Search TMDB in a locale
 - **WHEN** a user searches TMDB with a supported metadata locale
