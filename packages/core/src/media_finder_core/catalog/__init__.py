@@ -1,6 +1,8 @@
 """Catalog identity, revisions, collections, commands, queries, and persistence ports."""
 
 from .commands import CatalogCommands
+from .manual import ManualCatalogService
+from .metadata import MetadataCatalogService
 from .models import (
     CatalogIdentity,
     CatalogPage,
@@ -10,8 +12,9 @@ from .models import (
     MetadataRevisionSnapshot,
     RevisionDraft,
 )
-from .ports import CatalogQueryPort, CatalogRepository
+from .ports import CatalogQueryPort, CatalogRepository, CatalogUnitOfWork
 from .queries import CatalogQueries
+from .retention import MetadataRetentionService, RetentionRunSummary
 
 __all__ = [
     "CatalogCommands",
@@ -20,9 +23,14 @@ __all__ = [
     "CatalogQueries",
     "CatalogQueryPort",
     "CatalogRepository",
+    "CatalogUnitOfWork",
     "CollectionSnapshot",
     "ItemResolution",
+    "ManualCatalogService",
     "MediaItemSnapshot",
+    "MetadataCatalogService",
+    "MetadataRetentionService",
     "MetadataRevisionSnapshot",
+    "RetentionRunSummary",
     "RevisionDraft",
 ]

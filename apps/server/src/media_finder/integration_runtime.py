@@ -5,11 +5,44 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from threading import RLock
 from typing import Protocol
 
 import httpx
-from media_finder_sdk import ReleaseProviderRegistration, resolve_module_environment
+from media_finder_core import ModuleRuntime
+from media_finder_sdk import (
+    ExportWarning as CoreExportWarning,
+)
+from media_finder_sdk import (
+    MediaKind as CoreMediaKind,
+)
+from media_finder_sdk import (
+    MetadataEditor,
+    MetadataIdentity,
+    MetadataRetentionPolicy,
+    MetadataSearchQuery,
+    MetadataSearchResult,
+    ProviderPayload,
+    ReleaseProviderRegistration,
+    RetentionSubject,
+    resolve_module_environment,
+)
+from media_finder_sdk import (
+    MetadataProvider as CoreMetadataProvider,
+)
+from media_finder_sdk import (
+    NormalizedMetadata as CoreNormalizedMetadata,
+)
+from media_finder_sdk import (
+    RetentionAction as CoreRetentionAction,
+)
+from media_finder_sdk import (
+    RetentionActionKind as CoreRetentionActionKind,
+)
+from media_finder_sdk import (
+    RetentionPolicy as CoreRetentionPolicy,
+)
 
 from .acquisition import ClientLoader
 from .models import DownloadClientInstance
@@ -23,6 +56,7 @@ from .sdk.registration import (
 )
 from .sdk.settings import EnvReference
 from .sdk.types import Attribution, EnvironmentVariableSpec
+from .sdk.types import RetentionPolicy as LegacyRetentionPolicy
 from .system_clients import SYSTEM_QBITTORRENT_ID
 
 type ReleaseRegistrationFactory = Callable[
@@ -62,6 +96,7 @@ class DefaultRuntimeFactory:
         release_registration_factory: ReleaseRegistrationFactory,
         environment: Mapping[str, str] | None = None,
         lifecycle: RuntimeLifecycle | None = None,
+        module_runtime: ModuleRuntime | None = None,
     ) -> None:
         self._http_client_factory = http_client_factory
         self._environment = dict(os.environ if environment is None else environment)
@@ -72,6 +107,7 @@ class DefaultRuntimeFactory:
         self._http_clients: list[httpx.Client] = []
         self._registry = registry
         self._lifecycle = lifecycle
+        self._module_runtime = module_runtime
         self._release_registration_factory = release_registration_factory
         release_manifest = release_registration_factory(http_client_factory).manifest
         self._release_integration = IntegrationDescriptor(
@@ -137,6 +173,10 @@ class DefaultRuntimeFactory:
     @property
     def registry(self) -> StaticModuleRegistry:
         return self._registry
+
+    @property
+    def module_runtime(self) -> ModuleRuntime | None:
+        return self._module_runtime
 
     def metadata_provider(self, key: str) -> RuntimeResult[MetadataProvider]:
         with self._lock:
@@ -374,14 +414,6 @@ class RuntimeResolver:
         except Exception:
             return RuntimeResult(None, "metadata_provider_configuration_invalid")
 
-    def metadata_providers(self) -> dict[str, MetadataProvider]:
-        configured: dict[str, MetadataProvider] = {}
-        for key in self._providers:
-            result = self.metadata_provider(key)
-            if result.value is not None:
-                configured[key] = result.value
-        return configured
-
     def configured_provider_attributions(self) -> list[Attribution]:
         """Return attribution for configured modules without probing live services."""
 
@@ -441,3 +473,121 @@ class RuntimeResolver:
             return False
         probe = getattr(self._factory, "environment_is_set", None)
         return bool(probe(name)) if callable(probe) else False
+
+
+class LegacyMetadataCapabilities:
+    """Shape legacy test/runtime providers into the typed core capability ports."""
+
+    def __init__(self, runtime: RuntimeResolver) -> None:
+        self._runtime = runtime
+
+    def metadata_provider(self, module_id: str) -> CoreMetadataProvider:
+        result = self._runtime.metadata_provider(module_id)
+        if result.value is None:
+            raise ValueError(result.error_code or "metadata_provider_unavailable")
+        return _LegacyCoreMetadataProvider(result.value)
+
+    def metadata_editor(self, module_id: str) -> MetadataEditor:
+        result = self._runtime.metadata_provider(module_id)
+        if result.value is None:
+            raise ValueError(result.error_code or "metadata_provider_unavailable")
+        if not isinstance(result.value, MetadataEditor):
+            raise ValueError("metadata_editor_unavailable")
+        return result.value
+
+    def retention_policy(self, module_id: str) -> MetadataRetentionPolicy:
+        provider = self._runtime.supported_providers.get(module_id)
+        if provider is None:
+            raise ValueError("metadata_provider_unavailable")
+        return _LegacyCoreRetentionPolicy(provider)
+
+
+class _LegacyCoreMetadataProvider:
+    def __init__(self, provider: MetadataProvider) -> None:
+        self._provider = provider
+
+    def validate(self) -> None:
+        self._provider.validate_config()
+
+    def search(self, query: MetadataSearchQuery) -> tuple[MetadataSearchResult, ...]:
+        return tuple(
+            MetadataSearchResult(
+                provider_id=value.provider_key,
+                external_id=value.external_id,
+                media_kind=CoreMediaKind(value.kind.value),
+                title=value.title,
+                year=value.year,
+                locale=value.locale,
+            )
+            for value in self._provider.search(query.query, query.locale)
+        )
+
+    def fetch(self, identity: MetadataIdentity) -> ProviderPayload:
+        return ProviderPayload(
+            data=self._provider.fetch(
+                identity.media_kind.value,
+                identity.external_id,
+                identity.locale,
+            )
+        )
+
+    def normalize(
+        self, payload: ProviderPayload, identity: MetadataIdentity
+    ) -> CoreNormalizedMetadata:
+        legacy = self._provider.normalize(
+            dict(payload.data),
+            identity.media_kind.value,
+            identity.external_id,
+            identity.locale,
+        )
+        serialized = legacy.model_dump(mode="json")
+        provenance = serialized.get("provenance")
+        if not isinstance(provenance, dict):
+            raise ValueError("metadata_provenance_invalid")
+        provenance["provider_id"] = provenance.pop("provider_key")
+        return CoreNormalizedMetadata.model_validate(serialized)
+
+    def close(self) -> None:
+        return None
+
+
+class _LegacyCoreRetentionPolicy:
+    def __init__(self, provider: MetadataProvider) -> None:
+        self._provider = provider
+
+    def retention_for(self, created_at: datetime) -> CoreRetentionPolicy:
+        value = self._provider.retention_for(created_at)
+        return CoreRetentionPolicy(
+            refresh_after=value.refresh_after,
+            expires_at=value.expires_at,
+        )
+
+    def plan(self, subject: RetentionSubject, now: datetime) -> CoreRetentionAction:
+        value = self._provider.plan_retention(
+            self._legacy_policy(subject.policy),
+            now,
+        )
+        return CoreRetentionAction(
+            kind=CoreRetentionActionKind(value.kind.value),
+            mandatory=value.mandatory,
+        )
+
+    def export_warning(
+        self, policy: CoreRetentionPolicy, now: datetime
+    ) -> CoreExportWarning | None:
+        warning = self._provider.export_warning(self._legacy_policy(policy), now)
+        return (
+            CoreExportWarning.model_validate(warning.model_dump(mode="json"))
+            if warning is not None
+            else None
+        )
+
+    def close(self) -> None:
+        return None
+
+    @staticmethod
+    def _legacy_policy(policy: CoreRetentionPolicy) -> LegacyRetentionPolicy:
+        return LegacyRetentionPolicy(
+            refresh_after=policy.refresh_after,
+            expires_at=policy.expires_at,
+        )

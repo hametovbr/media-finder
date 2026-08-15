@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from .models import (
     CatalogIdentity,
     CatalogPage,
@@ -24,6 +26,12 @@ class CatalogQueries:
 
     def list_revisions(self, item_id: str) -> tuple[MetadataRevisionSnapshot, ...]:
         return self._queries.list_revisions(item_id)
+
+    def get_revision(self, revision_id: str) -> MetadataRevisionSnapshot | None:
+        return self._queries.get_revision(revision_id)
+
+    def retention_candidates(self, now: datetime) -> tuple[MetadataRevisionSnapshot, ...]:
+        return self._queries.retention_candidates(now)
 
     def current_revision(self, item_id: str) -> MetadataRevisionSnapshot | None:
         item = self._queries.get_item(item_id)

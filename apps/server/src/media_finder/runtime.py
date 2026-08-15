@@ -12,6 +12,13 @@ from datetime import UTC, datetime
 import uvicorn
 from fastapi import FastAPI
 from media_finder_builtin_ui import BuiltinUIOptions, create_builtin_ui
+from media_finder_core.catalog import MetadataRetentionService
+from media_finder_core.catalog.persistence import (
+    SqlAlchemyCatalogQueries,
+    SqlAlchemyCatalogUnitOfWork,
+)
+from media_finder_sdk import MetadataProvider as CoreMetadataProvider
+from media_finder_sdk import MetadataRetentionPolicy
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -25,7 +32,7 @@ from .integration_runtime import (
     DefaultRuntimeFactory,
     RuntimeResolver,
 )
-from .maintenance import MaintenanceCoordinator, MaintenanceRunner
+from .maintenance import MaintenanceRunner
 from .sdk.protocols import MetadataProvider
 from .sdk.registration import StaticModuleRegistry
 from .system_clients import ensure_system_qbittorrent
@@ -107,6 +114,7 @@ def _compose_application(
         runtime=runtime,
         registry=registry,
         release_integration=runtime_factory.release_integration,
+        metadata_capabilities=runtime_factory.module_runtime,
     )
     security = BackendBrowserSecurity(secret=secret_bytes)
     application = (
@@ -161,16 +169,43 @@ def _compose_application(
 
 
 def _execute_maintenance(application: FastAPI, *, startup: bool) -> None:
-    runtime = application.state.runtime
-    providers = dict(runtime.supported_providers)
-    providers.update(runtime.metadata_providers())
-    runner = MaintenanceRunner(MaintenanceCoordinator(providers))
+    module_runtime = application.state.runtime_factory.module_runtime
+    if module_runtime is None:
+        raise RuntimeError("metadata_module_runtime_unavailable")
+    policies: dict[str, MetadataRetentionPolicy] = {}
+    providers: dict[str, CoreMetadataProvider] = {}
+    for module_id in module_runtime.registry.metadata:
+        try:
+            policies[module_id] = module_runtime.retention_policy(module_id)
+        except Exception:
+            continue
+        try:
+            providers[module_id] = module_runtime.metadata_provider(module_id)
+        except Exception:
+            continue
+    service = MetadataRetentionService(
+        query_port=SqlAlchemyCatalogQueries(application.state.sessions),
+        unit_of_work=SqlAlchemyCatalogUnitOfWork(application.state.sessions),
+        policies=policies,
+        providers=providers,
+        clock=lambda: datetime.now(UTC),
+    )
+    runner = MaintenanceRunner(_CoreRetentionCoordinator(service))
     with application.state.sessions() as session:
         now = datetime.now(UTC)
         if startup:
             runner.run_at_startup(session, now)
         else:
             runner.run_if_daily_due(session, now)
+
+
+class _CoreRetentionCoordinator:
+    def __init__(self, service: MetadataRetentionService) -> None:
+        self._service = service
+
+    def run(self, session: Session, now: datetime) -> None:
+        del session, now
+        self._service.run()
 
 
 async def _maintenance_loop(application: FastAPI, stop: asyncio.Event) -> None:

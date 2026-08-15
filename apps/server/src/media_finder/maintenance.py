@@ -1,112 +1,11 @@
-"""Provider-agnostic application of module-planned retention actions."""
+"""Persisted cadence adapter for the core-owned maintenance application service."""
 
-from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Protocol
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .domain import CatalogService
-from .models import AppSetting, MetadataRevision
-from .sdk.errors import ModuleError
-from .sdk.protocols import MetadataProvider
-from .sdk.types import (
-    MediaKind,
-    RetentionActionKind,
-    RetentionExecutionStatus,
-    RetentionPolicy,
-)
-
-
-class MaintenanceCoordinator:
-    def __init__(self, providers: Mapping[str, MetadataProvider]) -> None:
-        self.providers = providers
-
-    def run(self, session: Session, now: datetime) -> None:
-        revisions = session.scalars(
-            select(MetadataRevision)
-            .where(MetadataRevision.expired_at.is_(None))
-            .order_by(MetadataRevision.created_at, MetadataRevision.id)
-        ).all()
-        session.info["retention_purge"] = True
-        try:
-            for revision in revisions:
-                provider = self.providers.get(revision.provider_key)
-                if provider is None:
-                    continue
-                try:
-                    with session.begin_nested():
-                        self._apply_revision(session, revision, provider, now)
-                except Exception as error:
-                    code = (
-                        error.code
-                        if isinstance(error, ModuleError)
-                        else "metadata_provider_maintenance_failed"
-                    )
-                    with session.begin_nested():
-                        failed = session.get(MetadataRevision, revision.id)
-                        if failed is not None:
-                            self._record_failure(failed, now, code)
-            session.commit()
-        finally:
-            session.info.pop("retention_purge", None)
-
-    @staticmethod
-    def _apply_revision(
-        session: Session,
-        revision: MetadataRevision,
-        provider: MetadataProvider,
-        now: datetime,
-    ) -> None:
-        policy = RetentionPolicy(
-            refresh_after=revision.refresh_after,
-            expires_at=revision.expires_at,
-        )
-        action = provider.plan_retention(policy, now)
-        if action.kind is RetentionActionKind.NONE:
-            return
-        if (
-            action.kind is RetentionActionKind.REFRESH
-            and revision.maintenance_status == RetentionExecutionStatus.REFRESHED.value
-        ):
-            return
-        revision.maintenance_attempted_at = now
-        revision.maintenance_error_code = None
-        if action.kind is RetentionActionKind.PURGE:
-            revision.maintenance_status = RetentionExecutionStatus.PURGED.value
-            revision.raw_payload = None
-            revision.normalized_payload = None
-            revision.effective_payload = None
-            revision.expired_at = now
-            return
-        if action.kind is not RetentionActionKind.REFRESH:
-            raise ValueError("metadata_provider_retention_action_invalid")
-        media_kind = MediaKind(revision.media_item.kind)
-        raw_payload = provider.fetch(media_kind.value, revision.external_id, revision.locale)
-        normalized = provider.normalize(
-            raw_payload,
-            media_kind.value,
-            revision.external_id,
-            revision.locale,
-        )
-        retention = provider.retention_for(now)
-        CatalogService(session).add_provider_revision(
-            revision.media_item,
-            raw_payload,
-            normalized,
-            revision.overrides_payload,
-            retention,
-            now,
-            commit=False,
-        )
-        revision.maintenance_status = RetentionExecutionStatus.REFRESHED.value
-
-    @staticmethod
-    def _record_failure(revision: MetadataRevision, now: datetime, code: str) -> None:
-        revision.maintenance_attempted_at = now
-        revision.maintenance_status = RetentionExecutionStatus.FAILED.value
-        revision.maintenance_error_code = code
+from .models import AppSetting
 
 
 class Coordinator(Protocol):
@@ -114,7 +13,7 @@ class Coordinator(Protocol):
 
 
 class MaintenanceRunner:
-    """Persist a generic startup and once-per-day maintenance cadence."""
+    """Run generic maintenance at startup and at most once per day."""
 
     setting_key = "maintenance.last_completed"
 
@@ -142,3 +41,6 @@ class MaintenanceRunner:
             session.add(setting)
         setting.value_payload = {"completed_at": now.isoformat()}
         session.commit()
+
+
+__all__ = ["MaintenanceRunner"]

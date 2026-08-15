@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from datetime import datetime
 from typing import Protocol
 
@@ -32,6 +33,26 @@ class CatalogRepository(Protocol):
 
     def append_revision(self, item_id: str, draft: RevisionDraft) -> MetadataRevisionSnapshot: ...
 
+    def get_revision(self, revision_id: str) -> MetadataRevisionSnapshot | None: ...
+
+    def list_revisions(self, item_id: str) -> tuple[MetadataRevisionSnapshot, ...]: ...
+
+    def find_similar(
+        self,
+        *,
+        normalized_title: str,
+        year: int | None,
+        excluding_provider_id: str,
+    ) -> tuple[MediaItemSnapshot, ...]: ...
+
+    def purge_revision(self, revision_id: str, attempted_at: datetime) -> None: ...
+
+    def record_retention_refreshed(self, revision_id: str, attempted_at: datetime) -> None: ...
+
+    def record_retention_failure(
+        self, revision_id: str, code: str, attempted_at: datetime
+    ) -> None: ...
+
     def set_item_archived(
         self, item_id: str, archived_at: datetime | None
     ) -> MediaItemSnapshot: ...
@@ -47,6 +68,10 @@ class CatalogQueryPort(Protocol):
     def find_item_by_identity(self, identity: CatalogIdentity) -> MediaItemSnapshot | None: ...
 
     def list_revisions(self, item_id: str) -> tuple[MetadataRevisionSnapshot, ...]: ...
+
+    def get_revision(self, revision_id: str) -> MetadataRevisionSnapshot | None: ...
+
+    def retention_candidates(self, now: datetime) -> tuple[MetadataRevisionSnapshot, ...]: ...
 
     def page_collections(
         self, *, archived: bool, limit: int, after: tuple[str, str] | None
@@ -71,4 +96,10 @@ class CatalogQueryPort(Protocol):
     ) -> tuple[MediaItemSnapshot, ...]: ...
 
 
-__all__ = ["CatalogQueryPort", "CatalogRepository"]
+class CatalogUnitOfWork(Protocol):
+    def write(self) -> AbstractContextManager[CatalogRepository]: ...
+
+    def savepoint(self) -> AbstractContextManager[CatalogRepository]: ...
+
+
+__all__ = ["CatalogQueryPort", "CatalogRepository", "CatalogUnitOfWork"]

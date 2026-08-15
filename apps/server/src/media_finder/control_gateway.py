@@ -10,7 +10,7 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal, TypeVar
+from typing import Literal, Protocol, TypeVar
 
 from media_finder_control import (
     AcquisitionStatus,
@@ -53,32 +53,59 @@ from media_finder_control.models import (
 from media_finder_control.models import (
     DownloadDestination as ControlDestination,
 )
-from media_finder_core.catalog import CatalogCommands, CatalogQueries
-from media_finder_core.catalog.persistence import SqlAlchemyCatalogRepository
-from media_finder_sdk import MetadataEditor, ReleaseSearchFilter
+from media_finder_core.catalog import (
+    CatalogCommands,
+    CatalogQueries,
+    ManualCatalogService,
+    MetadataCatalogService,
+)
+from media_finder_core.catalog.persistence import (
+    SqlAlchemyCatalogQueries,
+    SqlAlchemyCatalogRepository,
+    SqlAlchemyCatalogUnitOfWork,
+)
+from media_finder_sdk import (
+    EpisodeTableDocument,
+    MetadataEditor,
+    MetadataImportDocument,
+    MetadataRetentionPolicy,
+    ReleaseSearchFilter,
+)
+from media_finder_sdk import (
+    MetadataIdentity as CoreMetadataIdentity,
+)
+from media_finder_sdk import (
+    MetadataProvider as CoreMetadataProvider,
+)
+from media_finder_sdk import (
+    MetadataSearchQuery as CoreMetadataSearchQuery,
+)
+from media_finder_sdk import (
+    MetadataSearchResult as CoreMetadataSearchResult,
+)
 from media_finder_sdk import ReleaseSearchQuery as ModuleReleaseSearchQuery
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .acquisition import AcquisitionRequest, AcquisitionService, DestinationUnavailable
-from .domain import CatalogService, RevisionInput
 from .ephemeral import EphemeralCache, EphemeralTokenExpired
-from .integration_runtime import RuntimeResolver
-from .manual import ManualCatalogService
+from .integration_runtime import LegacyMetadataCapabilities, RuntimeResolver
 from .models import Acquisition, DownloadClientInstance, MediaItem, MetadataRevision
 from .sdk.protocols import DownloadClient
 from .sdk.registration import IntegrationDescriptor, StaticModuleRegistry
 from .sdk.types import EnvironmentVariableSpec, NormalizedMetadata
-from .sdk.types import MetadataSearchResult as ProviderSearchResult
 from .system_clients import SYSTEM_QBITTORRENT_ID
 
 T = TypeVar("T")
 
 
-class _SimilarityConfirmationRequired(Exception):
-    def __init__(self, result: ProviderSearchResult) -> None:
-        self.result = result
+class _MetadataCapabilities(Protocol):
+    def metadata_provider(self, module_id: str) -> CoreMetadataProvider: ...
+
+    def metadata_editor(self, module_id: str) -> MetadataEditor: ...
+
+    def retention_policy(self, module_id: str) -> MetadataRetentionPolicy: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +113,7 @@ class _ManualDraft:
     operation: str
     request: ManualImportRequest
     item_id: str | None = None
+    expected_current_revision_id: str | None = None
 
 
 def _urlsafe_encode(value: bytes) -> str:
@@ -163,10 +191,11 @@ class BackendControlGateway:
         sessions: sessionmaker[Session],
         cursor_secret: bytes,
         runtime: RuntimeResolver | None = None,
-        metadata_selections: EphemeralCache[ProviderSearchResult] | None = None,
+        metadata_selections: EphemeralCache[CoreMetadataSearchResult] | None = None,
         manual_drafts: EphemeralCache[_ManualDraft] | None = None,
         registry: StaticModuleRegistry,
         release_integration: IntegrationDescriptor,
+        metadata_capabilities: _MetadataCapabilities | None = None,
         build_version: str = "0.1.0",
     ) -> None:
         self._sessions = sessions
@@ -176,6 +205,16 @@ class BackendControlGateway:
         self._manual_drafts = manual_drafts or EphemeralCache()
         self._registry = registry
         self._release_integration = release_integration
+        self._metadata_capabilities = metadata_capabilities or (
+            LegacyMetadataCapabilities(runtime) if runtime is not None else None
+        )
+        self._metadata_provider_ids = (
+            tuple(sorted(registry.metadata_providers))
+            if metadata_capabilities is not None
+            else tuple(sorted(runtime.supported_providers))
+            if runtime is not None
+            else ()
+        )
         editor_keys = (
             tuple(
                 key
@@ -368,29 +407,30 @@ class BackendControlGateway:
     async def search_metadata(
         self, *, request: MetadataSearchRequest
     ) -> tuple[MetadataSearchResult, ...]:
-        runtime = self._require_runtime()
+        capabilities = self._require_metadata_capabilities()
+        selected = request.provider_keys or self._metadata_provider_ids
 
-        def operation() -> list[ProviderSearchResult]:
-            providers = runtime.metadata_providers()
-            selected = request.provider_keys or tuple(sorted(providers))
-            results: list[ProviderSearchResult] = []
-            for key in selected:
-                provider = providers.get(key)
-                if provider is None:
-                    continue
-                try:
-                    results.extend(provider.search(request.query, request.locale.value))
-                except Exception as error:
-                    raise self._failure_for(error, "metadata_provider_unavailable") from None
-            return results
+        def operation() -> tuple[CoreMetadataSearchResult, ...]:
+            try:
+                providers = {key: capabilities.metadata_provider(key) for key in selected}
+                return self._metadata_catalog_service().search(
+                    query=CoreMetadataSearchQuery(
+                        query=request.query,
+                        locale=request.locale.value,
+                    ),
+                    providers=providers,
+                    selected_provider_ids=selected,
+                )
+            except Exception as error:
+                raise self._failure_for(error, "metadata_provider_unavailable") from None
 
         provider_results = await asyncio.to_thread(operation)
         return tuple(
             MetadataSearchResult(
                 token=self._metadata_selections.put(result),
-                provider_key=result.provider_key,
+                provider_key=result.provider_id,
                 external_id=result.external_id,
-                kind=MediaKind(result.kind.value),
+                kind=MediaKind(result.media_kind.value),
                 title=result.title,
                 year=result.year,
                 locale=Locale(result.locale),
@@ -409,79 +449,35 @@ class BackendControlGateway:
             result = self._metadata_selections.pop(token)
         except EphemeralTokenExpired:
             raise ControlFailure(code="selection_expired", status=410) from None
-        runtime = self._require_runtime()
-
-        def operation(database: Session) -> MetadataSelectionResult:
-            exact = database.scalar(
-                select(MediaItem).where(
-                    MediaItem.provider_key == result.provider_key,
-                    MediaItem.external_id == result.external_id,
-                )
-            )
-            if exact is not None:
-                return MetadataSelectionResult(
-                    item=self._media_item_detail(database, exact, locale),
-                    created=False,
-                )
-            catalog = CatalogService(database)
-            similar = catalog.find_similar(
-                result.title,
-                result.year,
-                excluding_provider=result.provider_key,
-            )
-            if similar and not request.confirm_similarity:
-                raise _SimilarityConfirmationRequired(result)
-            resolved = runtime.metadata_provider(result.provider_key)
-            if resolved.value is None:
-                raise ControlFailure(
-                    code=resolved.error_code or "metadata_provider_unavailable",
-                    status=503,
-                )
-            provider = resolved.value
-            now = datetime.now(UTC)
-            try:
-                raw = provider.fetch(result.kind.value, result.external_id, result.locale)
-                normalized = provider.normalize(
-                    raw,
-                    result.kind.value,
-                    result.external_id,
-                    result.locale,
-                )
-                item, _ = catalog.get_or_create_item(
-                    result.provider_key,
-                    result.external_id,
-                    result.kind,
-                )
-                catalog.add_revision(
-                    item,
-                    RevisionInput(
-                        normalized=normalized,
-                        raw_payload=raw,
-                        retention=provider.retention_for(now),
-                        created_at=now,
-                    ),
-                )
-                if request.collection_id is not None:
-                    catalog.move_item(item, request.collection_id)
-                return MetadataSelectionResult(
-                    item=self._media_item_detail(database, item, locale),
-                    created=True,
-                )
-            except ControlFailure:
-                raise
-            except Exception as error:
-                database.rollback()
-                raise self._failure_for(error, "metadata_provider_unavailable") from None
-
+        capabilities = self._require_metadata_capabilities()
+        identity = CoreMetadataIdentity(
+            provider_id=result.provider_id,
+            external_id=result.external_id,
+            media_kind=result.media_kind,
+            locale=result.locale,
+        )
         try:
-            return await self._run(operation)
-        except _SimilarityConfirmationRequired as warning:
-            confirmation = self._metadata_selections.put(warning.result)
-            raise ControlFailure(
-                code="confirmation_required",
-                status=409,
-                details={"confirmation_token": confirmation, "kind": "similarity"},
-            ) from None
+            outcome = await asyncio.to_thread(
+                self._metadata_catalog_service().select,
+                identity=identity,
+                provider=lambda: capabilities.metadata_provider(result.provider_id),
+                retention_policy=lambda: capabilities.retention_policy(result.provider_id),
+                confirm_similarity=request.confirm_similarity,
+                collection_id=request.collection_id,
+            )
+        except ValueError as error:
+            if str(error) == "similarity_confirmation_required":
+                confirmation = self._metadata_selections.put(result)
+                raise ControlFailure(
+                    code="confirmation_required",
+                    status=409,
+                    details={"confirmation_token": confirmation, "kind": "similarity"},
+                ) from None
+            raise self._failure_for(error, "metadata_provider_unavailable") from None
+        except Exception as error:
+            raise self._failure_for(error, "metadata_provider_unavailable") from None
+        item = await self._item_detail(outcome.item.id, locale)
+        return MetadataSelectionResult(item=item, created=outcome.created)
 
     async def import_manual(
         self,
@@ -495,47 +491,28 @@ class BackendControlGateway:
             confirm_existing = True
         else:
             confirm_existing = False
-        provider = self._manual_provider()
         payload = request.document.model_dump(mode="json")
-
-        def operation(database: Session) -> ManualImportResult:
-            existing = None
-            if request.document.external_id is not None:
-                existing = database.scalar(
-                    select(MediaItem).where(
-                        MediaItem.provider_key == self._metadata_editor_key,
-                        MediaItem.external_id == request.document.external_id,
-                    )
-                )
-            if (
-                not confirm_existing
-                and request.document.external_id is not None
-                and existing is not None
-            ):
+        try:
+            outcome = await asyncio.to_thread(
+                self._manual_catalog_service().import_item,
+                document=MetadataImportDocument.from_bytes(json.dumps(payload).encode("utf-8")),
+                confirm_duplicate=confirm_existing,
+                collection_id=request.collection_id,
+            )
+        except ValueError as error:
+            if str(error) == "duplicate_confirmation_required" and not confirm_existing:
                 return ManualImportResult(
                     confirmation_token=self._manual_drafts.put(
                         _ManualDraft(operation="import", request=request)
                     )
                 )
-            try:
-                catalog = CatalogService(database)
-                item = ManualCatalogService(
-                    catalog, provider, self._require_editor_key()
-                ).import_json(
-                    payload,
-                    confirm_existing=confirm_existing,
-                )
-                if request.collection_id is not None:
-                    catalog.move_item(item, request.collection_id)
-                return ManualImportResult(
-                    item=self._media_item_detail(database, item, request.document.locale),
-                    created=existing is None,
-                )
-            except Exception as error:
-                database.rollback()
-                raise self._failure_for(error, "manual_import_invalid") from None
-
-        return await self._run(operation)
+            raise self._failure_for(error, "manual_import_invalid") from None
+        except Exception as error:
+            raise self._failure_for(error, "manual_import_invalid") from None
+        return ManualImportResult(
+            item=await self._item_detail(outcome.item.id, request.document.locale),
+            created=outcome.created,
+        )
 
     async def edit_manual(
         self,
@@ -557,7 +534,12 @@ class BackendControlGateway:
                     raise ControlFailure(code="manual_item_not_found", status=404)
                 return ManualImportResult(
                     confirmation_token=self._manual_drafts.put(
-                        _ManualDraft(operation="edit", request=request, item_id=item_id)
+                        _ManualDraft(
+                            operation="edit",
+                            request=request,
+                            item_id=item_id,
+                            expected_current_revision_id=item.current_revision_id,
+                        )
                     )
                 )
 
@@ -565,35 +547,24 @@ class BackendControlGateway:
         draft = self._consume_manual_draft(confirmation_token, operation="edit")
         if draft.item_id != item_id:
             raise ControlFailure(code="selection_expired", status=410)
-        provider = self._manual_provider()
         payload = draft.request.document.model_dump(mode="json")
-
-        def apply(database: Session) -> ManualImportResult:
-            item = database.get(MediaItem, item_id)
-            if (
-                item is None
-                or item.provider_key != self._metadata_editor_key
-                or draft.request.document.external_id != item.external_id
-            ):
-                raise ControlFailure(code="manual_item_not_found", status=404)
-            try:
-                updated = ManualCatalogService(
-                    CatalogService(database), provider, self._require_editor_key()
-                ).import_json(payload, confirm_existing=True)
-                return ManualImportResult(
-                    item=self._media_item_detail(
-                        database,
-                        updated,
-                        draft.request.document.locale,
-                    )
-                )
-            except ControlFailure:
-                raise
-            except Exception as error:
-                database.rollback()
-                raise self._failure_for(error, "manual_import_invalid") from None
-
-        return await self._run(apply)
+        if draft.expected_current_revision_id is None:
+            raise ControlFailure(code="selection_expired", status=410)
+        try:
+            outcome = await asyncio.to_thread(
+                self._manual_catalog_service().edit_item,
+                item_id=item_id,
+                document=MetadataImportDocument.from_bytes(json.dumps(payload).encode("utf-8")),
+                expected_current_revision_id=draft.expected_current_revision_id,
+            )
+        except Exception as error:
+            raise self._failure_for(error, "manual_import_invalid") from None
+        return ManualImportResult(
+            item=await self._item_detail(
+                outcome.item.id,
+                draft.request.document.locale,
+            )
+        )
 
     async def confirm_manual(self, *, token: str) -> ManualImportResult:
         try:
@@ -621,19 +592,19 @@ class BackendControlGateway:
         request: EpisodeImportRequest,
         locale: Locale,
     ) -> MediaItemDetail:
-        provider = self._manual_provider()
-
-        def operation(database: Session) -> MediaItemDetail:
-            try:
-                item = ManualCatalogService(
-                    CatalogService(database), provider, self._require_editor_key()
-                ).import_episode_csv(item_id, request.csv)
-                return self._media_item_detail(database, item, locale)
-            except Exception as error:
-                database.rollback()
-                raise self._failure_for(error, "manual_import_invalid") from None
-
-        return await self._run(operation)
+        current = SqlAlchemyCatalogQueries(self._sessions).get_item(item_id)
+        if current is None or current.current_revision_id is None:
+            raise ControlFailure(code="manual_item_not_found", status=404)
+        try:
+            outcome = await asyncio.to_thread(
+                self._manual_catalog_service().import_episode_table,
+                item_id=item_id,
+                document=EpisodeTableDocument.from_bytes(request.csv.encode("utf-8")),
+                expected_current_revision_id=current.current_revision_id,
+            )
+        except Exception as error:
+            raise self._failure_for(error, "manual_import_invalid") from None
+        return await self._item_detail(outcome.item.id, locale)
 
     async def search_releases(
         self,
@@ -874,16 +845,41 @@ class BackendControlGateway:
             raise ControlFailure(code="integration_runtime_unavailable", status=503)
         return self._runtime
 
-    def _manual_provider(self) -> MetadataEditor:
-        resolved = self._require_runtime().metadata_provider(self._require_editor_key())
-        if resolved.value is None:
-            raise ControlFailure(
-                code=resolved.error_code or "metadata_provider_unavailable",
-                status=503,
+    def _require_metadata_capabilities(self) -> _MetadataCapabilities:
+        if self._metadata_capabilities is None:
+            raise ControlFailure(code="integration_runtime_unavailable", status=503)
+        return self._metadata_capabilities
+
+    def _metadata_catalog_service(self) -> MetadataCatalogService:
+        return MetadataCatalogService(
+            query_port=SqlAlchemyCatalogQueries(self._sessions),
+            unit_of_work=SqlAlchemyCatalogUnitOfWork(self._sessions),
+            clock=lambda: datetime.now(UTC),
+        )
+
+    def _manual_catalog_service(self) -> ManualCatalogService:
+        capabilities = self._require_metadata_capabilities()
+        editor_key = self._require_editor_key()
+        try:
+            return ManualCatalogService(
+                query_port=SqlAlchemyCatalogQueries(self._sessions),
+                unit_of_work=SqlAlchemyCatalogUnitOfWork(self._sessions),
+                editor=capabilities.metadata_editor(editor_key),
+                provider_id=editor_key,
+                retention_policy=capabilities.retention_policy(editor_key),
+                clock=lambda: datetime.now(UTC),
             )
-        if not isinstance(resolved.value, MetadataEditor):
-            raise ControlFailure(code="metadata_editor_unavailable", status=503)
-        return resolved.value
+        except Exception as error:
+            raise self._failure_for(error, "metadata_editor_unavailable") from None
+
+    async def _item_detail(self, item_id: str, locale: Locale) -> MediaItemDetail:
+        def operation(database: Session) -> MediaItemDetail:
+            item = database.get(MediaItem, item_id)
+            if item is None:
+                raise ControlFailure(code="media_item_not_found", status=404)
+            return self._media_item_detail(database, item, locale)
+
+        return await self._run(operation)
 
     def _require_editor_key(self) -> str:
         if self._metadata_editor_key is None:

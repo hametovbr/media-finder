@@ -51,8 +51,19 @@ class CatalogCommands:
             created=True,
         )
 
-    def append_revision(self, item_id: str, draft: RevisionDraft) -> MetadataRevisionSnapshot:
+    def append_revision(
+        self,
+        item_id: str,
+        draft: RevisionDraft,
+        *,
+        expected_current_revision_id: str | None = None,
+    ) -> MetadataRevisionSnapshot:
         item = self._require_item(item_id)
+        if (
+            expected_current_revision_id is not None
+            and item.current_revision_id != expected_current_revision_id
+        ):
+            raise ValueError("catalog_current_revision_changed")
         provenance = draft.normalized.provenance
         effective_provenance = draft.effective.provenance
         expected = item.identity

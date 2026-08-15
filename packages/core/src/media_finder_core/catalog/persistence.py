@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -22,8 +24,9 @@ from sqlalchemy import (
     inspect,
     or_,
     select,
+    text,
 )
-from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
+from sqlalchemy.orm import Mapped, Session, mapped_column, relationship, sessionmaker
 
 from ..platform.database import Base
 from .models import (
@@ -271,6 +274,51 @@ class SqlAlchemyCatalogRepository:
         self._session.expire(item, ["revisions"])
         return _revision_snapshot(revision)
 
+    def get_revision(self, revision_id: str) -> MetadataRevisionSnapshot | None:
+        record = self._session.get(MetadataRevisionRecord, revision_id)
+        return _revision_snapshot(record) if record is not None else None
+
+    def retention_candidates(self, now: datetime) -> tuple[MetadataRevisionSnapshot, ...]:
+        del now
+        return tuple(
+            _revision_snapshot(record)
+            for record in self._session.scalars(
+                select(MetadataRevisionRecord)
+                .where(MetadataRevisionRecord.expired_at.is_(None))
+                .order_by(MetadataRevisionRecord.created_at, MetadataRevisionRecord.id)
+            )
+        )
+
+    def purge_revision(self, revision_id: str, attempted_at: datetime) -> None:
+        revision = self._require_revision(revision_id)
+        item = self._require_item(revision.media_item_id)
+        self._session.info["retention_purge"] = True
+        revision.raw_payload = None
+        revision.normalized_payload = None
+        revision.effective_payload = None
+        revision.expired_at = attempted_at
+        revision.maintenance_status = "purged"
+        revision.maintenance_error_code = None
+        revision.maintenance_attempted_at = attempted_at
+        if item.current_revision_id == revision.id:
+            item.normalized_title = None
+            item.year = None
+        self._session.flush()
+
+    def record_retention_refreshed(self, revision_id: str, attempted_at: datetime) -> None:
+        revision = self._require_revision(revision_id)
+        revision.maintenance_status = "refreshed"
+        revision.maintenance_error_code = None
+        revision.maintenance_attempted_at = attempted_at
+        self._session.flush()
+
+    def record_retention_failure(self, revision_id: str, code: str, attempted_at: datetime) -> None:
+        revision = self._require_revision(revision_id)
+        revision.maintenance_status = "failed"
+        revision.maintenance_error_code = code
+        revision.maintenance_attempted_at = attempted_at
+        self._session.flush()
+
     def set_item_archived(self, item_id: str, archived_at: datetime | None) -> MediaItemSnapshot:
         record = self._require_item(item_id)
         record.archived_at = archived_at
@@ -393,6 +441,121 @@ class SqlAlchemyCatalogRepository:
             raise ValueError("media_item_not_found")
         return record
 
+    def _require_revision(self, revision_id: str) -> MetadataRevisionRecord:
+        record = self._session.get(MetadataRevisionRecord, revision_id)
+        if record is None:
+            raise ValueError("metadata_revision_not_found")
+        return record
+
+
+class SqlAlchemyCatalogQueries:
+    """Short-lived read sessions for catalog application queries."""
+
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self._sessions = sessions
+
+    def get_collection(self, collection_id: str) -> CollectionSnapshot | None:
+        with self._sessions() as session:
+            return SqlAlchemyCatalogRepository(session).get_collection(collection_id)
+
+    def get_item(self, item_id: str) -> MediaItemSnapshot | None:
+        with self._sessions() as session:
+            return SqlAlchemyCatalogRepository(session).get_item(item_id)
+
+    def find_item_by_identity(self, identity: CatalogIdentity) -> MediaItemSnapshot | None:
+        with self._sessions() as session:
+            return SqlAlchemyCatalogRepository(session).find_item_by_identity(identity)
+
+    def list_revisions(self, item_id: str) -> tuple[MetadataRevisionSnapshot, ...]:
+        with self._sessions() as session:
+            return SqlAlchemyCatalogRepository(session).list_revisions(item_id)
+
+    def get_revision(self, revision_id: str) -> MetadataRevisionSnapshot | None:
+        with self._sessions() as session:
+            return SqlAlchemyCatalogRepository(session).get_revision(revision_id)
+
+    def retention_candidates(self, now: datetime) -> tuple[MetadataRevisionSnapshot, ...]:
+        with self._sessions() as session:
+            return SqlAlchemyCatalogRepository(session).retention_candidates(now)
+
+    def page_collections(
+        self, *, archived: bool, limit: int, after: tuple[str, str] | None
+    ) -> CatalogPage[CollectionSnapshot]:
+        with self._sessions() as session:
+            return SqlAlchemyCatalogRepository(session).page_collections(
+                archived=archived, limit=limit, after=after
+            )
+
+    def page_items(
+        self,
+        *,
+        archived: bool,
+        collection_id: str | None,
+        uncategorized: bool,
+        limit: int,
+        after: tuple[str, str] | None,
+    ) -> CatalogPage[MediaItemSnapshot]:
+        with self._sessions() as session:
+            return SqlAlchemyCatalogRepository(session).page_items(
+                archived=archived,
+                collection_id=collection_id,
+                uncategorized=uncategorized,
+                limit=limit,
+                after=after,
+            )
+
+    def find_similar(
+        self,
+        *,
+        normalized_title: str,
+        year: int | None,
+        excluding_provider_id: str,
+    ) -> tuple[MediaItemSnapshot, ...]:
+        with self._sessions() as session:
+            return SqlAlchemyCatalogRepository(session).find_similar(
+                normalized_title=normalized_title,
+                year=year,
+                excluding_provider_id=excluding_provider_id,
+            )
+
+
+class SqlAlchemyCatalogUnitOfWork:
+    """Own one write transaction and expose explicit nested savepoints."""
+
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self._sessions = sessions
+        self._session: Session | None = None
+        self._repository: SqlAlchemyCatalogRepository | None = None
+
+    @contextmanager
+    def write(self) -> Iterator[SqlAlchemyCatalogRepository]:
+        if self._session is not None:
+            raise RuntimeError("catalog_write_already_active")
+        session = self._sessions()
+        repository = SqlAlchemyCatalogRepository(session)
+        self._session = session
+        self._repository = repository
+        try:
+            if session.get_bind().dialect.name == "sqlite":
+                session.execute(text("BEGIN IMMEDIATE"))
+            yield repository
+            session.commit()
+        except BaseException:
+            session.rollback()
+            raise
+        finally:
+            session.info.pop("retention_purge", None)
+            self._repository = None
+            self._session = None
+            session.close()
+
+    @contextmanager
+    def savepoint(self) -> Iterator[SqlAlchemyCatalogRepository]:
+        if self._session is None or self._repository is None:
+            raise RuntimeError("catalog_write_not_active")
+        with self._session.begin_nested():
+            yield self._repository
+
 
 def _metadata_to_storage(metadata: NormalizedMetadata) -> dict[str, Any]:
     payload = metadata.model_dump(mode="json")
@@ -482,5 +645,7 @@ __all__ = [
     "CollectionRecord",
     "MediaItemRecord",
     "MetadataRevisionRecord",
+    "SqlAlchemyCatalogQueries",
     "SqlAlchemyCatalogRepository",
+    "SqlAlchemyCatalogUnitOfWork",
 ]

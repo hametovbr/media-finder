@@ -158,6 +158,11 @@ def _compose_ui_app(
             if isinstance(selected_factory, DefaultRuntimeFactory)
             else _release_descriptor(release_registration_factory)
         ),
+        metadata_capabilities=(
+            selected_factory.module_runtime
+            if isinstance(selected_factory, DefaultRuntimeFactory)
+            else None
+        ),
     )
     app = create_builtin_ui(
         gateway=gateway,

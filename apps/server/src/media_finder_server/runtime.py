@@ -36,6 +36,7 @@ def create_runtime_factory(
         release_registration_factory=composition.release_registration_factory,
         environment=snapshot,
         lifecycle=composition.runtime,
+        module_runtime=composition.runtime,
     )
 
 
