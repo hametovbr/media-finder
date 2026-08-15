@@ -11,11 +11,12 @@ OpenSpec is the source of truth for product behavior and architecture. Start any
 ## Workflow
 
 1. Create a focused branch.
-2. Use the generated OpenSpec workflow skill appropriate to the change.
-3. Add or update acceptance scenarios before production behavior.
-4. Implement test-first and keep commits scoped to one reviewed stage.
-5. Run every check documented for the current project stage.
-6. Explain user-visible behavior, security impact, migration needs, and validation evidence in the pull request.
+2. Follow the OpenSpec skill-routing contract in `AGENTS.md`. Use `openspec-propose` for a new change and wait for planning approval before `openspec-apply-change` begins implementation.
+3. Use `openspec-update-change` instead of editing planning artifacts ad hoc when implementation changes a requirement, scope, design decision, or task.
+4. Add or update acceptance scenarios before production behavior, observe the focused RED failure, and implement the minimum change needed for GREEN.
+5. Use `openspec-sync-specs` only when canonical specs must change while the change remains active; otherwise let `openspec-archive-change` assess, synchronize, and archive completed work.
+6. Run every check documented for the current project stage.
+7. Explain user-visible behavior, security impact, migration needs, and RED-to-GREEN validation evidence in the pull request.
 
 Do not manually edit generated `.agents/skills/openspec-*` files. Regenerate them with the pinned CLI when the OpenSpec profile changes.
 
