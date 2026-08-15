@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from threading import RLock
 from typing import Protocol, cast
 
 import httpx
@@ -84,9 +85,16 @@ class DefaultRuntimeFactory:
         self._download_clients: dict[tuple[str, str], DownloadClient] = {}
         self._http_clients: list[httpx.Client] = []
         self._registry = registry
+        self._lock = RLock()
 
     def close(self) -> None:
-        self._discard_http_clients_since(0)
+        with self._lock:
+            clients = self._http_clients
+            self._http_clients = []
+            self._prowlarr.clear()
+            self._metadata.clear()
+            self._download_clients.clear()
+        self._close_clients(clients)
 
     def metadata_provider(
         self, key: str, config: Mapping[str, object]
@@ -94,78 +102,108 @@ class DefaultRuntimeFactory:
         registration = self._registry.metadata_providers.get(key)
         if registration is None:
             return RuntimeResult(None, "metadata_provider_not_found")
-        client_checkpoint = len(self._http_clients)
+        owned_clients: list[httpx.Client] = []
         try:
             parsed = registration.config_model.model_validate(config)
             cache_key = (key, json.dumps(parsed.model_dump(mode="json"), sort_keys=True))
-            existing = self._metadata.get(cache_key)
+            with self._lock:
+                existing = self._metadata.get(cache_key)
             if existing is not None:
                 return RuntimeResult(existing)
             provider = registration.build(
-                parsed.model_dump(mode="json"), self._new_http_client, self._secret_resolver
+                parsed.model_dump(mode="json"),
+                self._attempt_client_factory(owned_clients),
+                self._secret_resolver,
             )
             provider.validate_config()
-            self._metadata[cache_key] = provider
-            return RuntimeResult(provider)
+            with self._lock:
+                existing = self._metadata.get(cache_key)
+                if existing is None:
+                    self._metadata[cache_key] = provider
+                    self._http_clients.extend(owned_clients)
+                    return RuntimeResult(provider)
+            self._close_clients(owned_clients)
+            return RuntimeResult(existing)
         except Exception:
-            self._discard_http_clients_since(client_checkpoint)
+            self._close_clients(owned_clients)
             return RuntimeResult(None, "metadata_provider_configuration_invalid")
 
     def prowlarr(self, config: Mapping[str, object]) -> RuntimeResult[ProwlarrAdapter]:
-        client_checkpoint = len(self._http_clients)
+        owned_clients: list[httpx.Client] = []
         try:
             parsed = ProwlarrSettings.model_validate(config)
             key = (str(parsed.base_url), parsed.api_key_ref)
-            adapter = self._prowlarr.get(key)
-            if adapter is None:
-                client = self._new_http_client()
-                transport = HttpxProwlarrTransport(
-                    str(parsed.base_url),
-                    parsed.api_key_ref,
-                    self._secret_resolver,
-                    client,
-                )
-                transport.validate()
-                adapter = ProwlarrAdapter(transport, SearchResultCache())
-                self._prowlarr[key] = adapter
-            return RuntimeResult(adapter)
+            with self._lock:
+                existing = self._prowlarr.get(key)
+            if existing is not None:
+                return RuntimeResult(existing)
+            client = self._attempt_client_factory(owned_clients)()
+            transport = HttpxProwlarrTransport(
+                str(parsed.base_url),
+                parsed.api_key_ref,
+                self._secret_resolver,
+                client,
+            )
+            transport.validate()
+            adapter = ProwlarrAdapter(transport, SearchResultCache())
+            with self._lock:
+                existing = self._prowlarr.get(key)
+                if existing is None:
+                    self._prowlarr[key] = adapter
+                    self._http_clients.extend(owned_clients)
+                    return RuntimeResult(adapter)
+            self._close_clients(owned_clients)
+            return RuntimeResult(existing)
         except Exception:
-            self._discard_http_clients_since(client_checkpoint)
+            self._close_clients(owned_clients)
             return RuntimeResult(None, "prowlarr_configuration_invalid")
 
     def download_client(self, instance: DownloadClientInstance) -> RuntimeResult[DownloadClient]:
         registration = self._registry.download_clients.get(instance.module_key)
         if registration is None:
             return RuntimeResult(None, "download_client_module_unknown")
-        client_checkpoint = len(self._http_clients)
+        owned_clients: list[httpx.Client] = []
         try:
             parsed = registration.config_model.model_validate(instance.config_payload)
             cache_key = (
                 instance.id,
                 json.dumps(parsed.model_dump(mode="json"), sort_keys=True),
             )
-            existing = self._download_clients.get(cache_key)
+            with self._lock:
+                existing = self._download_clients.get(cache_key)
             if existing is not None:
                 return RuntimeResult(existing)
             client = registration.build(
-                parsed.model_dump(mode="json"), self._new_http_client, self._secret_resolver
+                parsed.model_dump(mode="json"),
+                self._attempt_client_factory(owned_clients),
+                self._secret_resolver,
             )
             client.validate_config()
-            self._download_clients[cache_key] = client
-            return RuntimeResult(client)
+            with self._lock:
+                existing = self._download_clients.get(cache_key)
+                if existing is None:
+                    self._download_clients[cache_key] = client
+                    self._http_clients.extend(owned_clients)
+                    return RuntimeResult(client)
+            self._close_clients(owned_clients)
+            return RuntimeResult(existing)
         except Exception:
-            self._discard_http_clients_since(client_checkpoint)
+            self._close_clients(owned_clients)
             return RuntimeResult(None, "download_client_configuration_invalid")
 
-    def _new_http_client(self) -> httpx.Client:
-        client = self._http_client_factory()
-        self._http_clients.append(client)
-        return client
+    def _attempt_client_factory(
+        self, owned_clients: list[httpx.Client]
+    ) -> Callable[[], httpx.Client]:
+        def create() -> httpx.Client:
+            client = self._http_client_factory()
+            owned_clients.append(client)
+            return client
 
-    def _discard_http_clients_since(self, checkpoint: int) -> None:
-        discarded = self._http_clients[checkpoint:]
-        del self._http_clients[checkpoint:]
-        for client in discarded:
+        return create
+
+    @staticmethod
+    def _close_clients(clients: list[httpx.Client]) -> None:
+        for client in clients:
             client.close()
 
 
@@ -199,7 +237,10 @@ class RuntimeResolver:
             return RuntimeResult(prototype)
         payload = self._setting(f"metadata_provider:{key}")
         if payload is None:
-            return RuntimeResult(None, "metadata_provider_not_configured")
+            try:
+                payload = prototype.config_model.model_validate({}).model_dump(mode="json")
+            except Exception:
+                return RuntimeResult(None, "metadata_provider_not_configured")
         try:
             return self._factory.metadata_provider(key, payload)
         except Exception:
@@ -216,11 +257,20 @@ class RuntimeResolver:
     def configured_provider_attributions(self) -> list[Attribution]:
         """Return attribution for configured modules without probing live services."""
 
-        return [
-            provider.attribution()
-            for key, provider in self._providers.items()
-            if self._factory is None or self._setting(f"metadata_provider:{key}") is not None
-        ]
+        attributions: list[Attribution] = []
+        for key, provider in self._providers.items():
+            configured = (
+                self._factory is None or self._setting(f"metadata_provider:{key}") is not None
+            )
+            if not configured:
+                try:
+                    provider.config_model.model_validate({})
+                    configured = True
+                except Exception:
+                    pass
+            if configured:
+                attributions.append(provider.attribution())
+        return attributions
 
     def prowlarr(self) -> RuntimeResult[ProwlarrAdapter]:
         if self._factory is None:

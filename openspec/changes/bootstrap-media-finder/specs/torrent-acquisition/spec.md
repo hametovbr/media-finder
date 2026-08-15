@@ -22,6 +22,10 @@ Search results SHALL live only in a bounded in-memory TTL cache, and the browser
 - **WHEN** a valid result token is selected
 - **THEN** the Prowlarr adapter resolves a magnet URI or torrent bytes in memory and does not write the artifact to disk or the database
 
+#### Scenario: Constrain authenticated torrent resolution
+- **WHEN** Prowlarr is configured behind a reverse-proxy path and a selected download URL escapes that normalized path through an unrelated prefix, prefix confusion, or encoded traversal
+- **THEN** the adapter rejects the URL before resolving or sending the API key, while a URL within the configured path remains eligible for in-memory resolution
+
 #### Scenario: Reject oversized integration input
 - **WHEN** a UI form, Prowlarr response, result set, or torrent artifact exceeds its declared bound
 - **THEN** the system rejects it with a stable safe code without persisting or logging sensitive content and a selected release token remains one-use
@@ -93,6 +97,10 @@ On submission timeout, the system SHALL immediately query the selected client by
 #### Scenario: Restart finds pending acquisition
 - **WHEN** the service restarts with an Acquisition still `pending`
 - **THEN** it does not automatically resubmit and offers manual reconciliation
+
+#### Scenario: Reconcile after Prowlarr becomes unavailable
+- **WHEN** a pinned `pending` Acquisition is manually reconciled after Prowlarr has been removed or become unavailable
+- **THEN** the system queries only the pinned active download-client instance by the exact correlation token and does not require Prowlarr
 
 #### Scenario: Retry a failed release
 - **WHEN** a user retries after a failed Acquisition

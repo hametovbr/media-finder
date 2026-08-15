@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 from media_finder.db import migrate_to_head, session_factory
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.models import Acquisition, DownloadClientInstance, MediaItem
+from media_finder.modules.registry import FIRST_PARTY_MODULES
 from media_finder.prowlarr import ProwlarrAdapter, SearchResultCache
 from media_finder.sdk.types import (
     Attribution,
@@ -202,6 +203,7 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         providers={
             "provider-a": BrowserProvider("provider-a"),
             "provider-b": BrowserProvider("provider-b"),
+            "manual": FIRST_PARTY_MODULES.retention_providers()["manual"],
         },
         prowlarr=ProwlarrAdapter(BrowserProwlarrTransport(), SearchResultCache()),
         client_loader=load_client,

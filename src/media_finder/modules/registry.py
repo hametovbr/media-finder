@@ -13,7 +13,7 @@ from ..sdk.registration import (
     SecretResolver,
     StaticModuleRegistry,
 )
-from .manual import ManualProvider
+from .manual import ManualConfig, ManualProvider
 from .qbittorrent import (
     HttpxQbittorrentTransport,
     QbittorrentClient,
@@ -39,6 +39,16 @@ def _build_tmdb(
     )
 
 
+def _build_manual(
+    payload: Mapping[str, object],
+    http_client: HttpClientFactory,
+    secret_resolver: SecretResolver,
+) -> MetadataProvider:
+    del http_client, secret_resolver
+    ManualConfig.model_validate(payload)
+    return cast(MetadataProvider, ManualProvider())
+
+
 def _build_qbittorrent(
     payload: Mapping[str, object],
     http_client: HttpClientFactory,
@@ -57,12 +67,18 @@ def _build_qbittorrent(
 
 FIRST_PARTY_MODULES = StaticModuleRegistry(
     metadata_providers={
+        "manual": MetadataProviderRegistration(
+            key="manual",
+            config_model=ManualConfig,
+            retention_factory=lambda: cast(MetadataProvider, ManualProvider()),
+            build=_build_manual,
+        ),
         "tmdb": MetadataProviderRegistration(
             key="tmdb",
             config_model=TmdbConfig,
             retention_factory=lambda: cast(MetadataProvider, TmdbProvider.retention_only()),
             build=_build_tmdb,
-        )
+        ),
     },
     download_clients={
         "qbittorrent": DownloadClientRegistration(
@@ -71,7 +87,6 @@ FIRST_PARTY_MODULES = StaticModuleRegistry(
             build=_build_qbittorrent,
         )
     },
-    static_attributions=(lambda: ManualProvider().attribution(),),
 )
 
 

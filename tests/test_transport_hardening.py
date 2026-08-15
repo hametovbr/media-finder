@@ -1,4 +1,5 @@
 import logging
+import threading
 
 import httpx
 import pytest
@@ -292,6 +293,66 @@ def test_first_party_validation_owns_only_successful_cached_http_clients() -> No
     assert success_factory._http_clients == retained[:2]
     success_factory.close()
     assert all(client.is_closed for client in retained)
+
+
+def test_failed_interleaved_attempt_cannot_close_a_later_successful_client() -> None:
+    tmdb_started = threading.Event()
+    release_tmdb = threading.Event()
+    created: list[httpx.Client] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.themoviedb.org":
+            tmdb_started.set()
+            assert release_tmdb.wait(timeout=5)
+            return httpx.Response(500)
+        if request.url.path.endswith("/api/v2/auth/login"):
+            return httpx.Response(200, text="Ok.")
+        return httpx.Response(200, json={})
+
+    def clients() -> httpx.Client:
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        created.append(client)
+        return client
+
+    factory = DefaultRuntimeFactory(http_client_factory=clients, secret_resolver=_secrets)
+    failed_result: list[object] = []
+
+    def fail_tmdb() -> None:
+        failed_result.append(
+            factory.metadata_provider(
+                "tmdb",
+                {"api_token": "env:TMDB_TOKEN", "base_url": "https://api.themoviedb.org/3"},
+            )
+        )
+
+    worker = threading.Thread(target=fail_tmdb)
+    worker.start()
+    assert tmdb_started.wait(timeout=5)
+    instance = DownloadClientInstance(
+        id="interleaved-success",
+        name="Interleaved success",
+        module_key="qbittorrent",
+        config_payload={
+            "base_url": "https://qb-success.example.test",
+            "username_ref": "env:QB_USER",
+            "password_ref": "env:QB_PASS",
+        },
+    )
+    successful = factory.download_client(instance).value
+    assert successful is not None
+    release_tmdb.set()
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+
+    assert len(failed_result) == 1
+    assert failed_result[0].value is None
+    assert len(created) == 2
+    assert created[0].is_closed
+    assert not created[1].is_closed
+    assert factory.download_client(instance).value is successful
+    assert factory._http_clients == [created[1]]
+    factory.close()
+    assert created[1].is_closed
 
 
 def test_prowlarr_bounds_json_result_count_and_torrent_bytes_with_one_use_token() -> None:

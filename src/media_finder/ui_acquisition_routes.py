@@ -172,14 +172,11 @@ def acquisition_router(context: UIContext) -> APIRouter:
         checked = await context.checked_form(request)
         if checked is None:
             return context.denied(request)
-        prowlarr_result = context.runtime.prowlarr()
-        if prowlarr_result.value is None:
-            return context.ui_error(request, "acquisition_unavailable", 422)
         try:
             with context.sessions() as database:
-                acquisition = AcquisitionService(
-                    database, prowlarr_result.value, context.resolved_client
-                ).reconcile(acquisition_id)
+                acquisition = AcquisitionService(database, None, context.resolved_client).reconcile(
+                    acquisition_id
+                )
         except Exception as error:
             code = code_for_exception(error, "acquisition_unavailable")
             return context.ui_error(request, code, 404 if code == "acquisition_not_found" else 422)

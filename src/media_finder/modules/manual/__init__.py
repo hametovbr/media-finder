@@ -219,4 +219,4 @@ class ManualProvider:
         return NormalizedMetadata.model_validate(data)
 
 
-__all__ = ["ManualImportError", "ManualProvider"]
+__all__ = ["ManualConfig", "ManualImportError", "ManualProvider"]

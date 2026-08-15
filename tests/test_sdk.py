@@ -198,18 +198,24 @@ def test_provider_protocol_and_first_party_modules_use_only_public_sdk() -> None
 def test_one_public_static_registry_composes_runtime_and_settings_without_switches() -> None:
     registry = getattr(module_registry, "FIRST_PARTY_MODULES", None)
     assert registry is not None
-    assert set(registry.metadata_providers) == {"tmdb"}
+    assert set(registry.metadata_providers) == {"manual", "tmdb"}
     assert set(registry.download_clients) == {"qbittorrent"}
     assert registry.metadata_providers["tmdb"].retention_factory().manifest.key == "tmdb"
+    assert registry.metadata_providers["manual"].retention_factory().manifest.key == "manual"
     assert registry.download_clients["qbittorrent"].config_model.__name__ == "QbittorrentConfig"
     with pytest.raises(TypeError):
         registry.metadata_providers["mutated"] = registry.metadata_providers["tmdb"]
 
-    for path in (Path("src/media_finder/ui.py"), Path("src/media_finder/ui_runtime.py")):
+    for path in (
+        Path("src/media_finder/ui.py"),
+        Path("src/media_finder/ui_runtime.py"),
+        Path("src/media_finder/ui_metadata_routes.py"),
+    ):
         source = path.read_text(encoding="utf-8")
         assert "TmdbProvider" not in source
         assert "QbittorrentClient" not in source
         assert "QbittorrentConfig" not in source
+        assert "ManualProvider" not in source
 
 
 class MagnetOnlyClient:

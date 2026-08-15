@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from media_finder.db import migrate_to_head, session_factory
-from media_finder.models import Acquisition, DownloadClientInstance
+from media_finder.models import Acquisition, DownloadClientInstance, MediaItem
 from media_finder.prowlarr import ProwlarrAdapter, SearchResultCache
 from media_finder.sdk.types import CorrelationResult, DownloadDestination, SubmissionResult
 from media_finder.ui import create_ui_app
@@ -223,5 +223,46 @@ def test_release_and_reconcile_domain_errors_keep_stable_codes_and_safe_messages
             "/ui/acquisitions/not-a-uuid/reconcile",
             data={"csrf": csrf},
         )
-        assert missing.status_code == 404
-        assert 'data-error-code="acquisition_not_found"' in missing.text
+    assert missing.status_code == 404
+    assert 'data-error-code="acquisition_not_found"' in missing.text
+
+
+def test_pending_reconcile_uses_pinned_client_when_prowlarr_is_unavailable(release_app) -> None:
+    with TestClient(release_app) as client:
+        csrf = _csrf(client.get("/").text)
+        item_id, _ = _create_item_and_release(client, csrf)
+        sessions = session_factory(release_app.state.engine)
+        with sessions() as database:
+            item = database.get(MediaItem, item_id)
+            assert item is not None and item.current_revision_id is not None
+            acquisition = Acquisition(
+                media_item_id=item.id,
+                metadata_revision_id=item.current_revision_id,
+                download_client_instance_id=release_app.state.client_ids["second"],
+                idempotency_key="reconcile-without-prowlarr",
+                naming_profile="jellyfin-v1",
+                status="pending",
+                destination="second",
+                release_title="Pinned release",
+                indexer="Fixture",
+            )
+            database.add(acquisition)
+            database.commit()
+            acquisition_identity = acquisition.id
+            acquisition_id = str(acquisition.id)
+        correlation = f"mf-acq-{acquisition_id}"
+        release_app.state.fake_clients["second"].tasks[correlation] = "second"
+        release_app.state.runtime._prowlarr = None
+
+        reconciled = client.post(
+            f"/ui/acquisitions/{acquisition_id}/reconcile",
+            data={"csrf": csrf},
+            follow_redirects=False,
+        )
+
+    assert reconciled.status_code == 303
+    with sessions() as database:
+        stored = database.get(Acquisition, acquisition_identity)
+        assert stored is not None
+        assert stored.status == "submitted"
+        assert stored.external_task_id == "task"

@@ -61,7 +61,7 @@ class AcquisitionService:
     def __init__(
         self,
         session: Session,
-        prowlarr: ProwlarrAdapter,
+        prowlarr: ProwlarrAdapter | None,
         client_loader: ClientLoader,
     ) -> None:
         self._session = session
@@ -72,6 +72,8 @@ class AcquisitionService:
         existing = self._by_idempotency(request.idempotency_key)
         if existing is not None:
             return existing
+        if self._prowlarr is None:
+            raise ValueError("acquisition_unavailable")
 
         revision = self._session.get(MetadataRevision, request.metadata_revision_id)
         item = self._session.get(MediaItem, request.media_item_id)

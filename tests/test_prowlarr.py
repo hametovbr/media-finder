@@ -236,6 +236,42 @@ def test_authenticated_torrent_resolution_rejects_every_cross_origin_variant(
     assert "password" not in caplog.text
 
 
+def test_authenticated_torrent_resolution_stays_inside_reverse_proxy_prefix() -> None:
+    requests: list[httpx.Request] = []
+    resolved: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, content=b"torrent")
+
+    native = HttpxProwlarrTransport(
+        "https://services.example.test/prowlarr",
+        "env:PROWLARR_API_KEY",
+        lambda reference: resolved.append(reference) or "api-key-secret",
+        httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    for url in (
+        "https://services.example.test/unrelated/download/1",
+        "https://services.example.test/prowlarrish/download/1",
+        "https://services.example.test/prowlarr/../unrelated/download/1",
+        "https://services.example.test/prowlarr/%2e%2e/unrelated/download/1",
+        "https://services.example.test/prowlarr/%2F..%2Funrelated/download/1",
+    ):
+        with pytest.raises(ProwlarrError, match="prowlarr_download_origin_rejected"):
+            native.fetch_torrent(url)
+
+    assert requests == []
+    assert resolved == []
+    assert (
+        native.fetch_torrent(
+            "https://services.example.test/prowlarr/api/v1/download/1?indexer=fixture"
+        )
+        == b"torrent"
+    )
+    assert len(requests) == 1
+    assert requests[0].headers["X-Api-Key"] == "api-key-secret"
+
+
 def test_snapshot_classification_ignores_upstream_safety_flags_and_paths() -> None:
     class FlagTransport(FakeProwlarrTransport):
         def search(self, query: str, filters: dict[str, str]) -> list[dict[str, object]]:

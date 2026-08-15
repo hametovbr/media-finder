@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
@@ -12,9 +12,8 @@ from sqlalchemy import select
 
 from .domain import CatalogService, RevisionInput
 from .ephemeral import EphemeralTokenExpired
-from .manual import ManualCatalogService
+from .manual import ManualCatalogService, ManualMetadataModule
 from .models import MediaItem
-from .modules.manual import ManualProvider
 from .sdk.types import NormalizedMetadata
 from .ui_context import UIContext
 from .ui_i18n import code_for_exception, media_kind_label
@@ -24,6 +23,12 @@ from .ui_security import translation
 
 def metadata_router(context: UIContext) -> APIRouter:
     router = APIRouter()
+
+    def manual_provider() -> ManualMetadataModule:
+        result = context.runtime.metadata_provider("manual")
+        if result.value is None:
+            raise ValueError(result.error_code or "metadata_provider_unavailable")
+        return cast(ManualMetadataModule, result.value)
 
     @router.get("/add", response_class=HTMLResponse)
     async def add_page(request: Request) -> HTMLResponse:
@@ -136,8 +141,9 @@ def metadata_router(context: UIContext) -> APIRouter:
             payload = json.loads(form.get("document", ""))
             if not isinstance(payload, dict):
                 raise ValueError
-            external_id = payload.get("external_id")
-            if isinstance(external_id, str):
+            provider = manual_provider()
+            external_id, _, _ = provider.validate_import_identity(payload)
+            if external_id is not None:
                 with context.sessions() as database:
                     existing = database.scalar(
                         select(MediaItem).where(
@@ -153,9 +159,7 @@ def metadata_router(context: UIContext) -> APIRouter:
                         context.locale_for(request, session),
                     )
             with context.sessions() as database:
-                item = ManualCatalogService(CatalogService(database), ManualProvider()).import_json(
-                    payload
-                )
+                item = ManualCatalogService(CatalogService(database), provider).import_json(payload)
             return context.redirect(f"/items/{item.id}?saved=1")
         except Exception:
             return context.ui_error(request, "manual_import_invalid", 422)
@@ -212,6 +216,7 @@ def metadata_router(context: UIContext) -> APIRouter:
             return context.denied(request)
         session, form = checked
         try:
+            provider = manual_provider()
             external_id = form.get("external_id", "") or None
             current: NormalizedMetadata | None = None
             if external_id:
@@ -239,7 +244,7 @@ def metadata_router(context: UIContext) -> APIRouter:
                     context.locale_for(request, session),
                 )
             with context.sessions() as database:
-                item = ManualCatalogService(CatalogService(database), ManualProvider()).import_json(
+                item = ManualCatalogService(CatalogService(database), provider).import_json(
                     document
                 )
             return context.redirect(f"/items/{item.id}?saved=1")
@@ -257,8 +262,9 @@ def metadata_router(context: UIContext) -> APIRouter:
         except EphemeralTokenExpired:
             return context.ui_error(request, "manual_draft_expired", 410)
         try:
+            provider = manual_provider()
             with context.sessions() as database:
-                item = ManualCatalogService(CatalogService(database), ManualProvider()).import_json(
+                item = ManualCatalogService(CatalogService(database), provider).import_json(
                     document, confirm_existing=True
                 )
             return context.redirect(f"/items/{item.id}?saved=1")
@@ -272,8 +278,9 @@ def metadata_router(context: UIContext) -> APIRouter:
             return context.denied(request)
         _, form = checked
         try:
+            provider = manual_provider()
             with context.sessions() as database:
-                ManualCatalogService(CatalogService(database), ManualProvider()).import_episode_csv(
+                ManualCatalogService(CatalogService(database), provider).import_episode_csv(
                     item_id, form.get("content", "")
                 )
             return context.redirect(f"/items/{item_id}?saved=1")

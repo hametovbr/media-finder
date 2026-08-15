@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 
 from media_finder.db import migrate_to_head, session_factory
 from media_finder.models import Acquisition, DownloadClientInstance, MediaItem, MetadataRevision
+from media_finder.modules.registry import FIRST_PARTY_MODULES
 from media_finder.prowlarr import ProwlarrAdapter, SearchResultCache
 from media_finder.ui import create_ui_app
 
@@ -54,7 +55,10 @@ def workflow_app(
     app = create_ui_app(
         database_url,
         session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
-        providers={fake_provider.manifest.key: fake_provider},
+        providers={
+            fake_provider.manifest.key: fake_provider,
+            "manual": FIRST_PARTY_MODULES.retention_providers()["manual"],
+        },
         prowlarr=prowlarr,
         client_loader=lambda _: fake_client,
     )

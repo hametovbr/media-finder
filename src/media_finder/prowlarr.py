@@ -91,6 +91,7 @@ class HttpxProwlarrTransport:
             raise ValueError("prowlarr_base_url_invalid")
         self._base_url = base_url.rstrip("/")
         self._origin = origin
+        self._base_path = urlsplit(self._base_url).path.rstrip("/")
         self._api_key_ref = api_key_ref
         self._secret_resolver = secret_resolver
         self._client = client
@@ -142,7 +143,9 @@ class HttpxProwlarrTransport:
             raise ProwlarrError("prowlarr_configuration_invalid") from None
 
     def fetch_torrent(self, url: str) -> bytes:
-        if _authenticated_origin(url) != self._origin:
+        if _authenticated_origin(url) != self._origin or not _within_base_path(
+            url, self._base_path
+        ):
             raise ProwlarrError("prowlarr_download_origin_rejected") from None
         try:
             with self._client.stream(
@@ -181,6 +184,19 @@ def _authenticated_origin(value: str) -> tuple[str, str, int] | None:
     except ValueError:
         return None
     return parsed.scheme, parsed.hostname.casefold(), port
+
+
+def _within_base_path(value: str, base_path: str) -> bool:
+    try:
+        path = urlsplit(value).path
+    except ValueError:
+        return False
+    if not path.startswith("/") or "%" in path or "\\" in path:
+        return False
+    segments = path.removeprefix("/").split("/")
+    if any(segment in {"", ".", ".."} for segment in segments):
+        return False
+    return not base_path or path == base_path or path.startswith(f"{base_path}/")
 
 
 def _read_bounded(response: httpx.Response, limit: int, code: str) -> bytes:

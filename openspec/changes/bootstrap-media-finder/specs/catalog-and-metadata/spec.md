@@ -49,7 +49,7 @@ A complete version-1 Manual JSON import SHALL preserve a valid supplied Manual U
 
 #### Scenario: Import an existing Manual identity
 - **WHEN** a version-1 Manual JSON document supplies an external UUID already paired with `provider_key=manual`
-- **THEN** the system opens the existing item, creates no duplicate, and applies no imported metadata until the user explicitly confirms a new revision
+- **THEN** the provider validates and canonicalizes the UUID before lookup, the system opens that existing item, creates no duplicate, and applies no imported metadata until the user explicitly confirms a new revision
 
 #### Scenario: Import episodes into a Manual item
 - **WHEN** a valid atomic CSV episode import creates a new revision

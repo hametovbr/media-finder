@@ -200,7 +200,7 @@ def test_existing_json_import_requires_explicit_bounded_confirmation(manual_app)
         assert created.status_code == 303
         item_id = created.headers["location"].split("/")[2].split("?")[0]
         external_id = _external_id(client.get(f"/items/{item_id}/edit").text)
-        document["external_id"] = external_id
+        document["external_id"] = external_id.upper()
         document["titles"] = {"en": "JSON revised"}
 
         pending = client.post(
@@ -227,6 +227,11 @@ def test_existing_json_import_requires_explicit_bounded_confirmation(manual_app)
     sessions = session_factory(manual_app.state.engine)
     with sessions() as session:
         assert session.scalar(select(func.count(MetadataRevision.id))) == 2
+        item = session.scalar(select(MediaItem))
+        assert item is not None
+        assert item.external_id == external_id
+        assert item.current_revision is not None
+        assert item.current_revision.effective_payload["titles"]["en"] == "JSON revised"
 
 
 def test_manual_confirmation_uses_resolved_request_locale(manual_app) -> None:

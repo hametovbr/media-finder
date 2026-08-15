@@ -15,6 +15,10 @@ Metadata-provider and download-client modules SHALL be isolated Python packages 
 - **WHEN** core constructs settings, retention, or a live module instance
 - **THEN** it uses one static public registration boundary rather than provider- or client-specific switches
 
+#### Scenario: Discover the built-in Manual provider
+- **WHEN** no persisted configuration is required for the built-in Manual provider
+- **THEN** generic runtime and UI composition construct it from its empty typed configuration through the same immutable registry used for every other metadata provider, including attribution and no-op retention
+
 ### Requirement: Module manifests and configuration
 Every module SHALL provide a manifest, typed configuration schema, translations, fixtures, capabilities, configuration validation, and conformance-test compatibility. Core SHALL render settings from the schema and SHALL reject module-supplied HTML or JavaScript.
 
