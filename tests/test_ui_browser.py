@@ -11,6 +11,7 @@ from uuid import uuid4
 import httpx
 import pytest
 import uvicorn
+from fastapi.responses import Response
 from fastapi.testclient import TestClient
 from playwright.sync_api import Browser, Page, Playwright, sync_playwright
 from pydantic import BaseModel
@@ -206,6 +207,11 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         client_loader=load_client,
     )
     app.state.browser_clients = clients
+
+    @app.get("/test-assets/broken-poster")
+    def broken_poster() -> Response:
+        return Response(content=b"not-an-image", media_type="image/jpeg")
+
     sessions = session_factory(app.state.engine)
     with sessions() as session:
         first = DownloadClientInstance(name="First", module_key="fixture", config_payload={})
@@ -652,5 +658,52 @@ def test_metadata_locale_poster_placeholder_and_client_archive_browser(
     page.wait_for_url("**/settings?client=archived")
     assert "Клиент загрузки архивирован." in page.locator("main").inner_text()
     _axe(page, browser_site)
+    assert failures == []
+    page.context.close()
+
+
+def test_completed_broken_poster_is_removed_when_fallback_binding_runs(
+    browser: Browser, browser_site: BrowserSite
+) -> None:
+    page, failures = _strict_page(browser)
+    page.goto(browser_site.url)
+
+    result = page.evaluate(
+        """async (url) => {
+          const frame = document.createElement('div');
+          frame.className = 'poster-frame';
+          frame.innerHTML = '<div class="poster-placeholder">MF</div>';
+          const image = document.createElement('img');
+          image.dataset.poster = '';
+          frame.append(image);
+          document.body.append(frame);
+          image.src = url;
+          await new Promise((resolve) => {
+            if (image.complete) resolve();
+            else {
+              image.addEventListener('load', resolve, {once: true});
+              image.addEventListener('error', resolve, {once: true});
+            }
+          });
+          const failedBeforeBinding = image.complete && image.naturalWidth === 0;
+          document.dispatchEvent(new CustomEvent('htmx:afterSwap', {
+            detail: {target: frame}
+          }));
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+          return {
+            failedBeforeBinding,
+            remainingImages: frame.querySelectorAll('img[data-poster]').length,
+            placeholderVisible:
+              frame.querySelector('.poster-placeholder').getClientRects().length > 0
+          };
+        }""",
+        f"{browser_site.url}/test-assets/broken-poster",
+    )
+
+    assert result == {
+        "failedBeforeBinding": True,
+        "remainingImages": 0,
+        "placeholderVisible": True,
+    }
     assert failures == []
     page.context.close()

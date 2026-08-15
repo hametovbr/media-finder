@@ -9,6 +9,10 @@ function focusFeedback(root) {
 
 function bindPosterFallbacks(root) {
   root.querySelectorAll("img[data-poster]").forEach((image) => {
+    if (image.complete && image.naturalWidth === 0) {
+      image.remove();
+      return;
+    }
     image.addEventListener("error", () => image.remove(), { once: true });
   });
 }
