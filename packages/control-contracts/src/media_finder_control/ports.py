@@ -21,6 +21,7 @@ from .models import (
     MetadataSearchRequest,
     MetadataSearchResult,
     MetadataSelectionRequest,
+    MetadataSelectionResult,
     ReleaseSearchRequest,
     ReleaseSearchResult,
 )
@@ -64,7 +65,7 @@ class ControlGateway(Protocol):
 
     async def select_metadata(
         self, *, token: str, request: MetadataSelectionRequest, locale: Locale
-    ) -> MediaItemDetail: ...
+    ) -> MetadataSelectionResult: ...
 
     async def import_manual(
         self, *, request: ManualImportRequest, confirmation_token: str | None = None
@@ -77,6 +78,8 @@ class ControlGateway(Protocol):
         document: ManualDocumentV1,
         confirmation_token: str | None = None,
     ) -> ManualImportResult: ...
+
+    async def confirm_manual(self, *, token: str) -> ManualImportResult: ...
 
     async def import_episodes(
         self, *, item_id: str, request: EpisodeImportRequest, locale: Locale

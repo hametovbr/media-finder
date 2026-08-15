@@ -76,8 +76,9 @@ def test_metadata_search_uses_requested_locale_and_selection_is_one_use(
             request=MetadataSelectionRequest(),
             locale=Locale.RU,
         )
-        assert saved.provider_key == fake_provider.manifest.key
-        assert saved.metadata.titles == {"ru": "Fixture"}
+        assert saved.item.provider_key == fake_provider.manifest.key
+        assert saved.item.metadata.titles == {"ru": "Fixture"}
+        assert saved.created is True
 
         with pytest.raises(ControlFailure) as consumed:
             await gateway.select_metadata(
@@ -113,7 +114,8 @@ def test_exact_duplicate_returns_existing_without_new_revision(
             request=MetadataSelectionRequest(),
             locale=Locale.EN,
         )
-        assert selected.id == existing.id
+        assert selected.item.id == existing.id
+        assert selected.created is False
 
     asyncio.run(scenario())
     assert database.scalar(select(func.count(MetadataRevision.id))) == 1
@@ -155,11 +157,11 @@ def test_cross_provider_similarity_requires_new_confirmation_token(
             request=MetadataSelectionRequest(confirm_similarity=True),
             locale=Locale.EN,
         )
-        assert saved.provider_key == fake_provider.manifest.key
+        assert saved.item.provider_key == fake_provider.manifest.key
         assert (
             database.scalar(
                 select(func.count(MetadataRevision.id)).where(
-                    MetadataRevision.media_item_id == saved.id
+                    MetadataRevision.media_item_id == saved.item.id
                 )
             )
             == 1

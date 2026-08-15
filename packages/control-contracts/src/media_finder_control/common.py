@@ -37,6 +37,10 @@ class ControlError(ControlModel):
     details: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class ControlErrorEnvelope(ControlModel):
+    error: ControlError
+
+
 class ControlFailure(Exception):
     """Language-neutral expected failure crossing the control boundary."""
 

@@ -3,6 +3,7 @@
 from .common import (
     AcquisitionStatus,
     ControlError,
+    ControlErrorEnvelope,
     ControlFailure,
     Locale,
     MediaKind,
@@ -19,6 +20,7 @@ __all__ = [
     "BrowserSecurityPort",
     "BrowserSession",
     "ControlError",
+    "ControlErrorEnvelope",
     "ControlFailure",
     "ControlGateway",
     "Locale",

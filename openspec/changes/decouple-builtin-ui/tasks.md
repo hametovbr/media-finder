@@ -16,12 +16,12 @@
 
 ## 3. Browser security and HTTP control adapter
 
-- [ ] 3.1 Add focused failing tests for compatible `mf_session` bootstrap, independent locale updates, cookie flags, constant-time CSRF comparison, reusable valid CSRF, invalid sessions, and unchanged payload compatibility; implement `BrowserSecurityPort` to GREEN.
-- [ ] 3.2 Add focused failing HTTP tests for JSON-only mutations, one-megabyte body bounds, required same-origin `Origin`, foreign-origin rejection, absent CORS headers, request IDs, and safe framework errors; implement the shared control request boundary to GREEN.
-- [ ] 3.3 Add focused failing route tests for session, collection, paged catalog, item detail, move, archive, and restore endpoints; implement their `/api/control/v1` adapters and validate gateway/HTTP parity.
-- [ ] 3.4 Add focused failing route tests for metadata providers/search/selection, Manual import/confirmation/edit/CSV, exact duplicate, similarity, expiration, and redaction; implement those adapters and validate gateway/HTTP parity.
-- [ ] 3.5 Add focused failing route tests for release search, destinations, submission, reconcile, diagnostics, and about/attribution; implement those adapters and preserve one-use/idempotency semantics.
-- [ ] 3.6 Add a deterministic OpenAPI generation test, observe missing-schema RED, generate `docs/api/control-v1.openapi.json`, and make schema drift, processor-schema exclusion, and public error-model checks GREEN.
+- [x] 3.1 Add focused failing tests for compatible `mf_session` bootstrap, independent locale updates, cookie flags, constant-time CSRF comparison, reusable valid CSRF, invalid sessions, and unchanged payload compatibility; implement `BrowserSecurityPort` to GREEN.
+- [x] 3.2 Add focused failing HTTP tests for JSON-only mutations, one-megabyte body bounds, required same-origin `Origin`, foreign-origin rejection, absent CORS headers, request IDs, and safe framework errors; implement the shared control request boundary to GREEN.
+- [x] 3.3 Add focused failing route tests for session, collection, paged catalog, item detail, move, archive, and restore endpoints; implement their `/api/control/v1` adapters and validate gateway/HTTP parity.
+- [x] 3.4 Add focused failing route tests for metadata providers/search/selection, Manual import/confirmation/edit/CSV, exact duplicate, similarity, expiration, and redaction; implement those adapters and validate gateway/HTTP parity.
+- [x] 3.5 Add focused failing route tests for release search, destinations, submission, reconcile, diagnostics, and about/attribution; implement those adapters and preserve one-use/idempotency semantics.
+- [x] 3.6 Add a deterministic OpenAPI generation test, observe missing-schema RED, generate `docs/api/control-v1.openapi.json`, and make schema drift, processor-schema exclusion, and public error-model checks GREEN.
 
 ## 4. Built-in UI migration
 

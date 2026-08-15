@@ -45,6 +45,7 @@ from media_finder_control.models import (
     MetadataSearchRequest,
     MetadataSearchResult,
     MetadataSelectionRequest,
+    MetadataSelectionResult,
     MetadataView,
     ReleaseSearchRequest,
     ReleaseSearchResult,
@@ -390,14 +391,14 @@ class BackendControlGateway:
         token: str,
         request: MetadataSelectionRequest,
         locale: Locale,
-    ) -> MediaItemDetail:
+    ) -> MetadataSelectionResult:
         try:
             result = self._metadata_selections.pop(token)
         except EphemeralTokenExpired:
             raise ControlFailure(code="selection_expired", status=410) from None
         runtime = self._require_runtime()
 
-        def operation(database: Session) -> MediaItemDetail:
+        def operation(database: Session) -> MetadataSelectionResult:
             exact = database.scalar(
                 select(MediaItem).where(
                     MediaItem.provider_key == result.provider_key,
@@ -405,7 +406,10 @@ class BackendControlGateway:
                 )
             )
             if exact is not None:
-                return self._media_item_detail(database, exact, locale)
+                return MetadataSelectionResult(
+                    item=self._media_item_detail(database, exact, locale),
+                    created=False,
+                )
             catalog = CatalogService(database)
             similar = catalog.find_similar(
                 result.title,
@@ -446,7 +450,10 @@ class BackendControlGateway:
                 )
                 if request.collection_id is not None:
                     catalog.move_item(item, request.collection_id)
-                return self._media_item_detail(database, item, locale)
+                return MetadataSelectionResult(
+                    item=self._media_item_detail(database, item, locale),
+                    created=True,
+                )
             except ControlFailure:
                 raise
             except Exception as error:
@@ -479,19 +486,24 @@ class BackendControlGateway:
         payload = request.document.model_dump(mode="json")
 
         def operation(database: Session) -> ManualImportResult:
-            if not confirm_existing and request.document.external_id is not None:
+            existing = None
+            if request.document.external_id is not None:
                 existing = database.scalar(
                     select(MediaItem).where(
                         MediaItem.provider_key == "manual",
                         MediaItem.external_id == request.document.external_id,
                     )
                 )
-                if existing is not None:
-                    return ManualImportResult(
-                        confirmation_token=self._manual_drafts.put(
-                            _ManualDraft(operation="import", request=request)
-                        )
+            if (
+                not confirm_existing
+                and request.document.external_id is not None
+                and existing is not None
+            ):
+                return ManualImportResult(
+                    confirmation_token=self._manual_drafts.put(
+                        _ManualDraft(operation="import", request=request)
                     )
+                )
             try:
                 catalog = CatalogService(database)
                 item = ManualCatalogService(catalog, provider).import_json(
@@ -501,7 +513,8 @@ class BackendControlGateway:
                 if request.collection_id is not None:
                     catalog.move_item(item, request.collection_id)
                 return ManualImportResult(
-                    item=self._media_item_detail(database, item, request.document.locale)
+                    item=self._media_item_detail(database, item, request.document.locale),
+                    created=existing is None,
                 )
             except Exception as error:
                 database.rollback()
@@ -566,6 +579,25 @@ class BackendControlGateway:
                 raise self._failure_for(error, "manual_import_invalid") from None
 
         return await self._run(apply)
+
+    async def confirm_manual(self, *, token: str) -> ManualImportResult:
+        try:
+            draft = self._manual_drafts.pop(token)
+        except EphemeralTokenExpired:
+            raise ControlFailure(code="selection_expired", status=410) from None
+        continuation = self._manual_drafts.put(draft)
+        if draft.operation == "import":
+            return await self.import_manual(
+                request=draft.request,
+                confirmation_token=continuation,
+            )
+        if draft.operation == "edit" and draft.item_id is not None:
+            return await self.edit_manual(
+                item_id=draft.item_id,
+                document=draft.request.document,
+                confirmation_token=continuation,
+            )
+        raise ControlFailure(code="selection_expired", status=410)
 
     async def import_episodes(
         self,

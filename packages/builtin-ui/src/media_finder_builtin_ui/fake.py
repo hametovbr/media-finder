@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from media_finder_control import (
     AcquisitionStatus,
+    ControlFailure,
     Locale,
     MediaKind,
     Page,
@@ -29,6 +30,7 @@ from media_finder_control.models import (
     MetadataSearchRequest,
     MetadataSearchResult,
     MetadataSelectionRequest,
+    MetadataSelectionResult,
     MetadataView,
     ReleaseSearchRequest,
     ReleaseSearchResult,
@@ -181,7 +183,13 @@ class FakeControlGateway:
     async def search_metadata(
         self, *, request: MetadataSearchRequest
     ) -> tuple[MetadataSearchResult, ...]:
-        token = "metadata-duplicate" if "duplicate" in request.query.casefold() else "metadata-1"
+        query = request.query.casefold()
+        if "duplicate" in query:
+            token = "metadata-duplicate"
+        elif "similar" in query:
+            token = "metadata-similar"
+        else:
+            token = "metadata-1"
         return (
             MetadataSearchResult(
                 token=token,
@@ -196,9 +204,20 @@ class FakeControlGateway:
 
     async def select_metadata(
         self, *, token: str, request: MetadataSelectionRequest, locale: Locale
-    ) -> MediaItemDetail:
-        del token, request
-        return await self.get_media_item(item_id="series-1", locale=locale)
+    ) -> MetadataSelectionResult:
+        del request
+        if token == "metadata-expired":
+            raise ControlFailure(code="selection_expired", status=410)
+        if token == "metadata-similar":
+            raise ControlFailure(
+                code="confirmation_required",
+                status=409,
+                details={"confirmation_token": "metadata-confirmed", "kind": "similarity"},
+            )
+        return MetadataSelectionResult(
+            item=await self.get_media_item(item_id="series-1", locale=locale),
+            created=token != "metadata-duplicate",
+        )
 
     async def import_manual(
         self, *, request: ManualImportRequest, confirmation_token: str | None = None
@@ -206,7 +225,8 @@ class FakeControlGateway:
         if request.document.external_id and confirmation_token is None:
             return ManualImportResult(confirmation_token="manual-confirmation")
         return ManualImportResult(
-            item=await self.get_media_item(item_id="movie-1", locale=request.document.locale)
+            item=await self.get_media_item(item_id="movie-1", locale=request.document.locale),
+            created=request.document.external_id is None,
         )
 
     async def edit_manual(
@@ -216,9 +236,18 @@ class FakeControlGateway:
         document: ManualDocumentV1,
         confirmation_token: str | None = None,
     ) -> ManualImportResult:
+        if confirmation_token is None:
+            return ManualImportResult(confirmation_token="manual-edit-confirmation")
         return await self.import_manual(
             request=ManualImportRequest(document=document),
             confirmation_token=confirmation_token or item_id,
+        )
+
+    async def confirm_manual(self, *, token: str) -> ManualImportResult:
+        del token
+        return ManualImportResult(
+            item=await self.get_media_item(item_id="movie-1", locale=Locale.EN),
+            created=False,
         )
 
     async def import_episodes(
