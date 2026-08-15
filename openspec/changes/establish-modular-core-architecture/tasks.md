@@ -32,7 +32,7 @@
 
 ## 4. Establish Core Bounded Contexts
 
-- [ ] 4.1 Add RED import and application-port tests for catalog, acquisition, exports, module runtime, control, and platform contexts, including a prohibition on cross-context ORM imports/relationships and direct `Session` use from command/query services.
+- [x] 4.1 Add RED import and application-port tests for catalog, acquisition, exports, module runtime, control, and platform contexts, including a prohibition on cross-context ORM imports/relationships and direct `Session` use from command/query services.
 - [ ] 4.2 Move catalog identity, collections, immutable metadata revision rules, duplicate/similarity handling, archive behavior, and catalog queries into `media_finder_core.catalog` behind focused repository/query ports; preserve current tests and make the catalog architecture slice GREEN.
 - [ ] 4.3 Move metadata-editor orchestration, provider fetch/normalize orchestration, overrides, current-revision selection, and generic provider-owned retention execution into catalog application services; inject the selected editor without a concrete module identifier, validate SDK outputs before persistence, and make existing Manual atomicity/retention tests GREEN.
 - [ ] 4.4 Move Acquisition state, idempotency, safe snapshots, exact correlation, timeout recovery, manual reconcile, and bounded opaque release selection into `media_finder_core.acquisition`; consume catalog through declared read ports and make focused acquisition tests GREEN.
