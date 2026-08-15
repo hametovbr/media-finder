@@ -1,8 +1,14 @@
+import runpy
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 
-from scripts.check_documentation_language import violations_for
+_CHECKER = runpy.run_path(
+    str(Path(__file__).resolve().parents[1] / "scripts" / "check_documentation_language.py")
+)
+violations_for = cast(Callable[[Path, str], list[str]], _CHECKER["violations_for"])
 
 
 @pytest.mark.parametrize(
