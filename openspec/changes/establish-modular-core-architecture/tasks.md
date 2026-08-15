@@ -19,7 +19,7 @@
 
 ## 3. Extract First-Party Modules Through the SDK
 
-- [ ] 3.1 Add RED isolated-wheel and metadata/editor-conformance tests for the Manual package, including its empty environment contract, in-memory fixture search/fetch, normalization, structured JSON identity validation, atomic episode CSV merge, standardized invalid-identity error, attribution, and configuration-free retention behavior.
+- [x] 3.1 Add RED isolated-wheel and metadata/editor-conformance tests for the Manual package, including its empty environment contract, in-memory fixture search/fetch, normalization, structured JSON identity validation, atomic episode CSV merge, standardized invalid-identity error, attribution, and configuration-free retention behavior.
 - [ ] 3.2 Move Manual into `media-finder-metadata-manual`, add its `module.toml`, public `registration()`, and typed metadata editor, make its focused tests GREEN, update consumers to the new package, and remove the old Manual module source in the same slice.
 - [ ] 3.3 Add RED isolated-wheel and metadata-conformance tests for TMDB covering exact `TMDB_TOKEN`, official-origin validation, movie/series/special fixture fetches, locale/identity, normalization/artwork, retention/expiry, export warnings, redaction, and resource closure.
 - [ ] 3.4 Move TMDB into `media-finder-metadata-tmdb`, add its `module.toml` and public `registration()`, make focused tests GREEN, update consumers, and remove the old TMDB module source without a compatibility import.
