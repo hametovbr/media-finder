@@ -1,5 +1,6 @@
 [dependency-groups]
 dev = [
+  "hatchling>=1.27,<2",
   "httpx>=0.28,<1",
   "media-finder",
   "mypy>=1.17,<2",

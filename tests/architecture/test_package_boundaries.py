@@ -83,6 +83,15 @@ def test_distribution_dependencies_follow_the_approved_graph() -> None:
 
 def test_imports_do_not_cross_package_ownership_boundaries() -> None:
     prohibited = {
+        "sdk": (
+            "alembic",
+            "fastapi",
+            "httpx",
+            "jinja2",
+            "media_finder_control",
+            "media_finder_core",
+            "sqlalchemy",
+        ),
         "core": (
             "media_finder_builtin_ui",
             "media_finder_metadata_manual",
@@ -133,6 +142,13 @@ def test_public_python_distributions_are_typed_and_explicit() -> None:
             for target in node.targets
             if isinstance(target, ast.Name) and target.id == "__all__"
         }
+        exported.update(
+            node.target.id
+            for node in module.body
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "__all__"
+        )
         assert exported == {"__all__"}, f"{distribution} does not declare explicit __all__"
 
 
@@ -171,9 +187,23 @@ def test_runtime_module_discovery_is_absent() -> None:
             for node in ast.walk(tree):
                 if (
                     isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr in forbidden_calls
+                    and (
+                        (
+                            isinstance(node.func, ast.Attribute)
+                            and node.func.attr in forbidden_calls
+                        )
+                        or (
+                            isinstance(node.func, ast.Name)
+                            and node.func.id in forbidden_calls
+                        )
+                    )
                 ):
                     violations.append(f"{path.relative_to(ROOT)}:{node.lineno}")
 
     assert violations == []
+
+
+def test_test_runtime_does_not_inject_workspace_source_directories() -> None:
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert config["tool"]["pytest"]["ini_options"].get("pythonpath", []) == []
