@@ -32,6 +32,7 @@ pnpm install --frozen-lockfile
 uv sync --frozen --all-groups
 pnpm spec:validate
 pnpm docs:check
+pnpm delivery:test
 pnpm delivery:validate
 uv run ruff format --check .
 uv run ruff check .

@@ -28,6 +28,7 @@ uv run pytest
 pnpm spec:validate
 pnpm spec:list
 pnpm docs:check
+pnpm delivery:test
 pnpm delivery:validate
 ```
 

@@ -6,6 +6,7 @@
   "scripts": {
     "assets:build": "node scripts/build-assets.mjs",
     "delivery:validate": "node scripts/validate-delivery.mjs",
+    "delivery:test": "node --test scripts/validate-delivery.test.mjs",
     "docs:check": "python scripts/check_documentation_language.py",
     "py:format": "uv run ruff format --check .",
     "py:lint": "uv run ruff check .",

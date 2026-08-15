@@ -13,158 +13,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  documentation:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.19.0
-          run_install: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm docs:check
-      - run: pnpm spec:validate
-      - run: pnpm delivery:validate
+  verification:
+    uses: ./.github/workflows/verify.yaml
+    permissions:
+      contents: read
 
-  python:
+  publish-edge:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: verification
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
-          version: "0.12.5"
-          enable-cache: true
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.19.0
-          run_install: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: uv sync --frozen --all-groups
-      - run: uv run ruff format --check .
-      - run: uv run ruff check .
-      - run: uv run mypy
-      - run: pnpm assets:build
-      - run: git diff --exit-code -- src/media_finder/static
-
-  unit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v7
-        with:
-          version: "0.12.5"
-          enable-cache: true
-      - run: uv sync --frozen --all-groups
-      - name: Unit tests
-        run: >-
-          uv run pytest
-          tests/test_config.py
-          tests/test_ephemeral_cache.py
-          tests/test_manual.py
-          tests/test_naming.py
-          tests/test_nfo.py
-          tests/test_prowlarr.py
-
-  integration:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v7
-        with:
-          version: "0.12.5"
-          enable-cache: true
-      - run: uv sync --frozen --all-groups
-      - name: Integration tests
-        run: >-
-          uv run pytest
-          tests/test_acquisition.py
-          tests/test_api_foundation.py
-          tests/test_db.py
-          tests/test_domain.py
-          tests/test_metadata_api.py
-          tests/test_runtime.py
-          tests/test_ui_catalog.py
-          tests/test_ui_error_feedback.py
-          tests/test_ui_foundation.py
-          tests/test_ui_i18n.py
-          tests/test_ui_manual_structured.py
-          tests/test_ui_release_live_clients.py
-          tests/test_ui_runtime_settings.py
-          tests/test_ui_semantic_feedback.py
-          tests/test_ui_settings.py
-          tests/test_ui_workflows.py
-
-  contract:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v7
-        with:
-          version: "0.12.5"
-          enable-cache: true
-      - run: uv sync --frozen --all-groups
-      - name: Module contract tests
-        run: >-
-          uv run pytest
-          tests/test_sdk.py
-          tests/test_tmdb_retention.py
-          tests/test_qbittorrent.py
-
-  browser:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v7
-        with:
-          version: "0.12.5"
-          enable-cache: true
-      - run: uv sync --frozen --all-groups
-      - run: uv run playwright install --with-deps chromium
-      - run: uv run pytest tests/test_ui_browser.py
-
-  image:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
-          push: false
-          load: true
-          tags: media-finder:ci
-      - name: Exercise production startup and health
-        run: |
-          docker run --detach --name media-finder-ci \
-            --publish 127.0.0.1:8000:8000 \
-            --volume media-finder-ci-data:/data \
-            --env MEDIA_FINDER_UI_SECRET=ci-session-secret-with-sufficient-length \
-            --env MEDIA_FINDER_INTEGRATION_TOKEN=ci-integration-token \
-            --env MEDIA_FINDER_SECURE_COOKIE=false \
-            media-finder:ci
-          for attempt in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:8000/health/ready; then
-              break
-            fi
-            sleep 1
-          done
-          curl --fail http://127.0.0.1:8000/health/ready
-          test "$(docker exec media-finder-ci id -u)" = "10001"
-          test "$(docker exec media-finder-ci id -g)" = "10001"
-      - name: Show logs and remove test container
-        if: always()
-        run: |
-          docker logs media-finder-ci || true
-          docker rm --force media-finder-ci || true
-          docker volume rm media-finder-ci-data || true
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ghcr.io/${{ github.repository }}:edge

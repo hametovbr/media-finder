@@ -10,10 +10,12 @@ Use an immutable `vX.Y.Z` tag for production deployments. Moving tags are provid
 | --- | --- |
 | `v1.2.3` | Immutable stable release |
 | `1.2` | Latest stable patch in the minor line |
-| `latest` | Latest stable GitHub Release |
-| `edge` | Current successful `main` build; not a stable release |
+| `latest` | Latest stable GitHub Release after full verification |
+| `edge` | Current fully verified `main` commit; not a stable release |
 
 Images are published for `linux/amd64` and `linux/arm64`.
+
+Both publishing paths run the same documentation, OpenSpec, format, lint, type, unit, integration, contract, browser, and production-image checks for the exact commit before granting the publish job package-write permission. A failed or skipped verification cannot publish `edge` or stable tags.
 
 ## Initial deployment
 
