@@ -98,7 +98,7 @@ for attempt in {1..30}; do
   sleep 1
 done
 
-assert_response "Disabled UI root" "$base_url/" "404" '"code":"not_found"'
+assert_response "Disabled UI root" "$base_url/" "404" '"code":"route_not_found"'
 assert_response "Disabled control session" "$base_url/api/control/v1/session" "200" '"csrf_token"'
 assert_response "Disabled liveness" "$base_url/health/live" "200" '{"status":"live"}'
 assert_response \
