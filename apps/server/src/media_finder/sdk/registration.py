@@ -43,6 +43,7 @@ class IntegrationDescriptor:
 
     key: str
     environment: tuple[EnvironmentVariableSpec, ...]
+    version: str
 
     def __post_init__(self) -> None:
         _validate_environment(self.environment)

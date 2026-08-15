@@ -518,6 +518,11 @@ class SqlAlchemyCatalogQueries:
                 excluding_provider_id=excluding_provider_id,
             )
 
+    def has_pinned_revision(self, media_item_id: str, metadata_revision_id: str) -> bool:
+        with self._sessions() as session:
+            revision = SqlAlchemyCatalogRepository(session).get_revision(metadata_revision_id)
+            return revision is not None and revision.media_item_id == media_item_id
+
 
 class SqlAlchemyCatalogUnitOfWork:
     """Own one write transaction and expose explicit nested savepoints."""

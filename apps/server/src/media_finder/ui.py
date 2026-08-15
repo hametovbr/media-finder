@@ -10,21 +10,21 @@ import httpx
 from fastapi import FastAPI
 from media_finder_builtin_ui import BuiltinUIOptions, create_builtin_ui
 from media_finder_builtin_ui.i18n import message_for
+from media_finder_core.acquisition import ReleaseSelectionService
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from .acquisition import ClientLoader
 from .config import EnvReference, resolve_env_reference
 from .control_gateway import BackendControlGateway
 from .control_security import BackendBrowserSecurity
 from .db import create_database, session_factory
 from .integration_runtime import (
+    ClientLoader,
     DefaultRuntimeFactory,
     ReleaseRegistrationFactory,
     RuntimeFactory,
     RuntimeResolver,
 )
-from .release_selection import ReleaseSelectionService
 from .sdk.protocols import MetadataProvider
 from .sdk.registration import IntegrationDescriptor, StaticModuleRegistry
 from .sdk.types import EnvironmentVariableSpec
@@ -39,6 +39,7 @@ def _release_descriptor(
     manifest = factory(httpx.Client).manifest
     return IntegrationDescriptor(
         key=manifest.module_id,
+        version=manifest.module_version,
         environment=tuple(
             EnvironmentVariableSpec(
                 name=value.name,
@@ -73,6 +74,7 @@ def create_ui_app(
     providers: dict[str, MetadataProvider] | None = None,
     prowlarr: ReleaseSelectionService | None = None,
     client_loader: ClientLoader | None = None,
+    download_client_versions: Mapping[str, str] | None = None,
     runtime_factory: RuntimeFactory | None = None,
     registry: StaticModuleRegistry,
     release_registration_factory: ReleaseRegistrationFactory,
@@ -94,6 +96,7 @@ def create_ui_app(
             providers=providers,
             prowlarr=prowlarr,
             client_loader=client_loader,
+            download_client_versions=download_client_versions,
             runtime_factory=runtime_factory,
             registry=registry,
             release_registration_factory=release_registration_factory,
@@ -115,6 +118,7 @@ def _compose_ui_app(
     providers: dict[str, MetadataProvider] | None,
     prowlarr: ReleaseSelectionService | None,
     client_loader: ClientLoader | None,
+    download_client_versions: Mapping[str, str] | None,
     runtime_factory: RuntimeFactory | None,
     registry: StaticModuleRegistry,
     release_registration_factory: ReleaseRegistrationFactory,
@@ -147,6 +151,7 @@ def _compose_ui_app(
         providers=provider_registry,
         prowlarr=prowlarr,
         client_loader=client_loader,
+        download_client_versions=download_client_versions,
     )
     gateway = BackendControlGateway(
         sessions=sessions,

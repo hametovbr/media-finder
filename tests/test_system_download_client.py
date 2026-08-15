@@ -1,3 +1,4 @@
+from dataclasses import fields
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -5,14 +6,13 @@ from uuid import uuid4
 import pytest
 import sqlalchemy as sa
 from alembic.config import Config
+from media_finder.db import create_database, migrate_to_head, session_factory
+from media_finder.models import AppSetting, DownloadClientInstance
+from media_finder.system_clients import SYSTEM_QBITTORRENT_ID, ensure_system_qbittorrent
+from media_finder_core.acquisition import AcquisitionRequest
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from alembic import command
-from media_finder.acquisition import AcquisitionRequest, AcquisitionService
-from media_finder.db import create_database, migrate_to_head, session_factory
-from media_finder.models import Acquisition, AppSetting, DownloadClientInstance
-from media_finder.system_clients import SYSTEM_QBITTORRENT_ID, ensure_system_qbittorrent
 
 
 def _config(url: str) -> Config:
@@ -40,7 +40,7 @@ def test_fresh_database_has_one_idempotent_system_qbittorrent(tmp_path: Path) ->
     engine.dispose()
 
 
-def test_upgrade_preserves_history_and_scrubs_legacy_clients(tmp_path: Path) -> None:
+def test_upgrade_rejects_acquisitions_without_truthful_module_snapshots(tmp_path: Path) -> None:
     url = f"sqlite:///{tmp_path / 'upgrade.db'}"
     config = _config(url)
     command.upgrade(config, "0002_acquisition_submission")
@@ -100,23 +100,8 @@ def test_upgrade_preserves_history_and_scrubs_legacy_clients(tmp_path: Path) -> 
         )
     engine.dispose()
 
-    command.upgrade(config, "head")
-    engine = create_database(url)
-    with session_factory(engine)() as database:
-        legacy = database.get(DownloadClientInstance, legacy_id)
-        system = database.get(DownloadClientInstance, SYSTEM_QBITTORRENT_ID)
-        acquisition = database.scalar(
-            select(Acquisition).where(Acquisition.idempotency_key == "legacy-acq")
-        )
-
-    assert legacy is not None
-    assert legacy.archived_at is not None
-    assert legacy.name.startswith("qBittorrent (legacy ")
-    assert legacy.config_payload == {}
-    assert legacy.system_owned is False
-    assert system is not None and system.system_owned is True
-    assert acquisition is not None and acquisition.download_client_instance_id == legacy_id
-    engine.dispose()
+    with pytest.raises(RuntimeError, match="cannot reconstruct acquisition module snapshots"):
+        command.upgrade(config, "head")
 
 
 def test_schema_downgrade_requires_the_documented_pre_upgrade_backup(tmp_path: Path) -> None:
@@ -188,22 +173,5 @@ def test_upgrade_recovers_partial_ddl_scrubs_settings_and_avoids_name_collisions
     engine.dispose()
 
 
-def test_new_submission_rejects_a_legacy_client(database: Session) -> None:
-    legacy = DownloadClientInstance(
-        name="Legacy", module_key="qbittorrent", config_payload={}, system_owned=False
-    )
-    database.add(legacy)
-    database.commit()
-
-    service = AcquisitionService(database, None, lambda _: pytest.fail("must not resolve legacy"))
-    with pytest.raises(ValueError, match="download_client_system_required"):
-        service.submit(
-            AcquisitionRequest(
-                media_item_id="missing",
-                metadata_revision_id="missing",
-                client_instance_id=legacy.id,
-                destination="movies",
-                release_token="missing",
-                idempotency_key="legacy-rejected",
-            )
-        )
+def test_acquisition_request_has_no_mutable_client_instance_selection() -> None:
+    assert "client_instance_id" not in {field.name for field in fields(AcquisitionRequest)}

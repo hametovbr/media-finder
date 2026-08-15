@@ -1,8 +1,16 @@
 import asyncio
+from uuid import uuid4
 
 import pytest
+from media_finder.control_gateway import BackendControlGateway
+from media_finder.domain import CatalogService, RevisionInput
+from media_finder.integration_runtime import RuntimeResolver
+from media_finder.models import Acquisition, DownloadClientInstance
+from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
+from media_finder.system_clients import SYSTEM_QBITTORRENT_ID, ensure_system_qbittorrent
 from media_finder_control import ControlFailure
 from media_finder_control.models import AcquisitionSubmissionRequest, ReleaseSearchRequest
+from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder_sdk import (
     MagnetArtifact,
     PrivateReleaseSelection,
@@ -13,14 +21,6 @@ from media_finder_sdk import (
 )
 from media_finder_server import create_legacy_module_registry, create_runtime_factory
 from sqlalchemy.orm import Session, sessionmaker
-
-from media_finder.control_gateway import BackendControlGateway
-from media_finder.domain import CatalogService, RevisionInput
-from media_finder.integration_runtime import RuntimeResolver
-from media_finder.models import Acquisition, DownloadClientInstance
-from media_finder.release_selection import ReleaseSelectionCache, ReleaseSelectionService
-from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
-from media_finder.system_clients import SYSTEM_QBITTORRENT_ID, ensure_system_qbittorrent
 
 REGISTRY = create_legacy_module_registry()
 RELEASE_INTEGRATION = create_runtime_factory(environment={}).release_integration
@@ -54,7 +54,7 @@ class FixtureReleaseProvider:
 
 
 def _release_selection() -> ReleaseSelectionService:
-    return ReleaseSelectionService(FixtureReleaseProvider(), ReleaseSelectionCache())
+    return ReleaseSelectionService(provider=FixtureReleaseProvider(), cache=ReleaseSelectionCache())
 
 
 def _item(database: Session):
@@ -78,6 +78,7 @@ def _gateway(
     *,
     prowlarr: ReleaseSelectionService | None,
     client,
+    client_version: str | None = "9.8.7",
 ) -> BackendControlGateway:
     sessions = sessionmaker(bind=database.get_bind(), expire_on_commit=False)
     runtime = RuntimeResolver(
@@ -85,6 +86,9 @@ def _gateway(
         providers={},
         prowlarr=prowlarr,
         client_loader=lambda instance: client,
+        download_client_versions=(
+            {"qbittorrent": client_version} if client_version is not None else None
+        ),
     )
     return BackendControlGateway(
         sessions=sessions,
@@ -122,6 +126,57 @@ def test_release_search_destinations_and_idempotent_submission(
         assert first.id == second.id
         assert first.status == "submitted"
         assert list(fake_client.tasks) == [f"mf-acq-{first.id}"]
+
+    asyncio.run(scenario())
+
+
+def test_new_submission_requires_a_manifest_version_but_duplicate_does_not(
+    database: Session, fake_client
+) -> None:
+    item = _item(database)
+    ensure_system_qbittorrent(database)
+    prowlarr = _release_selection()
+    gateway = _gateway(database, prowlarr=prowlarr, client=fake_client)
+
+    async def scenario() -> None:
+        result = (
+            await gateway.search_releases(
+                item_id=item.id,
+                request=ReleaseSearchRequest(query="Example", indexer_ids=(1, 2)),
+            )
+        )[0]
+        request = AcquisitionSubmissionRequest(
+            media_item_id=item.id,
+            release_token=result.token,
+            destination="fixture",
+            idempotency_key="version-required",
+        )
+        first = await gateway.submit_acquisition(request=request)
+        unversioned = _gateway(
+            database,
+            prowlarr=prowlarr,
+            client=fake_client,
+            client_version=None,
+        )
+        duplicate = await unversioned.submit_acquisition(request=request)
+        assert duplicate.id == first.id
+
+        fresh_result = (
+            await unversioned.search_releases(
+                item_id=item.id,
+                request=ReleaseSearchRequest(query="Example", indexer_ids=(1, 2)),
+            )
+        )[0]
+        fresh = AcquisitionSubmissionRequest(
+            media_item_id=item.id,
+            release_token=fresh_result.token,
+            destination="fixture",
+            idempotency_key="version-missing",
+        )
+        with pytest.raises(ControlFailure) as rejected:
+            await unversioned.submit_acquisition(request=fresh)
+        assert rejected.value.error.code == "download_client_version_unavailable"
+        assert rejected.value.status == 503
 
     asyncio.run(scenario())
 
@@ -171,6 +226,12 @@ def test_pending_reconcile_does_not_require_prowlarr(database: Session, fake_cli
     item = _item(database)
     instance = ensure_system_qbittorrent(database)
     acquisition = Acquisition(
+        id=(acquisition_id := uuid4()),
+        correlation=f"mf-acq-{acquisition_id}",
+        release_provider_id="fixture-release",
+        release_provider_version="1.0.0",
+        download_client_module_id="qbittorrent",
+        download_client_module_version="0.1.0",
         media_item_id=item.id,
         metadata_revision_id=item.current_revision_id,
         download_client_instance_id=SYSTEM_QBITTORRENT_ID,

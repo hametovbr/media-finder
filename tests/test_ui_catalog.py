@@ -5,12 +5,11 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from media_finder_server import create_ui_app
-
 from media_finder.db import migrate_to_head, session_factory
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.models import Acquisition, Collection, MediaItem
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
+from media_finder_server import create_ui_app
 
 
 def _csrf(response_text: str) -> str:
@@ -48,6 +47,12 @@ def catalog_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         )
         revision = CatalogService(session).add_revision(item, RevisionInput(normalized=normalized))
         older = Acquisition(
+            id=(older_id := uuid4()),
+            correlation=f"mf-acq-{older_id}",
+            release_provider_id="fixture-release",
+            release_provider_version="1.0.0",
+            download_client_module_id="fixture-download",
+            download_client_module_version="1.0.0",
             media_item_id=item.id,
             metadata_revision_id=revision.id,
             idempotency_key="old",
@@ -57,6 +62,12 @@ def catalog_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             created_at=datetime.now(UTC) - timedelta(hours=1),
         )
         latest = Acquisition(
+            id=(latest_id := uuid4()),
+            correlation=f"mf-acq-{latest_id}",
+            release_provider_id="fixture-release",
+            release_provider_version="1.0.0",
+            download_client_module_id="fixture-download",
+            download_client_module_version="1.0.0",
             media_item_id=item.id,
             metadata_revision_id=revision.id,
             idempotency_key="new",

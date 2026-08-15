@@ -13,26 +13,11 @@ import pytest
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, Response
-from media_finder_builtin_ui import create_builtin_ui
-from media_finder_builtin_ui.fake import FakeBrowserSecurity, FakeControlGateway
-from media_finder_sdk import (
-    MagnetArtifact,
-    PrivateReleaseSelection,
-    ReleaseCandidate,
-    ReleaseSearchQuery,
-    SafeReleaseSnapshot,
-)
-from media_finder_server import create_legacy_module_registry, create_ui_app
-from playwright.sync_api import Browser, Page, Playwright, sync_playwright
-from pydantic import BaseModel
-from sqlalchemy import func, select
-
 from media_finder.control_api import create_control_app
 from media_finder.control_security import BackendBrowserSecurity
 from media_finder.db import migrate_to_head, session_factory
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.models import Acquisition, DownloadClientInstance, MediaItem
-from media_finder.release_selection import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder.sdk.types import (
     Attribution,
     CorrelationResult,
@@ -49,6 +34,20 @@ from media_finder.sdk.types import (
     SubmissionResult,
 )
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
+from media_finder_builtin_ui import create_builtin_ui
+from media_finder_builtin_ui.fake import FakeBrowserSecurity, FakeControlGateway
+from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
+from media_finder_sdk import (
+    MagnetArtifact,
+    PrivateReleaseSelection,
+    ReleaseCandidate,
+    ReleaseSearchQuery,
+    SafeReleaseSnapshot,
+)
+from media_finder_server import create_legacy_module_registry, create_ui_app
+from playwright.sync_api import Browser, Page, Playwright, sync_playwright
+from pydantic import BaseModel
+from sqlalchemy import func, select
 
 LEGACY_REGISTRY = create_legacy_module_registry()
 
@@ -226,8 +225,11 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             "provider-b": BrowserProvider("provider-b"),
             "manual": LEGACY_REGISTRY.retention_providers()["manual"],
         },
-        prowlarr=ReleaseSelectionService(BrowserReleaseProvider(), ReleaseSelectionCache()),
+        prowlarr=ReleaseSelectionService(
+            provider=BrowserReleaseProvider(), cache=ReleaseSelectionCache()
+        ),
         client_loader=load_client,
+        download_client_versions={"qbittorrent": "9.8.7"},
     )
     app.state.browser_clients = clients
 
@@ -250,6 +252,12 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         )
         revision = CatalogService(session).add_revision(item, RevisionInput(normalized=metadata))
         pending = Acquisition(
+            id=(pending_id := uuid4()),
+            correlation=f"mf-acq-{pending_id}",
+            release_provider_id="fixture-release",
+            release_provider_version="1.0.0",
+            download_client_module_id="qbittorrent",
+            download_client_module_version="9.8.7",
             media_item_id=item.id,
             metadata_revision_id=revision.id,
             download_client_instance_id=system.id,

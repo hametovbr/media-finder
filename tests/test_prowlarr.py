@@ -1,6 +1,11 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from media_finder_core.acquisition import (
+    ReleaseSelectionCache,
+    ReleaseSelectionExpired,
+    ReleaseSelectionService,
+)
 from media_finder_sdk import (
     MagnetArtifact,
     PrivateReleaseSelection,
@@ -8,12 +13,6 @@ from media_finder_sdk import (
     ReleaseSearchQuery,
     SafeReleaseSnapshot,
     TorrentArtifact,
-)
-
-from media_finder.release_selection import (
-    ReleaseSelectionCache,
-    ReleaseSelectionExpired,
-    ReleaseSelectionService,
 )
 
 
@@ -52,7 +51,7 @@ class FixtureReleaseProvider:
 
 def test_release_selection_exposes_only_safe_snapshot_and_resolves_private_selection() -> None:
     provider = FixtureReleaseProvider()
-    service = ReleaseSelectionService(provider, ReleaseSelectionCache())
+    service = ReleaseSelectionService(provider=provider, cache=ReleaseSelectionCache())
 
     selected = service.search(ReleaseSearchQuery(query="Fixture"))[0]
 
@@ -83,7 +82,7 @@ def test_release_selection_cache_enforces_ttl_lru_eviction_and_process_locality(
         max_entries=2,
         clock=lambda: current[0],
     )
-    service = ReleaseSelectionService(provider, cache)
+    service = ReleaseSelectionService(provider=provider, cache=cache)
 
     first = service.search(ReleaseSearchQuery(query="first"))[0]
     second = service.search(ReleaseSearchQuery(query="second"))[0]
@@ -96,8 +95,8 @@ def test_release_selection_cache_enforces_ttl_lru_eviction_and_process_locality(
     assert service.inspect(third.token).title == "third.Release"
 
     restarted = ReleaseSelectionService(
-        provider,
-        ReleaseSelectionCache(clock=lambda: current[0]),
+        provider=provider,
+        cache=ReleaseSelectionCache(clock=lambda: current[0]),
     )
     with pytest.raises(ReleaseSelectionExpired):
         restarted.inspect(first.token)
@@ -109,7 +108,7 @@ def test_release_selection_cache_enforces_ttl_lru_eviction_and_process_locality(
 
 def test_release_selection_resolves_torrent_bytes_in_memory_and_closes_provider() -> None:
     provider = FixtureReleaseProvider()
-    service = ReleaseSelectionService(provider, ReleaseSelectionCache())
+    service = ReleaseSelectionService(provider=provider, cache=ReleaseSelectionCache())
     selected = service.search(ReleaseSearchQuery(query="torrent"))[0]
 
     resolved = service.resolve(selected.token)

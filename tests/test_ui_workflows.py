@@ -4,6 +4,10 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from media_finder.db import migrate_to_head, session_factory
+from media_finder.models import Acquisition, DownloadClientInstance, MediaItem, MetadataRevision
+from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
+from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder_sdk import (
     MagnetArtifact,
     PrivateReleaseSelection,
@@ -13,11 +17,6 @@ from media_finder_sdk import (
 )
 from media_finder_server import create_legacy_module_registry, create_ui_app
 from sqlalchemy import func, select
-
-from media_finder.db import migrate_to_head, session_factory
-from media_finder.models import Acquisition, DownloadClientInstance, MediaItem, MetadataRevision
-from media_finder.release_selection import ReleaseSelectionCache, ReleaseSelectionService
-from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 
 LEGACY_REGISTRY = create_legacy_module_registry()
 
@@ -68,7 +67,9 @@ def workflow_app(
     database_url = f"sqlite:///{tmp_path / 'workflow.db'}"
     migrate_to_head(database_url)
     monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long test session secret")
-    prowlarr = ReleaseSelectionService(FakeReleaseProvider(), ReleaseSelectionCache())
+    prowlarr = ReleaseSelectionService(
+        provider=FakeReleaseProvider(), cache=ReleaseSelectionCache()
+    )
     app = create_ui_app(
         database_url,
         session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
@@ -78,6 +79,7 @@ def workflow_app(
         },
         prowlarr=prowlarr,
         client_loader=lambda _: fake_client,
+        download_client_versions={"qbittorrent": "9.8.7"},
     )
     sessions = session_factory(app.state.engine)
     with sessions() as session:

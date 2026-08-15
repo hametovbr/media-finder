@@ -1,8 +1,8 @@
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-
 from media_finder.api import create_app
 from media_finder.db import create_database, migrate_to_head, session_factory
 from media_finder.domain import CatalogService
@@ -155,6 +155,12 @@ def test_current_and_pinned_naming_endpoints_use_the_fixed_profile(
         revision = item.current_revision
         assert revision is not None
         acquisition = Acquisition(
+            id=(acquisition_identity := uuid4()),
+            correlation=f"mf-acq-{acquisition_identity}",
+            release_provider_id="fixture-release",
+            release_provider_version="1.0.0",
+            download_client_module_id="fixture-download",
+            download_client_module_version="1.0.0",
             media_item_id=item.id,
             metadata_revision_id=revision.id,
             idempotency_key="naming-api",

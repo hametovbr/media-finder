@@ -53,6 +53,23 @@ from media_finder_control.models import (
 from media_finder_control.models import (
     DownloadDestination as ControlDestination,
 )
+from media_finder_core.acquisition import (
+    AcquisitionCommands,
+    AcquisitionQueries,
+    DestinationUnavailable,
+    ModuleVersionSnapshot,
+    ReleaseSelectionService,
+)
+from media_finder_core.acquisition import (
+    AcquisitionRequest as CoreAcquisitionRequest,
+)
+from media_finder_core.acquisition import (
+    AcquisitionSnapshot as CoreAcquisitionSnapshot,
+)
+from media_finder_core.acquisition.persistence import (
+    SqlAlchemyAcquisitionQueries,
+    SqlAlchemyAcquisitionUnitOfWork,
+)
 from media_finder_core.catalog import (
     CatalogCommands,
     CatalogQueries,
@@ -63,6 +80,9 @@ from media_finder_core.catalog.persistence import (
     SqlAlchemyCatalogQueries,
     SqlAlchemyCatalogRepository,
     SqlAlchemyCatalogUnitOfWork,
+)
+from media_finder_sdk import (
+    DownloadClient as CoreDownloadClient,
 )
 from media_finder_sdk import (
     EpisodeTableDocument,
@@ -84,14 +104,12 @@ from media_finder_sdk import (
     MetadataSearchResult as CoreMetadataSearchResult,
 )
 from media_finder_sdk import ReleaseSearchQuery as ModuleReleaseSearchQuery
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from .acquisition import AcquisitionRequest, AcquisitionService, DestinationUnavailable
 from .ephemeral import EphemeralCache, EphemeralTokenExpired
 from .integration_runtime import LegacyMetadataCapabilities, RuntimeResolver
-from .models import Acquisition, DownloadClientInstance, MediaItem, MetadataRevision
+from .models import DownloadClientInstance, MediaItem, MetadataRevision
 from .sdk.protocols import DownloadClient
 from .sdk.registration import IntegrationDescriptor, StaticModuleRegistry
 from .sdk.types import EnvironmentVariableSpec, NormalizedMetadata
@@ -675,20 +693,59 @@ class BackendControlGateway:
             item = database.get(MediaItem, request.media_item_id)
             if item is None or item.current_revision_id is None:
                 raise ControlFailure(code="media_item_not_found", status=404)
-            service = AcquisitionService(
-                database,
-                runtime.prowlarr().value,
-                self._load_client,
+            instance = database.get(DownloadClientInstance, SYSTEM_QBITTORRENT_ID)
+            if instance is None:
+                raise ControlFailure(code="download_client_not_found", status=404)
+
+            def release_selections() -> ReleaseSelectionService:
+                result = runtime.prowlarr()
+                if result.value is None:
+                    raise ValueError(result.error_code or "acquisition_unavailable")
+                return result.value
+
+            def download_client() -> CoreDownloadClient:
+                result = runtime.core_download_client(instance)
+                if result.value is None:
+                    raise ValueError(result.error_code or "download_client_unavailable")
+                return result.value
+
+            def download_client_module() -> ModuleVersionSnapshot:
+                version = runtime.download_client_version(instance)
+                if version is None:
+                    raise ValueError("download_client_version_unavailable")
+                return ModuleVersionSnapshot(
+                    module_id=instance.module_key,
+                    module_version=version,
+                )
+
+            service = AcquisitionCommands(
+                query_port=SqlAlchemyAcquisitionQueries(
+                    self._sessions,
+                    legacy_download_client_instance_id=instance.id,
+                ),
+                unit_of_work=SqlAlchemyAcquisitionUnitOfWork(
+                    self._sessions,
+                    legacy_download_client_instance_id=instance.id,
+                ),
+                catalog=SqlAlchemyCatalogQueries(self._sessions),
+                releases=release_selections,
+                download_client=download_client,
+                release_provider=ModuleVersionSnapshot(
+                    module_id=self._release_integration.key,
+                    module_version=self._release_integration.version,
+                ),
+                download_client_module=download_client_module,
+                clock=lambda: datetime.now(UTC),
             )
             try:
                 acquisition = service.submit(
-                    AcquisitionRequest(
+                    CoreAcquisitionRequest(
                         media_item_id=item.id,
                         metadata_revision_id=item.current_revision_id,
-                        client_instance_id=SYSTEM_QBITTORRENT_ID,
                         destination=request.destination,
                         release_token=request.release_token,
                         idempotency_key=request.idempotency_key,
+                        naming_profile="jellyfin-v1",
                     )
                 )
                 return self._acquisition_view(acquisition)
@@ -711,12 +768,40 @@ class BackendControlGateway:
         return await self._run(operation)
 
     async def reconcile_acquisition(self, *, acquisition_id: str) -> AcquisitionView:
+        runtime = self._require_runtime()
+
         def operation(database: Session) -> AcquisitionView:
+            instance = database.get(DownloadClientInstance, SYSTEM_QBITTORRENT_ID)
+            if instance is None:
+                raise ControlFailure(code="download_client_not_found", status=404)
+            persisted = SqlAlchemyAcquisitionQueries(self._sessions).get(acquisition_id)
+            if persisted is None:
+                raise ControlFailure(code="acquisition_not_found", status=404)
+            if persisted.download_client.module_id != instance.module_key:
+                raise ControlFailure(code="download_client_module_mismatch", status=422)
+
+            def download_client() -> CoreDownloadClient:
+                result = runtime.core_download_client(instance)
+                if result.value is None:
+                    raise ValueError(result.error_code or "download_client_unavailable")
+                return result.value
+
             try:
-                acquisition = AcquisitionService(
-                    database,
-                    None,
-                    self._load_client,
+                acquisition = AcquisitionCommands(
+                    query_port=SqlAlchemyAcquisitionQueries(
+                        self._sessions,
+                        legacy_download_client_instance_id=instance.id,
+                    ),
+                    unit_of_work=SqlAlchemyAcquisitionUnitOfWork(
+                        self._sessions,
+                        legacy_download_client_instance_id=instance.id,
+                    ),
+                    catalog=SqlAlchemyCatalogQueries(self._sessions),
+                    releases=None,
+                    download_client=download_client,
+                    release_provider=persisted.release_provider,
+                    download_client_module=persisted.download_client,
+                    clock=lambda: datetime.now(UTC),
                 ).reconcile(acquisition_id)
                 return self._acquisition_view(acquisition)
             except Exception as error:
@@ -965,19 +1050,22 @@ class BackendControlGateway:
         return ControlFailure(code=code, status=status)
 
     @staticmethod
-    def _acquisition_view(acquisition: Acquisition) -> AcquisitionView:
+    def _acquisition_view(
+        acquisition: CoreAcquisitionSnapshot,
+    ) -> AcquisitionView:
         return AcquisitionView(
             id=str(acquisition.id),
             media_item_id=acquisition.media_item_id,
-            status=AcquisitionStatus(acquisition.status),
-            release_title=acquisition.release_title or "",
+            status=AcquisitionStatus(acquisition.status.value),
+            release_title=acquisition.release_snapshot.title,
             destination=acquisition.destination,
             created_at=acquisition.created_at,
             error_code=acquisition.failure_code,
         )
 
-    @staticmethod
-    def _media_item_detail(database: Session, item: MediaItem, locale: Locale) -> MediaItemDetail:
+    def _media_item_detail(
+        self, database: Session, item: MediaItem, locale: Locale
+    ) -> MediaItemDetail:
         revision = database.get(MetadataRevision, item.current_revision_id)
         if revision is None or revision.effective_payload is None:
             raise ControlFailure(code="metadata_unavailable", status=410)
@@ -986,20 +1074,10 @@ class BackendControlGateway:
         except Exception:
             raise ControlFailure(code="metadata_unavailable", status=410) from None
         acquisitions = tuple(
-            AcquisitionView(
-                id=str(acquisition.id),
-                media_item_id=acquisition.media_item_id,
-                status=AcquisitionStatus(acquisition.status),
-                release_title=acquisition.release_title or "",
-                destination=acquisition.destination,
-                created_at=acquisition.created_at,
-                error_code=acquisition.failure_code,
-            )
-            for acquisition in database.scalars(
-                select(Acquisition)
-                .where(Acquisition.media_item_id == item.id)
-                .order_by(Acquisition.created_at.desc(), Acquisition.id.desc())
-            )
+            self._acquisition_view(acquisition)
+            for acquisition in AcquisitionQueries(
+                query_port=SqlAlchemyAcquisitionQueries(self._sessions)
+            ).for_media_item(item.id, limit=100)
         )
         projected = MetadataView(
             kind=MediaKind(metadata.kind.value),
@@ -1040,8 +1118,7 @@ class BackendControlGateway:
             acquisitions=acquisitions,
         )
 
-    @staticmethod
-    def _catalog_item(database: Session, item: MediaItem, locale: Locale) -> CatalogItemView:
+    def _catalog_item(self, database: Session, item: MediaItem, locale: Locale) -> CatalogItemView:
         revision = database.get(MetadataRevision, item.current_revision_id)
         payload = revision.effective_payload if revision and revision.effective_payload else {}
         raw_titles = payload.get("titles")
@@ -1052,12 +1129,10 @@ class BackendControlGateway:
             if isinstance(artwork, dict) and str(artwork.get("kind", "")).casefold() == "poster":
                 poster_url = artwork.get("url")
                 break
-        latest = database.scalar(
-            select(Acquisition)
-            .where(Acquisition.media_item_id == item.id)
-            .order_by(Acquisition.created_at.desc(), Acquisition.id.desc())
-            .limit(1)
-        )
+        latest_values = AcquisitionQueries(
+            query_port=SqlAlchemyAcquisitionQueries(self._sessions)
+        ).for_media_item(item.id, limit=1)
+        latest = latest_values[0] if latest_values else None
         return CatalogItemView(
             id=item.id,
             title=str(title),
@@ -1065,7 +1140,7 @@ class BackendControlGateway:
             kind=MediaKind(item.kind),
             provider_key=item.provider_key,
             latest_acquisition_status=(
-                AcquisitionStatus(latest.status) if latest is not None else None
+                AcquisitionStatus(latest.status.value) if latest is not None else None
             ),
             poster_url=poster_url,
             archived=item.archived_at is not None,

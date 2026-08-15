@@ -154,6 +154,8 @@ The legacy generic `app_settings` table and mutable `download_client_instances` 
 
 Existing migrations are squashed into a new initial migration before the next stable release. Starting against an old development Alembic revision fails explicitly; developers and test operators recreate `/data`. There is no silent data conversion and no compatibility model. Fresh-schema migration, SQLite WAL/foreign-key settings, readiness, schema drift, immutability, idempotency, and savepoint behavior remain covered by integration tests.
 
+The acquisition production cutover is a dependency exception to the broader schema-replacement phase. The current table cannot represent immutable release-provider and download-client module versions, so acquisition context extraction introduces its owning record and required snapshot columns before the legacy acquisition service is removed. A temporary development migration may bridge the test database during that vertical slice; the later schema phase still removes legacy settings/client tables and squashes every development revision into the single new initial migration. Reconstructing historical module versions from the currently installed manifests is prohibited because an upgrade would silently rewrite the meaning of an existing Acquisition.
+
 Alternative rejected: retaining legacy tables solely for rollback would make an unsupported pre-release database format a permanent core contract. If persistent production data exists before apply begins, the change must be updated rather than silently implementing this decision.
 
 ### 4. Publish one narrow SDK for three module kinds and four specialized capabilities
@@ -275,8 +277,8 @@ Removing any of the retained components would break a current approved requireme
 2. Convert the root into a virtual uv workspace and create buildable empty server-host, core, and module-SDK distributions without moving runtime behavior.
 3. Move public SDK DTOs, manifests, registrations, errors, schema generation, fixtures, and conformance runners; update all consumers to the new SDK and remove `media_finder.sdk`.
 4. Extract Manual, TMDB, Prowlarr, and qBittorrent sequentially into their own wheels, making each pass isolated build, architecture, and capability conformance before removing its old source.
-5. Split core into catalog, acquisition, exports, module-runtime, control, and platform contexts; replace direct ORM coordination with focused ports and decompose the control facade without changing HTTP DTOs.
-6. Replace the development schema with the new core-owned initial migration, remove legacy settings/client tables and cross-context ORM relationships, and verify fresh migration and persistence invariants.
+5. Split core into catalog, acquisition, exports, module-runtime, control, and platform contexts; introduce acquisition-owned immutable module-version snapshot persistence as a prerequisite of the acquisition production cutover; replace direct ORM coordination with focused ports and decompose the control facade without changing HTTP DTOs.
+6. Replace the remaining development schema with the new core-owned initial migration, remove legacy settings/client tables and cross-context ORM relationships, squash the temporary acquisition migration, and verify fresh migration and persistence invariants.
 7. Move FastAPI composition and adapters into the server host, explicitly register first-party modules there, and prove one lifespan owns all resources in built-in and disabled UI modes.
 8. Add deterministic module JSON Schemas, processor OpenAPI, serialized conformance fixtures, isolated wheel builds, dependency rules, and Docker installation from built wheels to existing verification jobs.
 9. Update English contributor, module-authoring, architecture, environment, deployment, and database-reset documentation; regenerate assets and localization catalogs without changing UI behavior.

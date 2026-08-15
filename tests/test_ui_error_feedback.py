@@ -2,14 +2,14 @@
 import json
 import re
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from media_finder_server import create_ui_app
-from sqlalchemy import select
-
 from media_finder.db import migrate_to_head, session_factory
 from media_finder.models import Acquisition, DownloadClientInstance, MediaItem
+from media_finder_server import create_ui_app
+from sqlalchemy import select
 
 
 def _csrf(text: str) -> str:
@@ -80,6 +80,12 @@ def test_failed_acquisition_fragment_localizes_status_and_failure_code(feedback_
         database.flush()
         database.add(
             Acquisition(
+                id=(acquisition_id := uuid4()),
+                correlation=f"mf-acq-{acquisition_id}",
+                release_provider_id="fixture-release",
+                release_provider_version="1.0.0",
+                download_client_module_id="fixture-download",
+                download_client_module_version="1.0.0",
                 media_item_id=item.id,
                 metadata_revision_id=item.current_revision_id,
                 download_client_instance_id=instance.id,

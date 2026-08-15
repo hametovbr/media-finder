@@ -11,9 +11,23 @@ from typing import Protocol
 
 import httpx
 from media_finder_core import ModuleRuntime
+from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
+from media_finder_sdk import (
+    CorrelationResult as CoreCorrelationResult,
+)
+from media_finder_sdk import (
+    DownloadArtifact as CoreDownloadArtifact,
+)
+from media_finder_sdk import (
+    DownloadClient as CoreDownloadClient,
+)
+from media_finder_sdk import (
+    DownloadDestination as CoreDownloadDestination,
+)
 from media_finder_sdk import (
     ExportWarning as CoreExportWarning,
 )
+from media_finder_sdk import MagnetArtifact as CoreMagnetArtifact
 from media_finder_sdk import (
     MediaKind as CoreMediaKind,
 )
@@ -23,6 +37,7 @@ from media_finder_sdk import (
     MetadataRetentionPolicy,
     MetadataSearchQuery,
     MetadataSearchResult,
+    ModuleFailureCategory,
     ProviderPayload,
     ReleaseProviderRegistration,
     RetentionSubject,
@@ -31,6 +46,7 @@ from media_finder_sdk import (
 from media_finder_sdk import (
     MetadataProvider as CoreMetadataProvider,
 )
+from media_finder_sdk import ModuleError as CoreModuleError
 from media_finder_sdk import (
     NormalizedMetadata as CoreNormalizedMetadata,
 )
@@ -43,10 +59,15 @@ from media_finder_sdk import (
 from media_finder_sdk import (
     RetentionPolicy as CoreRetentionPolicy,
 )
+from media_finder_sdk import (
+    SubmissionResult as CoreSubmissionResult,
+)
+from media_finder_sdk import (
+    TorrentArtifact as CoreTorrentArtifact,
+)
 
-from .acquisition import ClientLoader
 from .models import DownloadClientInstance
-from .release_selection import ReleaseSelectionCache, ReleaseSelectionService
+from .sdk.errors import ModuleError as LegacyModuleError
 from .sdk.protocols import DownloadClient, MetadataProvider
 from .sdk.registration import (
     EnvironmentConfigurationError,
@@ -55,13 +76,32 @@ from .sdk.registration import (
     resolve_environment,
 )
 from .sdk.settings import EnvReference
-from .sdk.types import Attribution, EnvironmentVariableSpec
+from .sdk.types import (
+    Attribution,
+    EnvironmentVariableSpec,
+)
+from .sdk.types import (
+    CorrelationResult as LegacyCorrelationResult,
+)
+from .sdk.types import (
+    DownloadArtifact as LegacyDownloadArtifact,
+)
+from .sdk.types import (
+    MagnetArtifact as LegacyMagnetArtifact,
+)
 from .sdk.types import RetentionPolicy as LegacyRetentionPolicy
+from .sdk.types import (
+    SubmissionResult as LegacySubmissionResult,
+)
+from .sdk.types import (
+    TorrentArtifact as LegacyTorrentArtifact,
+)
 from .system_clients import SYSTEM_QBITTORRENT_ID
 
 type ReleaseRegistrationFactory = Callable[
     [Callable[[], httpx.Client]], ReleaseProviderRegistration
 ]
+type ClientLoader = Callable[[DownloadClientInstance], DownloadClient]
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +152,7 @@ class DefaultRuntimeFactory:
         release_manifest = release_registration_factory(http_client_factory).manifest
         self._release_integration = IntegrationDescriptor(
             key=release_manifest.module_id,
+            version=release_manifest.module_version,
             environment=tuple(
                 EnvironmentVariableSpec(
                     name=value.name,
@@ -247,7 +288,10 @@ class DefaultRuntimeFactory:
                 resolve_module_environment(registered.manifest, environment)
             )
             provider.validate()
-            adapter = ReleaseSelectionService(provider, ReleaseSelectionCache())
+            adapter = ReleaseSelectionService(
+                provider=provider,
+                cache=ReleaseSelectionCache(),
+            )
             with self._lock:
                 if self._closed:
                     existing = None
@@ -393,11 +437,13 @@ class RuntimeResolver:
         providers: Mapping[str, MetadataProvider],
         prowlarr: ReleaseSelectionService | None,
         client_loader: ClientLoader | None,
+        download_client_versions: Mapping[str, str] | None = None,
     ) -> None:
         self._factory = factory
         self._providers = dict(providers)
         self._prowlarr = prowlarr
         self._client_loader = client_loader
+        self._download_client_versions = dict(download_client_versions or {})
 
     @property
     def supported_providers(self) -> Mapping[str, MetadataProvider]:
@@ -452,6 +498,34 @@ class RuntimeResolver:
         except Exception:
             return RuntimeResult(None, "download_client_configuration_invalid")
 
+    def core_download_client(
+        self, instance: DownloadClientInstance
+    ) -> RuntimeResult[CoreDownloadClient]:
+        module_runtime = (
+            getattr(self._factory, "module_runtime", None) if self._factory is not None else None
+        )
+        if isinstance(module_runtime, ModuleRuntime):
+            try:
+                return RuntimeResult(module_runtime.download_client(instance.module_key))
+            except Exception:
+                return RuntimeResult(None, "download_client_configuration_invalid")
+        legacy = self.download_client(instance)
+        return RuntimeResult(
+            _CoreDownloadClientAdapter(legacy.value) if legacy.value is not None else None,
+            legacy.error_code,
+            legacy.missing_variables,
+        )
+
+    def download_client_version(self, instance: DownloadClientInstance) -> str | None:
+        module_runtime = (
+            getattr(self._factory, "module_runtime", None) if self._factory is not None else None
+        )
+        if isinstance(module_runtime, ModuleRuntime):
+            registration = module_runtime.registry.download.get(instance.module_key)
+            if registration is not None:
+                return registration.manifest.module_version
+        return self._download_client_versions.get(instance.module_key)
+
     def provider_ready(self, key: str) -> bool:
         return self.metadata_provider(key).value is not None
 
@@ -473,6 +547,66 @@ class RuntimeResolver:
             return False
         probe = getattr(self._factory, "environment_is_set", None)
         return bool(probe(name)) if callable(probe) else False
+
+
+class _CoreDownloadClientAdapter:
+    """Translate the temporary server client surface to the public SDK capability."""
+
+    def __init__(self, client: DownloadClient) -> None:
+        self._client = client
+
+    def validate(self) -> None:
+        self._client.validate_config()
+
+    def list_destinations(self) -> tuple[CoreDownloadDestination, ...]:
+        return tuple(
+            CoreDownloadDestination.model_validate(value.model_dump(mode="json"))
+            for value in self._client.list_destinations()
+        )
+
+    def submit(
+        self,
+        artifact: CoreDownloadArtifact,
+        destination: str,
+        correlation: str,
+    ) -> CoreSubmissionResult:
+        legacy_artifact: LegacyDownloadArtifact
+        if isinstance(artifact, CoreMagnetArtifact):
+            legacy_artifact = LegacyMagnetArtifact(uri=artifact.uri)
+        elif isinstance(artifact, CoreTorrentArtifact):
+            legacy_artifact = LegacyTorrentArtifact(content=artifact.content())
+        else:  # pragma: no cover - the SDK union is closed
+            raise ValueError("download_artifact_unsupported")
+        try:
+            value: LegacySubmissionResult = self._client.submit(
+                legacy_artifact,
+                destination,
+                correlation,
+            )
+        except LegacyModuleError as error:
+            raise _core_module_error(error.code) from None
+        return CoreSubmissionResult.model_validate(value.model_dump(mode="json"))
+
+    def find_by_correlation(self, correlation: str) -> CoreCorrelationResult:
+        try:
+            value: LegacyCorrelationResult = self._client.find_by_correlation(correlation)
+        except LegacyModuleError as error:
+            raise _core_module_error(error.code) from None
+        return CoreCorrelationResult.model_validate(value.model_dump(mode="json"))
+
+    def close(self) -> None:
+        return None
+
+
+def _core_module_error(code: str) -> CoreModuleError:
+    return CoreModuleError(
+        category=(
+            ModuleFailureCategory.TIMEOUT
+            if code == "submission_timeout"
+            else ModuleFailureCategory.UNAVAILABLE
+        ),
+        code=code,
+    )
 
 
 class LegacyMetadataCapabilities:

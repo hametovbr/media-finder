@@ -2,11 +2,10 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy.exc import IntegrityError
-
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.models import Acquisition, Collection, MediaItem, MetadataRevision
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance, RetentionPolicy
+from sqlalchemy.exc import IntegrityError
 
 
 def metadata(title: str = "Spirited Away", year: int = 2001) -> NormalizedMetadata:
@@ -42,7 +41,12 @@ def test_archive_retains_revisions_and_acquisitions(database) -> None:
     item = service.create_manual_item(metadata())
     revision = item.revisions[-1]
     acquisition = Acquisition(
-        id=uuid4(),
+        id=(acquisition_id := uuid4()),
+        correlation=f"mf-acq-{acquisition_id}",
+        release_provider_id="fixture-release",
+        release_provider_version="1.0.0",
+        download_client_module_id="fixture-download",
+        download_client_module_version="1.0.0",
         media_item_id=item.id,
         metadata_revision_id=revision.id,
         idempotency_key="archive-test",
@@ -95,6 +99,12 @@ def test_acquisition_pins_revision_and_idempotency_key_is_unique(database) -> No
     item = service.create_manual_item(metadata())
     pinned = item.revisions[-1]
     first = Acquisition(
+        id=(first_id := uuid4()),
+        correlation=f"mf-acq-{first_id}",
+        release_provider_id="fixture-release",
+        release_provider_version="1.0.0",
+        download_client_module_id="fixture-download",
+        download_client_module_version="1.0.0",
         media_item_id=item.id,
         metadata_revision_id=pinned.id,
         idempotency_key="same-request",
@@ -107,6 +117,12 @@ def test_acquisition_pins_revision_and_idempotency_key_is_unique(database) -> No
     assert first.metadata_revision_id == pinned.id
     database.add(
         Acquisition(
+            id=(duplicate_id := uuid4()),
+            correlation=f"mf-acq-{duplicate_id}",
+            release_provider_id="fixture-release",
+            release_provider_version="1.0.0",
+            download_client_module_id="fixture-download",
+            download_client_module_version="1.0.0",
             media_item_id=item.id,
             metadata_revision_id=item.revisions[-1].id,
             idempotency_key="same-request",
@@ -123,6 +139,12 @@ def test_acquisition_cannot_be_repointed_to_a_new_revision(database) -> None:
     item = service.create_manual_item(metadata())
     pinned = item.revisions[-1]
     acquisition = Acquisition(
+        id=(acquisition_id := uuid4()),
+        correlation=f"mf-acq-{acquisition_id}",
+        release_provider_id="fixture-release",
+        release_provider_version="1.0.0",
+        download_client_module_id="fixture-download",
+        download_client_module_version="1.0.0",
         media_item_id=item.id,
         metadata_revision_id=pinned.id,
         idempotency_key="immutable-pin",

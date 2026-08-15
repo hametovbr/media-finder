@@ -1,8 +1,8 @@
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
-
 from media_finder.api import create_app
 from media_finder.db import create_database, migrate_to_head, session_factory
 from media_finder.domain import CatalogService, RevisionInput
@@ -54,6 +54,12 @@ def test_metadata_endpoints_return_current_and_pinned_validated_snapshots(
         pinned = item.current_revision
         assert pinned is not None
         acquisition = Acquisition(
+            id=(acquisition_identity := uuid4()),
+            correlation=f"mf-acq-{acquisition_identity}",
+            release_provider_id="fixture-release",
+            release_provider_version="1.0.0",
+            download_client_module_id="fixture-download",
+            download_client_module_version="1.0.0",
             media_item_id=item.id,
             metadata_revision_id=pinned.id,
             idempotency_key="metadata-pin",
@@ -104,6 +110,12 @@ def test_expiry_is_enforced_at_boundary_before_and_after_purge(tmp_path: Path, m
             datetime(2025, 1, 1, tzinfo=UTC),
         )
         acquisition = Acquisition(
+            id=(acquisition_identity := uuid4()),
+            correlation=f"mf-acq-{acquisition_identity}",
+            release_provider_id="fixture-release",
+            release_provider_version="1.0.0",
+            download_client_module_id="fixture-download",
+            download_client_module_version="1.0.0",
             media_item_id=item.id,
             metadata_revision_id=revision.id,
             idempotency_key="expired-pin",
@@ -167,6 +179,12 @@ def test_naming_and_nfo_expiry_at_boundary_and_after_purge_for_current_and_pinne
             datetime(2025, 1, 1, tzinfo=UTC),
         )
         acquisition = Acquisition(
+            id=(acquisition_identity := uuid4()),
+            correlation=f"mf-acq-{acquisition_identity}",
+            release_provider_id="fixture-release",
+            release_provider_version="1.0.0",
+            download_client_module_id="fixture-download",
+            download_client_module_version="1.0.0",
             media_item_id=item.id,
             metadata_revision_id=revision.id,
             idempotency_key="export-expiry",

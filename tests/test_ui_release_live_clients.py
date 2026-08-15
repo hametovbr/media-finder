@@ -1,9 +1,15 @@
 import json
 import re
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from media_finder.db import migrate_to_head, session_factory
+from media_finder.models import Acquisition, MediaItem
+from media_finder.sdk.types import CorrelationResult, DownloadDestination, SubmissionResult
+from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
+from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder_sdk import (
     MagnetArtifact,
     PrivateReleaseSelection,
@@ -13,12 +19,6 @@ from media_finder_sdk import (
 )
 from media_finder_server import create_ui_app
 from sqlalchemy import select
-
-from media_finder.db import migrate_to_head, session_factory
-from media_finder.models import Acquisition, MediaItem
-from media_finder.release_selection import ReleaseSelectionCache, ReleaseSelectionService
-from media_finder.sdk.types import CorrelationResult, DownloadDestination, SubmissionResult
-from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 
 
 def _csrf(text: str) -> str:
@@ -82,8 +82,11 @@ def release_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     app = create_ui_app(
         database_url,
         session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
-        prowlarr=ReleaseSelectionService(FakeReleaseProvider(), ReleaseSelectionCache()),
+        prowlarr=ReleaseSelectionService(
+            provider=FakeReleaseProvider(), cache=ReleaseSelectionCache()
+        ),
         client_loader=lambda _: qbittorrent,
+        download_client_versions={"qbittorrent": "9.8.7"},
     )
     app.state.fake_client = qbittorrent
     return app
@@ -197,6 +200,12 @@ def test_pending_system_reconcile_does_not_require_prowlarr(release_app) -> None
             item = database.get(MediaItem, item_id)
             assert item is not None and item.current_revision_id is not None
             acquisition = Acquisition(
+                id=(acquisition_id := uuid4()),
+                correlation=f"mf-acq-{acquisition_id}",
+                release_provider_id="fixture-release",
+                release_provider_version="1.0.0",
+                download_client_module_id="qbittorrent",
+                download_client_module_version="0.1.0",
                 media_item_id=item.id,
                 metadata_revision_id=item.current_revision_id,
                 download_client_instance_id=SYSTEM_QBITTORRENT_ID,

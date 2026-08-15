@@ -59,7 +59,10 @@ class AttributionSpec(PublicModel):
 class ModuleManifest(PublicModel):
     """Canonical static contract read from a module's ``module.toml``."""
 
-    module_id: Annotated[str, Field(pattern=r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$")]
+    module_id: Annotated[
+        str,
+        Field(max_length=100, pattern=r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"),
+    ]
     module_kind: ModuleKind
     module_version: str
     sdk_compatibility: str

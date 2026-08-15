@@ -1,11 +1,10 @@
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 from xml.etree import ElementTree
 
 import pytest
 from fastapi.testclient import TestClient
-from media_finder_server import create_legacy_module_registry
-
 from media_finder.api import create_app
 from media_finder.db import create_database, migrate_to_head, session_factory
 from media_finder.domain import CatalogService
@@ -25,6 +24,7 @@ from media_finder.sdk.types import (
     RetentionPolicy,
     Season,
 )
+from media_finder_server import create_legacy_module_registry
 
 LEGACY_REGISTRY = create_legacy_module_registry()
 
@@ -161,6 +161,12 @@ def test_current_and_pinned_nfo_api_adds_provider_owned_warning_headers(
             datetime(2025, 1, 1, tzinfo=UTC),
         )
         acquisition = Acquisition(
+            id=(acquisition_identity := uuid4()),
+            correlation=f"mf-acq-{acquisition_identity}",
+            release_provider_id="fixture-release",
+            release_provider_version="1.0.0",
+            download_client_module_id="fixture-download",
+            download_client_module_version="1.0.0",
             media_item_id=item.id,
             metadata_revision_id=revision.id,
             idempotency_key="nfo-api",

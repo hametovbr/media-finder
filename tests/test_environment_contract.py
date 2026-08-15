@@ -3,9 +3,6 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
-from media_finder_server import create_legacy_module_registry, create_runtime_factory
-from pydantic import ValidationError
-
 from media_finder import sdk
 from media_finder.sdk.conformance import ClientConformanceFixture, ProviderConformanceFixture
 from media_finder.sdk.registration import (
@@ -19,6 +16,8 @@ from media_finder.sdk.types import (
     RetentionActionKind,
     TorrentArtifact,
 )
+from media_finder_server import create_legacy_module_registry, create_runtime_factory
+from pydantic import ValidationError
 
 LEGACY_REGISTRY = create_legacy_module_registry()
 
@@ -133,6 +132,41 @@ def test_prowlarr_publishes_the_same_public_descriptor_type() -> None:
         "PROWLARR_API_KEY",
     ]
     assert [item.secret for item in release_integration.environment] == [False, True]
+
+
+def test_release_descriptor_requires_and_preserves_the_manifest_version() -> None:
+    from types import SimpleNamespace
+
+    from media_finder.ui import _release_descriptor
+
+    descriptor = sdk.IntegrationDescriptor
+    with pytest.raises(TypeError):
+        descriptor(key="fixture-release", environment=())
+
+    value = _release_descriptor(
+        lambda _: SimpleNamespace(
+            manifest=SimpleNamespace(
+                module_id="fixture-release",
+                module_version="9.8.7",
+                environment=(),
+            )
+        )
+    )
+    assert value.version == "9.8.7"
+
+
+def test_unregistered_download_client_version_is_never_fabricated() -> None:
+    from types import SimpleNamespace
+
+    from media_finder.integration_runtime import RuntimeResolver
+
+    resolver = RuntimeResolver(
+        factory=None,
+        providers={},
+        prowlarr=None,
+        client_loader=lambda _: object(),
+    )
+    assert resolver.download_client_version(SimpleNamespace(module_key="fixture-download")) is None
 
 
 def test_shared_conformance_exercises_declared_and_missing_environment() -> None:

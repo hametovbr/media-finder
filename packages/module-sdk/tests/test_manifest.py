@@ -54,6 +54,12 @@ def test_invalid_identity_version_or_sdk_range_is_rejected(field: str, value: st
         parse_manifest(manifest_toml(**arguments))  # type: ignore[arg-type]
 
 
+def test_module_identity_bound_matches_durable_snapshot_storage() -> None:
+    assert parse_manifest(manifest_toml(module_id="a" * 100)).module_id == "a" * 100
+    with pytest.raises(ValidationError):
+        parse_manifest(manifest_toml(module_id="a" * 101))
+
+
 @pytest.mark.parametrize("name", ("", "token", "PREFIX_*", "1TOKEN", "TOKEN-NAME"))
 def test_environment_names_are_exact_and_syntactically_valid(name: str) -> None:
     declaration = f'''\
