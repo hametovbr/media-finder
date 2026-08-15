@@ -5,6 +5,7 @@ import httpx
 import pytest
 from pydantic import BaseModel, ValidationError
 
+from media_finder.integration_runtime import DefaultRuntimeFactory
 from media_finder.models import DownloadClientInstance
 from media_finder.modules.manual import ManualProvider
 from media_finder.modules.qbittorrent import HttpxQbittorrentTransport, QbittorrentConfig
@@ -21,7 +22,6 @@ from media_finder.sdk.registration import (
     StaticModuleRegistry,
 )
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
-from media_finder.ui_runtime import DefaultRuntimeFactory
 
 
 def _secrets(reference: str) -> str:

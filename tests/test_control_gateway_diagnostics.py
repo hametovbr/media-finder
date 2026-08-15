@@ -6,8 +6,8 @@ from media_finder_control import ReadinessStatus
 from sqlalchemy.orm import Session, sessionmaker
 
 from media_finder.control_gateway import BackendControlGateway
+from media_finder.integration_runtime import RuntimeResolver, RuntimeResult
 from media_finder.system_clients import ensure_system_qbittorrent
-from media_finder.ui_runtime import RuntimeResolver, RuntimeResult
 
 
 class DiagnosticRuntime:

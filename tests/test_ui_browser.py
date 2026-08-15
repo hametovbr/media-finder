@@ -11,11 +11,16 @@ from uuid import uuid4
 import httpx
 import pytest
 import uvicorn
-from fastapi.responses import Response
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse, Response
+from media_finder_builtin_ui import create_builtin_ui
+from media_finder_builtin_ui.fake import FakeBrowserSecurity, FakeControlGateway
 from playwright.sync_api import Browser, Page, Playwright, sync_playwright
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
+from media_finder.control_api import create_control_app
+from media_finder.control_security import BackendBrowserSecurity
 from media_finder.db import migrate_to_head, session_factory
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.models import Acquisition, DownloadClientInstance, MediaItem
@@ -345,6 +350,92 @@ def unavailable_runtime_browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyP
     thread.join(timeout=10)
 
 
+@pytest.fixture
+def fake_gateway_browser_site():
+    app = create_builtin_ui(
+        gateway=FakeControlGateway(),
+        security=FakeBrowserSecurity(),
+    )
+    port = _port()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not server.started and time.monotonic() < deadline:
+        time.sleep(0.02)
+    if not server.started:
+        raise RuntimeError("fake gateway browser server did not start")
+    yield BrowserSite(f"http://127.0.0.1:{port}", app, "")
+    server.should_exit = True
+    thread.join(timeout=10)
+
+
+@pytest.fixture
+def external_ui_browser_site():
+    frontend = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    control = create_control_app(
+        gateway=FakeControlGateway(),
+        security=BackendBrowserSecurity(secret=b"external-ui-session-secret-at-least-32"),
+    )
+
+    @frontend.get("/", response_class=HTMLResponse)
+    async def external_page() -> str:
+        return """<!doctype html><html lang="en"><body><main id="state">starting</main>
+        <script>
+        (async () => {
+          const session = await fetch('/api/control/v1/session').then(r => r.json());
+          const headers = {'Content-Type': 'application/json',
+                           'X-CSRF-Token': session.csrf_token};
+          const catalog = await fetch('/api/control/v1/media-items').then(r => r.json());
+          const search = await fetch('/api/control/v1/metadata-searches', {
+            method: 'POST', headers, body: JSON.stringify({query: 'Example', locale: 'en'})
+          }).then(r => r.json());
+          await fetch('/api/control/v1/metadata-selections/' + search[0].token, {
+            method: 'POST', headers, body: JSON.stringify({})
+          });
+          await fetch('/api/control/v1/manual-imports', {
+            method: 'POST', headers, body: JSON.stringify({document: {
+              schema_version: '1', kind: 'movie', locale: 'en',
+              titles: {en: 'External Manual'}
+            }})
+          });
+          const releases = await fetch('/api/control/v1/media-items/movie-1/release-searches', {
+            method: 'POST', headers, body: JSON.stringify({query: 'Example'})
+          }).then(r => r.json());
+          const destinations = await fetch(
+            '/api/control/v1/download-destinations'
+          ).then(r => r.json());
+          const acquisition = await fetch('/api/control/v1/acquisitions', {
+            method: 'POST', headers, body: JSON.stringify({media_item_id: 'movie-1',
+              release_token: releases[0].token, destination: destinations[0].key,
+              idempotency_key: 'external-ui-attempt'})
+          }).then(r => r.json());
+          const reconciled = await fetch(
+            '/api/control/v1/acquisitions/' + acquisition.id + '/reconcile',
+            {method: 'POST', headers, body: JSON.stringify({})}
+          ).then(r => r.json());
+          document.querySelector('#state').textContent =
+              catalog.items[0].title + '|' + reconciled.status;
+        })().catch(error => document.querySelector('#state').textContent = 'error:' + error);
+        </script></body></html>"""
+
+    frontend.mount("/api/control", control)
+    port = _port()
+    server = uvicorn.Server(
+        uvicorn.Config(frontend, host="127.0.0.1", port=port, log_level="error")
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not server.started and time.monotonic() < deadline:
+        time.sleep(0.02)
+    if not server.started:
+        raise RuntimeError("external UI browser server did not start")
+    yield BrowserSite(f"http://127.0.0.1:{port}", frontend, "")
+    server.should_exit = True
+    thread.join(timeout=10)
+
+
 def _strict_page(browser: Browser, *, locale: str = "en-US") -> tuple[Page, list[str]]:
     page = browser.new_context(locale=locale).new_page()
     failures: list[str] = []
@@ -381,6 +472,38 @@ def _axe(page: Page, site: BrowserSite, selector: str | None = None) -> None:
 
 def _csrf(page: Page) -> str:
     return page.locator('input[name="csrf"]').first.get_attribute("value") or ""
+
+
+def test_isolated_builtin_ui_browser_uses_only_fake_ports(
+    browser: Browser,
+    fake_gateway_browser_site: BrowserSite,
+) -> None:
+    page, failures = _strict_page(browser, locale="ru-RU")
+    page.goto(fake_gateway_browser_site.url)
+    assert page.get_by_text("Пример фильма").is_visible()
+    page.keyboard.press("Tab")
+    assert page.evaluate("document.activeElement.classList.contains('skip-link')")
+    _axe(page, fake_gateway_browser_site)
+    page.get_by_role("link", name="Добавить тайтл").click()
+    page.get_by_test_id("add-mode-manual").click()
+    assert page.get_by_test_id("manual-structured-form").is_visible()
+    _axe(page, fake_gateway_browser_site)
+    assert failures == []
+    page.context.close()
+
+
+def test_minimal_same_origin_external_ui_uses_only_control_api(
+    browser: Browser,
+    external_ui_browser_site: BrowserSite,
+) -> None:
+    page, failures = _strict_page(browser)
+    page.goto(external_ui_browser_site.url)
+    page.locator("#state").filter(has_text="Example Movie|submitted").wait_for()
+    assert failures == []
+    assert page.evaluate(
+        "performance.getEntriesByType('resource').every(r => !r.name.includes('/api/v1'))"
+    )
+    page.context.close()
 
 
 def test_keyboard_structured_manual_edit_specials_and_announced_completion(

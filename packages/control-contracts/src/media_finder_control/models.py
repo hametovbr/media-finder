@@ -119,6 +119,7 @@ class MetadataView(ControlModel):
 
 class AcquisitionView(ControlModel):
     id: str
+    media_item_id: str
     status: AcquisitionStatus
     release_title: str
     destination: str

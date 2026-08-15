@@ -9,13 +9,17 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/opt/venv
 WORKDIR /build
 
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+COPY pyproject.toml uv.lock README.md ./
+COPY packages/control-contracts/pyproject.toml packages/control-contracts/pyproject.toml
+COPY packages/builtin-ui/pyproject.toml packages/builtin-ui/pyproject.toml
+COPY src ./src
+COPY packages/control-contracts/src ./packages/control-contracts/src
+COPY packages/builtin-ui/src ./packages/builtin-ui/src
+RUN uv sync --frozen --no-dev --no-editable
 
 FROM python:3.13.14-slim-bookworm AS runtime
 
 ENV PATH="/opt/venv/bin:${PATH}" \
-    PYTHONPATH=/app/src \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     MEDIA_FINDER_DATABASE_URL=sqlite:////data/media-finder.db
@@ -27,7 +31,6 @@ RUN groupadd --gid 10001 media-finder \
 
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
-COPY --chown=10001:10001 src ./src
 COPY --chown=10001:10001 alembic ./alembic
 COPY --chown=10001:10001 alembic.ini ./alembic.ini
 

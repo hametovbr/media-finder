@@ -1,0 +1,6 @@
+{
+  "module.tmdb.name": "TMDB",
+  "module.tmdb.environment.token": "Токен доступа на чтение TMDB API",
+  "module.tmdb.settings.api_token": "Ссылка на переменную окружения с API-токеном",
+  "module.tmdb.settings.base_url": "Базовый адрес API"
+}

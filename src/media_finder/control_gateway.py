@@ -60,6 +60,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .acquisition import AcquisitionRequest, AcquisitionService, DestinationUnavailable
 from .domain import CatalogService, RevisionInput
 from .ephemeral import EphemeralCache, EphemeralTokenExpired
+from .integration_runtime import PROWLARR_INTEGRATION, RuntimeResolver
 from .manual import ManualCatalogService, ManualMetadataModule
 from .models import Acquisition, Collection, DownloadClientInstance, MediaItem, MetadataRevision
 from .modules.registry import FIRST_PARTY_MODULES
@@ -68,7 +69,6 @@ from .sdk.registration import StaticModuleRegistry
 from .sdk.types import EnvironmentVariableSpec, NormalizedMetadata
 from .sdk.types import MetadataSearchResult as ProviderSearchResult
 from .system_clients import SYSTEM_QBITTORRENT_ID
-from .ui_runtime import PROWLARR_INTEGRATION, RuntimeResolver
 
 T = TypeVar("T")
 
@@ -936,6 +936,7 @@ class BackendControlGateway:
     def _acquisition_view(acquisition: Acquisition) -> AcquisitionView:
         return AcquisitionView(
             id=str(acquisition.id),
+            media_item_id=acquisition.media_item_id,
             status=AcquisitionStatus(acquisition.status),
             release_title=acquisition.release_title or "",
             destination=acquisition.destination,
@@ -955,6 +956,7 @@ class BackendControlGateway:
         acquisitions = tuple(
             AcquisitionView(
                 id=str(acquisition.id),
+                media_item_id=acquisition.media_item_id,
                 status=AcquisitionStatus(acquisition.status),
                 release_title=acquisition.release_title or "",
                 destination=acquisition.destination,

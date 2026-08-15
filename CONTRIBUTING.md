@@ -40,7 +40,13 @@ uv run ruff check .
 uv run mypy
 uv run pytest
 pnpm assets:build
-git diff --exit-code -- src/media_finder/static
+git diff --exit-code -- packages/builtin-ui/src/media_finder_builtin_ui/static
 ```
+
+The built-in UI is an independently buildable workspace package. Code under
+`packages/builtin-ui` may import only `media_finder_control` and its web or
+localization dependencies; it must never import the backend `media_finder`
+package. Run `media-finder-ui-dev` to develop the complete UI against the
+deterministic fake gateway without SQLite or external integrations.
 
 Browser tests require the pinned Playwright Chromium installation. The production image is built in GitHub Actions; when Docker is available locally, also run `docker build --tag media-finder:local .`.

@@ -14,6 +14,11 @@ TMDB, Prowlarr, and the single qBittorrent instance are configured only through 
 
 External FileFlows, n8n, and custom post-processors should follow the [processor integration guide](docs/processor-integration.md) for pinned metadata, naming, NFO, expiry, and safe error handling.
 
+The built-in interface is an independent workspace package that remains enabled
+in the single production container by default. Alternative same-origin browser
+interfaces should use the versioned [browser control API](docs/browser-control-api.md)
+and its checked-in OpenAPI contract rather than backend Python internals.
+
 ## Product boundary
 
 Media Finder owns catalog metadata, user collections, manual release selection, and submission records. It does not scan, mux, move, or monitor media files, and it does not invoke Jellyfin. FileFlows, n8n, or another external processor may consume its APIs after a download client receives a release.

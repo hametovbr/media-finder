@@ -2,7 +2,7 @@
 {% block content %}
 <h2>{{ _('Create Manual title') if not manual.external_id else _('Edit Manual title') }}</h2>
 <form action="/ui/manual/save" method="post" data-testid="manual-structured-form">
-  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="external_id" value="{{ manual.external_id }}">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="item_id" value="{{ manual.item_id }}"><input type="hidden" name="external_id" value="{{ manual.external_id }}">
   <fieldset><legend>{{ _('Common metadata') }}</legend>
     <label>{{ _('Media type') }} <select name="kind"><option value="movie"{% if manual.kind == 'movie' %} selected{% endif %}>{{ _('Movie') }}</option><option value="series"{% if manual.kind == 'series' %} selected{% endif %}>{{ _('Series') }}</option></select></label>
     <label>{{ _('Metadata locale') }} <select name="metadata_locale"><option value="en"{% if manual.locale == 'en' %} selected{% endif %}>{{ _('English') }}</option><option value="ru"{% if manual.locale == 'ru' %} selected{% endif %}>{{ _('Russian') }}</option></select></label>

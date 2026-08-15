@@ -7,11 +7,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from media_finder.control_gateway import BackendControlGateway
 from media_finder.domain import CatalogService, RevisionInput
+from media_finder.integration_runtime import RuntimeResolver
 from media_finder.models import Acquisition, DownloadClientInstance
 from media_finder.prowlarr import ProwlarrAdapter, SearchResultCache
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID, ensure_system_qbittorrent
-from media_finder.ui_runtime import RuntimeResolver
 
 
 class TorrentSearchTransport:

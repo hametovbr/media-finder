@@ -229,22 +229,23 @@ import pytest
 def test_all_stable_ui_codes_have_english_and_russian_messages(
     code: str, english: str, russian: str
 ) -> None:
-    from media_finder.ui_i18n import message_for
+    from media_finder_builtin_ui.i18n import message_for
 
     assert message_for(code, "en") == english
     assert message_for(code, "ru") == russian
 
 
 def test_unknown_code_has_a_safe_localized_fallback() -> None:
-    from media_finder.ui_i18n import message_for
+    from media_finder_builtin_ui.i18n import message_for
 
     assert message_for("future_error", "en") == "A safely hidden error occurred."
     assert message_for("future_error", "ru") == "Произошла безопасно скрытая ошибка."
 
 
 def test_exception_mapping_preserves_only_known_explicit_module_codes() -> None:
+    from media_finder_builtin_ui.i18n import code_for_exception
+
     from media_finder.sdk.errors import ModuleError
-    from media_finder.ui_i18n import code_for_exception
 
     assert (
         code_for_exception(
@@ -269,7 +270,7 @@ def test_exception_mapping_preserves_only_known_explicit_module_codes() -> None:
 def test_kind_and_acquisition_status_are_localized(
     kind: str, status: str, russian_kind: str, russian_status: str
 ) -> None:
-    from media_finder.ui_i18n import acquisition_status_label, media_kind_label
+    from media_finder_builtin_ui.i18n import acquisition_status_label, media_kind_label
 
     assert media_kind_label(kind, "en") == kind.title()
     assert media_kind_label(kind, "ru") == russian_kind
@@ -277,7 +278,7 @@ def test_kind_and_acquisition_status_are_localized(
 
 
 def test_module_translation_assets_resolve_keys_with_locale_fallback() -> None:
-    from media_finder.ui_i18n import module_translation
+    from media_finder_builtin_ui.i18n import module_translation
 
     assert module_translation("tmdb", "module.tmdb.settings.base_url", "ru") == "Базовый адрес API"
     assert module_translation("qbittorrent", "module.qbittorrent.password_ref", "ru") == (

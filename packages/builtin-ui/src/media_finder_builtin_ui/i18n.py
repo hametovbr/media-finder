@@ -98,6 +98,10 @@ def message_for(code: str, locale: str) -> str:
     return _translation(locale).gettext(_SOURCES.get(code, _UNKNOWN))
 
 
+def translation(locale: str) -> gettext.NullTranslations:
+    return _translation(locale)
+
+
 def code_for_exception(error: Exception, default: str) -> str:
     """Preserve only known stable codes; never expose arbitrary exception text."""
 
@@ -116,7 +120,7 @@ def acquisition_status_label(status: str, locale: str) -> str:
 
 @cache
 def _module_catalog(module_key: str, locale: str) -> dict[str, str]:
-    path = Path(__file__).with_name("modules") / module_key / "translations" / f"{locale}.json"
+    path = Path(__file__).with_name("module_translations") / module_key / f"{locale}.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):

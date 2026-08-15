@@ -100,6 +100,7 @@ def test_rich_manual_import_edit_preserves_unedited_contract_fields(acceptance_a
             "/ui/manual/save",
             data={
                 "csrf": csrf,
+                "item_id": item_id,
                 "external_id": _external_id(edit.text),
                 "kind": "series",
                 "metadata_locale": "en",

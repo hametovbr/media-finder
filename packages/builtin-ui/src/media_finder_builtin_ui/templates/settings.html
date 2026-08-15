@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}<h2>{{ _('Settings') }}</h2>
+<section data-testid="readiness-checklist"><h3>{{ _('Integration diagnostics') }}</h3>
+  <p data-readiness="manual:ready">{{ _('Ready') }}: {{ _('Manual metadata') }}</p>
+  {% for integration in diagnostics %}<article data-integration="{{ integration.key }}" data-integration-state="{{ integration.status }}">
+    <h4>{{ 'Prowlarr' if integration.key == 'prowlarr' else integration.key }}: {{ _(integration.status|capitalize) }}</h4>
+    <dl>{% for variable in integration.variables %}<div data-environment-variable="{{ variable.name }}" data-variable-state="{{ 'set' if variable.is_set else 'missing' }}">
+      <dt><code>{{ variable.name }}</code></dt><dd>{{ variable.description_key }} — {{ _('Set') if variable.is_set else _('Missing') }}; {% if variable.required %}{{ _('required') }}{% else %}{{ _('optional') }}{% endif %}; {% if variable.secret %}{{ _('secret') }}{% else %}{{ _('non-secret') }}{% endif %}</dd>
+    </div>{% endfor %}</dl>
+  </article>{% endfor %}
+  <p>{{ _('Manual-only catalog use remains available.') }}</p>
+</section>{% endblock %}

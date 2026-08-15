@@ -105,3 +105,41 @@ test("all exact first-party integration variables are required in deployment art
 
   assert.match(validateDelivery(root).join("\n"), /QBITTORRENT_PASSWORD/);
 });
+
+test("compose must keep the built-in UI enabled by default", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, "compose.example.yaml", (value) =>
+    value.replace("${MEDIA_FINDER_UI_MODE:-builtin}", "disabled"),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /MEDIA_FINDER_UI_MODE/);
+});
+
+test("verification must build both independently replaceable UI boundary wheels", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace("--package media-finder-builtin-ui", "--package omitted-ui"),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /wheel build is missing media-finder-builtin-ui/);
+});
+
+test("image smoke must prove disabled mode retains the control API", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, "scripts/smoke-container.sh", (value) =>
+    value.replace("MEDIA_FINDER_UI_MODE=disabled", "MEDIA_FINDER_UI_MODE=omitted"),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /disabled UI mode/);
+});
+
+test("production workspace installs cannot retain builder-only editable paths", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, "Dockerfile", (value) => value.replace(" --no-editable", ""));
+
+  assert.match(validateDelivery(root).join("\n"), /installed non-editably/);
+});

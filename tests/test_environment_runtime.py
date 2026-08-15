@@ -1,8 +1,8 @@
 import httpx
 
+from media_finder.integration_runtime import DefaultRuntimeFactory
 from media_finder.models import DownloadClientInstance
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
-from media_finder.ui_runtime import DefaultRuntimeFactory
 
 
 def test_default_runtime_constructs_every_integration_only_from_exact_environment() -> None:

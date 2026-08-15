@@ -208,8 +208,8 @@ def test_one_public_static_registry_composes_runtime_and_settings_without_switch
 
     for path in (
         Path("src/media_finder/ui.py"),
-        Path("src/media_finder/ui_runtime.py"),
-        Path("src/media_finder/ui_metadata_routes.py"),
+        Path("src/media_finder/integration_runtime.py"),
+        Path("src/media_finder/control_gateway.py"),
     ):
         source = path.read_text(encoding="utf-8")
         assert "TmdbProvider" not in source

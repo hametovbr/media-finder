@@ -90,6 +90,10 @@
             "title": "Id",
             "type": "string"
           },
+          "media_item_id": {
+            "title": "Media Item Id",
+            "type": "string"
+          },
           "release_title": {
             "title": "Release Title",
             "type": "string"
@@ -100,6 +104,7 @@
         },
         "required": [
           "id",
+          "media_item_id",
           "status",
           "release_title",
           "destination",

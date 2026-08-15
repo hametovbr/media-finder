@@ -1,38 +1,42 @@
-"""Composition root for the server-rendered browser interface."""
+"""Compatibility composition for embedders of the built-in UI."""
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from fastapi import FastAPI
+from media_finder_builtin_ui import BuiltinUIOptions, create_builtin_ui
+from media_finder_builtin_ui.i18n import message_for
 
 from .acquisition import ClientLoader
 from .config import EnvReference, resolve_env_reference
+from .control_gateway import BackendControlGateway
+from .control_security import BackendBrowserSecurity
 from .db import create_database, session_factory
+from .integration_runtime import DefaultRuntimeFactory, RuntimeFactory, RuntimeResolver
 from .modules.registry import FIRST_PARTY_MODULES
 from .prowlarr import ProwlarrAdapter
 from .sdk.protocols import MetadataProvider
 from .system_clients import ensure_system_qbittorrent
-from .ui_acquisition_routes import acquisition_router
-from .ui_catalog_routes import catalog_router
-from .ui_context import UIContext
-from .ui_metadata_routes import metadata_router
-from .ui_repository import UIRepository
-from .ui_runtime import DefaultRuntimeFactory, RuntimeFactory, RuntimeResolver
-from .ui_security import FormBodyTooLarge, SessionSigner, error_message, resolve_locale
-from .ui_settings_routes import settings_router
 
-__all__ = ["SessionSigner", "create_ui_app", "error_message", "resolve_locale"]
+__all__ = ["create_ui_app", "error_message", "resolve_locale"]
 
-TEMPLATE_ROOT = Path(__file__).with_name("templates")
-STATIC_ROOT = Path(__file__).with_name("static")
+
+def resolve_locale(override: str | None, accept_language: str | None) -> str:
+    if override in {"en", "ru"}:
+        return override
+    for choice in (accept_language or "").split(","):
+        language = choice.split(";", 1)[0].strip().split("-", 1)[0].casefold()
+        if language in {"en", "ru"}:
+            return language
+    return "en"
+
+
+def error_message(code: str, locale: str) -> tuple[str, str]:
+    return message_for(code, resolve_locale(locale, None)), code
 
 
 def create_ui_app(
@@ -48,14 +52,19 @@ def create_ui_app(
     environment: Mapping[str, str] | None = None,
     **_: Any,
 ) -> FastAPI:
-    engine = create_database(database_url)
-    secret_value = resolve_env_reference(EnvReference(value=session_secret_reference))
-    signer = SessionSigner(secret_value.get_secret_value().encode())
+    """Build the port-only UI over explicitly composed backend resources."""
 
-    selected_factory = runtime_factory
-    provider_registry: dict[str, MetadataProvider] = dict(
-        providers or FIRST_PARTY_MODULES.retention_providers()
+    engine = create_database(database_url)
+    sessions = session_factory(engine)
+    with sessions() as database:
+        ensure_system_qbittorrent(database)
+    secret = (
+        resolve_env_reference(EnvReference(value=session_secret_reference))
+        .get_secret_value()
+        .encode()
     )
+    selected_factory = runtime_factory
+    provider_registry = dict(providers or FIRST_PARTY_MODULES.retention_providers())
     if (
         selected_factory is None
         and providers is None
@@ -66,6 +75,22 @@ def create_ui_app(
             environment=environment,
             http_client_factory=http_client_factory,
         )
+    runtime = RuntimeResolver(
+        factory=selected_factory,
+        providers=provider_registry,
+        prowlarr=prowlarr,
+        client_loader=client_loader,
+    )
+    gateway = BackendControlGateway(
+        sessions=sessions,
+        cursor_secret=secret,
+        runtime=runtime,
+    )
+    app = create_builtin_ui(
+        gateway=gateway,
+        security=BackendBrowserSecurity(secret=secret),
+        options=BuiltinUIOptions(secure_cookie=secure_cookie),
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -77,49 +102,9 @@ def create_ui_app(
                 close()
             engine.dispose()
 
-    app = FastAPI(lifespan=lifespan)
-    sessions = session_factory(engine)
-    with sessions() as database:
-        ensure_system_qbittorrent(database)
-    repository = UIRepository(sessions)
-    runtime = RuntimeResolver(
-        factory=selected_factory,
-        providers=provider_registry,
-        prowlarr=prowlarr,
-        client_loader=client_loader,
-    )
-    templates = Environment(
-        loader=FileSystemLoader(TEMPLATE_ROOT),
-        autoescape=select_autoescape(("html", "xml")),
-        enable_async=False,
-    )
-    context = UIContext(
-        sessions=sessions,
-        repository=repository,
-        runtime=runtime,
-        templates=templates,
-        signer=signer,
-        secure_cookie=secure_cookie,
-    )
-
-    @app.exception_handler(FormBodyTooLarge)
-    async def form_too_large(request: Request, _: FormBodyTooLarge) -> HTMLResponse:
-        return context.ui_error(request, "ui_form_too_large", 413)
-
-    # Compatibility-only inspection hooks; route families depend on UIContext.
+    app.router.lifespan_context = lifespan
     app.state.engine = engine
-    app.state.session_signer = signer
     app.state.sessions = sessions
-    app.state.providers = provider_registry
-    app.state.prowlarr = prowlarr
-    app.state.client_loader = client_loader
     app.state.runtime = runtime
-    app.state.metadata_selections = context.metadata_selections
-    app.state.manual_drafts = context.manual_drafts
-
-    app.mount("/static", StaticFiles(directory=STATIC_ROOT), name="static")
-    app.include_router(catalog_router(context))
-    app.include_router(metadata_router(context))
-    app.include_router(acquisition_router(context))
-    app.include_router(settings_router(context))
+    app.state.gateway = gateway
     return app

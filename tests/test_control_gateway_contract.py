@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from media_finder.control_gateway import BackendControlGateway
 from media_finder.domain import CatalogService, RevisionInput
+from media_finder.integration_runtime import RuntimeResolver
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
-from media_finder.ui_runtime import RuntimeResolver
 
 
 def _gateway(database: Session) -> BackendControlGateway:

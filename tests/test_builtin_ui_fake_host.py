@@ -73,8 +73,9 @@ def test_fake_gateway_covers_critical_deterministic_states() -> None:
 
 def test_dev_host_renders_without_database_or_integrations() -> None:
     with TestClient(create_dev_app()) as client:
-        english = client.get("/", params={"locale": "en"})
-        russian = client.get("/", params={"locale": "ru"})
+        english = client.get("/", headers={"Accept-Language": "en"})
+    with TestClient(create_dev_app()) as client:
+        russian = client.get("/", headers={"Accept-Language": "ru"})
 
     assert english.status_code == 200
     assert "Example Movie" in english.text

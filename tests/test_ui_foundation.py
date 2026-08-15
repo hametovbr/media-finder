@@ -3,11 +3,11 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from media_finder_builtin_ui.forms import decode_form
 from starlette.requests import Request
 
 from media_finder.db import migrate_to_head
-from media_finder.ui import SessionSigner, create_ui_app, error_message, resolve_locale
-from media_finder.ui_security import decode_form
+from media_finder.ui import create_ui_app, error_message, resolve_locale
 
 MAX_UI_FORM_BYTES = 1024 * 1024
 
@@ -31,15 +31,6 @@ def test_error_messages_are_localized_without_translating_machine_code() -> None
         "Произошла безопасно скрытая ошибка.",
         "future_error",
     )
-
-
-def test_signed_session_rejects_tampering() -> None:
-    signer = SessionSigner(b"a sufficiently long test session secret")
-    token = signer.dumps({"locale": "ru", "csrf": "fixed"})
-
-    assert signer.loads(token) == {"locale": "ru", "csrf": "fixed"}
-    with pytest.raises(ValueError, match="invalid_session"):
-        signer.loads(token[:-1] + ("A" if token[-1] != "A" else "B"))
 
 
 def test_ui_cookie_is_hardened_and_mutations_require_session_csrf(

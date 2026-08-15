@@ -15,6 +15,8 @@ from fastapi import APIRouter, Depends, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import Engine
+from sqlalchemy.orm import Session, sessionmaker
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import EnvReference, resolve_env_reference
@@ -69,23 +71,30 @@ def create_app(
     integration_token_reference: str,
     clock: Callable[[], datetime] | None = None,
     providers: Mapping[str, MetadataProvider] | None = None,
+    database_engine: Engine | None = None,
+    sessions: sessionmaker[Session] | None = None,
 ) -> FastAPI:
     """Create the HTTP application with explicit runtime dependencies."""
 
-    engine = create_database(database_url)
+    owns_engine = database_engine is None
+    engine = database_engine or create_database(database_url)
     reference = EnvReference(value=integration_token_reference)
     integration_token = resolve_env_reference(reference).get_secret_value().encode()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        yield
-        engine.dispose()
+        try:
+            yield
+        finally:
+            if owns_engine:
+                engine.dispose()
 
     app = FastAPI(lifespan=lifespan)
     app.state.engine = engine
+    app.state.owns_engine = owns_engine
     app.state.clock = clock or (lambda: datetime.now(UTC))
     app.state.providers = dict(providers or {})
-    sessions = session_factory(engine)
+    session_source = sessions or session_factory(engine)
 
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next: Any) -> Any:
@@ -191,7 +200,7 @@ def create_app(
         return validated_snapshot(revision).model_dump(mode="json")
 
     def current_revision(item_id: str) -> MetadataRevision:
-        with sessions() as session:
+        with session_source() as session:
             item = session.get(MediaItem, item_id)
             if item is None or item.current_revision_id is None:
                 raise APIError(404, "media_item_not_found")
@@ -206,7 +215,7 @@ def create_app(
             identity = UUID(acquisition_id)
         except ValueError:
             raise APIError(404, "acquisition_not_found") from None
-        with sessions() as session:
+        with session_source() as session:
             acquisition = session.get(Acquisition, identity)
             if acquisition is None:
                 raise APIError(404, "acquisition_not_found")

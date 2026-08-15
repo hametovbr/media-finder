@@ -17,6 +17,7 @@ from media_finder_control.models import (
     AcquisitionSubmissionRequest,
     AcquisitionView,
     AttributionView,
+    BrowserSession,
     CatalogItemView,
     CollectionView,
     DownloadDestination,
@@ -39,6 +40,33 @@ from media_finder_control.models import (
 RU_EXAMPLE = "\u041f\u0440\u0438\u043c\u0435\u0440"
 RU_MOVIE = f"{RU_EXAMPLE} \u0444\u0438\u043b\u044c\u043c\u0430"
 RU_SERIES = f"{RU_EXAMPLE} \u0441\u0435\u0440\u0438\u0430\u043b\u0430"
+
+
+class FakeBrowserSecurity:
+    """Deterministic browser security port for isolated UI development."""
+
+    def __init__(self) -> None:
+        self._session: BrowserSession | None = None
+
+    async def load_session(
+        self, *, cookie: str | None, accept_language: str | None
+    ) -> BrowserSession:
+        if cookie is not None and self._session is not None:
+            return self._session.model_copy(update={"is_new": False})
+        locale = Locale.RU if (accept_language or "").casefold().startswith("ru") else Locale.EN
+        return BrowserSession(
+            ui_locale=locale,
+            metadata_locale=locale,
+            csrf_token="fake-csrf-token",
+            is_new=cookie is None,
+        )
+
+    async def serialize_session(self, *, session: BrowserSession) -> str:
+        self._session = session.model_copy(update={"is_new": False})
+        return "fake-session"
+
+    async def validate_csrf(self, *, session: BrowserSession, token: str | None) -> bool:
+        return token == session.csrf_token
 
 
 class FakeControlGateway:
@@ -268,6 +296,7 @@ class FakeControlGateway:
     async def submit_acquisition(self, *, request: AcquisitionSubmissionRequest) -> AcquisitionView:
         acquisition = AcquisitionView(
             id=f"{request.media_item_id}-acquisition",
+            media_item_id=request.media_item_id,
             status=AcquisitionStatus.PENDING,
             release_title="Example.Release.1080p",
             destination=request.destination,

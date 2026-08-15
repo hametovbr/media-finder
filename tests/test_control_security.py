@@ -1,18 +1,34 @@
 import asyncio
+import base64
+import hashlib
 import hmac
+import json
 from unittest.mock import patch
 
 from media_finder_control import Locale
 
 from media_finder.control_security import BackendBrowserSecurity
-from media_finder.ui_security import SessionSigner
+
+
+def _encode(secret: bytes, values: dict[str, str]) -> str:
+    payload = json.dumps(values, sort_keys=True, separators=(",", ":")).encode()
+    encoded = base64.urlsafe_b64encode(payload).rstrip(b"=").decode()
+    signature = hmac.new(secret, encoded.encode(), hashlib.sha256).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def _decode(secret: bytes, token: str) -> dict[str, str]:
+    encoded, supplied = token.rsplit(".", 1)
+    assert hmac.compare_digest(
+        supplied, hmac.new(secret, encoded.encode(), hashlib.sha256).hexdigest()
+    )
+    padding = "=" * (-len(encoded) % 4)
+    return json.loads(base64.urlsafe_b64decode(encoded + padding))
 
 
 def test_browser_security_reads_and_writes_compatible_session_payload() -> None:
     secret = b"browser-session-secret-at-least-32-bytes"
-    legacy = SessionSigner(secret).dumps(
-        {"csrf": "existing", "locale": "ru", "metadata_locale": "en"}
-    )
+    legacy = _encode(secret, {"csrf": "existing", "locale": "ru", "metadata_locale": "en"})
     security = BackendBrowserSecurity(secret=secret)
 
     async def scenario() -> None:
@@ -21,7 +37,7 @@ def test_browser_security_reads_and_writes_compatible_session_payload() -> None:
         assert session.metadata_locale is Locale.EN
         assert session.metadata_locale_explicit is True
         encoded = await security.serialize_session(session=session)
-        assert SessionSigner(secret).loads(encoded) == {
+        assert _decode(secret, encoded) == {
             "csrf": "existing",
             "locale": "ru",
             "metadata_locale": "en",

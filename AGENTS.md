@@ -6,6 +6,8 @@
 - Treat `openspec/` as the source of truth for behavior, UX, architecture, APIs, schemas, and module contracts.
 - Keep Media Finder a catalog and acquisition control plane. It does not scan, mux, move, or monitor media files and does not invoke Jellyfin.
 - Keep secrets in environment variables and redact secrets and sensitive URLs from errors and logs. First-party integrations declare exact environment variables and never persist integration values or environment references.
+- Keep `packages/builtin-ui` dependent only on `media-finder-control-contracts` and presentation-layer libraries. It must not import the backend package, SQLAlchemy, persistence models, repositories, runtime composition, or integration modules.
+- Treat `/api/control/v1` as the only supported boundary for an external browser UI. Any control-contract change requires an OpenSpec change, an updated deterministic OpenAPI snapshot, gateway/HTTP conformance tests, and browser-security tests.
 
 ## Spec-driven development
 

@@ -25,30 +25,30 @@
 
 ## 4. Built-in UI migration
 
-- [ ] 4.1 Add failing compatibility tests for the current HTML route/method inventory, cookie behavior, redirect/fragment semantics, localization, and error codes using only fake ports; introduce the built-in UI composition/context on the public contracts and make the foundation GREEN.
-- [ ] 4.2 Add focused HTML-versus-gateway parity tests for catalog, collections, archive/restore/move, poster fallback, details, and acquisition tabs; migrate the catalog route family and view models to the gateway and make them GREEN.
-- [ ] 4.3 Add focused parity tests for provider search/confirmation, structured Manual create/edit/import/confirmation, rich field preservation, CSV atomicity, and locale independence; migrate the metadata/Manual route family and make them GREEN.
-- [ ] 4.4 Add focused parity tests for release search, destination refresh, submission, stale destination recovery, pending reconcile, and safe failures; migrate the acquisition route family and make them GREEN.
-- [ ] 4.5 Add focused parity tests for read-only integration diagnostics and provider attribution; migrate Settings/About to the gateway and make them GREEN.
-- [ ] 4.6 Move templates, assets, gettext catalogs, i18n, form parsing, and presentation helpers into the built-in UI wheel; rebuild assets/catalogs and make wheel-resource, fake-host, forbidden-import, keyboard, axe, RU/EN, and zero-console/network-noise tests GREEN.
-- [ ] 4.7 Remove obsolete UI repository/runtime/context paths and compatibility state hooks only after an architecture scan and full UI regression prove there is no direct backend path remaining.
+- [x] 4.1 Add failing compatibility tests for the current HTML route/method inventory, cookie behavior, redirect/fragment semantics, localization, and error codes using only fake ports; introduce the built-in UI composition/context on the public contracts and make the foundation GREEN.
+- [x] 4.2 Add focused HTML-versus-gateway parity tests for catalog, collections, archive/restore/move, poster fallback, details, and acquisition tabs; migrate the catalog route family and view models to the gateway and make them GREEN.
+- [x] 4.3 Add focused parity tests for provider search/confirmation, structured Manual create/edit/import/confirmation, rich field preservation, CSV atomicity, and locale independence; migrate the metadata/Manual route family and make them GREEN.
+- [x] 4.4 Add focused parity tests for release search, destination refresh, submission, stale destination recovery, pending reconcile, and safe failures; migrate the acquisition route family and make them GREEN.
+- [x] 4.5 Add focused parity tests for read-only integration diagnostics and provider attribution; migrate Settings/About to the gateway and make them GREEN.
+- [x] 4.6 Move templates, assets, gettext catalogs, i18n, form parsing, and presentation helpers into the built-in UI wheel; rebuild assets/catalogs and make wheel-resource, fake-host, forbidden-import, keyboard, axe, RU/EN, and zero-console/network-noise tests GREEN.
+- [x] 4.7 Remove obsolete UI repository/runtime/context paths and compatibility state hooks only after an architecture scan and full UI regression prove there is no direct backend path remaining.
 
 ## 5. Production composition and UI mode
 
-- [ ] 5.1 Add focused failing lifecycle tests proving the root creates one engine/session/runtime/cache set, child apps do not own shared resources, and shutdown closes each resource exactly once; refactor production composition to GREEN.
-- [ ] 5.2 Add focused failing runtime tests for missing/default `builtin`, explicit `builtin`, `disabled`, and invalid `MEDIA_FINDER_UI_MODE`; implement one-time mode parsing and conditional HTML/static mounting to GREEN.
-- [ ] 5.3 Add composed-app regression tests proving default HTML paths, `/api/control/v1`, `/api/v1`, health, migrations, maintenance, and processor Bearer behavior coexist without route shadowing; make both UI modes GREEN without a database migration.
+- [x] 5.1 Add focused failing lifecycle tests proving the root creates one engine/session/runtime/cache set, child apps do not own shared resources, and shutdown closes each resource exactly once; refactor production composition to GREEN.
+- [x] 5.2 Add focused failing runtime tests for missing/default `builtin`, explicit `builtin`, `disabled`, and invalid `MEDIA_FINDER_UI_MODE`; implement one-time mode parsing and conditional HTML/static mounting to GREEN.
+- [x] 5.3 Add composed-app regression tests proving default HTML paths, `/api/control/v1`, `/api/v1`, health, migrations, maintenance, and processor Bearer behavior coexist without route shadowing; make both UI modes GREEN without a database migration.
 
 ## 6. External UI, delivery, and documentation
 
-- [ ] 6.1 Add a failing Playwright acceptance test for a minimal same-origin external page using session, catalog, metadata, Manual, destination, Acquisition, and reconcile control operations without CORS or a processor token; implement only the test fixture and required contract fixes until GREEN.
-- [ ] 6.2 Update English documentation for control API compatibility, OpenAPI consumption, independent built-in UI development, default/disabled mode, trusted proxy origin handling, and generic same-origin Traefik routing; document rollback to `builtin` and the absence of cross-origin support.
-- [ ] 6.3 Update `AGENTS.md` with the UI import boundary and mandatory OpenSpec, OpenAPI snapshot, gateway conformance, and browser-security checks for control-contract changes.
-- [ ] 6.4 Add workspace wheel, architecture, control contract, OpenAPI drift, UI fake-host, and both-mode smoke steps inside the existing seven `verification/*` contexts; extend deterministic delivery validators without changing branch-protection check names.
-- [ ] 6.5 Update the Docker build and generic Compose environment placeholder for `MEDIA_FINDER_UI_MODE=builtin`; prove the common image contains both workspace wheels and no additional service, port, volume, or media/download mount.
+- [x] 6.1 Add a failing Playwright acceptance test for a minimal same-origin external page using session, catalog, metadata, Manual, destination, Acquisition, and reconcile control operations without CORS or a processor token; implement only the test fixture and required contract fixes until GREEN.
+- [x] 6.2 Update English documentation for control API compatibility, OpenAPI consumption, independent built-in UI development, default/disabled mode, trusted proxy origin handling, and generic same-origin Traefik routing; document rollback to `builtin` and the absence of cross-origin support.
+- [x] 6.3 Update `AGENTS.md` with the UI import boundary and mandatory OpenSpec, OpenAPI snapshot, gateway conformance, and browser-security checks for control-contract changes.
+- [x] 6.4 Add workspace wheel, architecture, control contract, OpenAPI drift, UI fake-host, and both-mode smoke steps inside the existing seven `verification/*` contexts; extend deterministic delivery validators without changing branch-protection check names.
+- [x] 6.5 Update the Docker build and generic Compose environment placeholder for `MEDIA_FINDER_UI_MODE=builtin`; prove the common image contains both workspace wheels and no additional service, port, volume, or media/download mount.
 
 ## 7. Final verification and review
 
-- [ ] 7.1 Run frozen uv and pnpm installs, strict OpenSpec validation, documentation policy, format, lint, strict type checks, all unit/integration/gateway/contract/Playwright tests, independent wheel builds, asset/catalog rebuild with no diff, delivery validation, and available production image smoke checks.
-- [ ] 7.2 Verify Alembic head and autogenerate drift are unchanged, a fresh database starts in both UI modes, secrets/raw provider data never enter control/OpenAPI responses, and `git diff --check` is clean.
-- [ ] 7.3 Perform an independent architecture/security/acceptance review against every delta-spec scenario, fix all Critical and Important findings through focused RED/GREEN tests, and rerun the complete pristine verification matrix before marking the change ready for spec sync and archive.
+- [x] 7.1 Run frozen uv and pnpm installs, strict OpenSpec validation, documentation policy, format, lint, strict type checks, all unit/integration/gateway/contract/Playwright tests, independent wheel builds, asset/catalog rebuild with no diff, delivery validation, and available production image smoke checks.
+- [x] 7.2 Verify Alembic head and autogenerate drift are unchanged, a fresh database starts in both UI modes, secrets/raw provider data never enter control/OpenAPI responses, and `git diff --check` is clean.
+- [x] 7.3 Perform an independent architecture/security/acceptance review against every delta-spec scenario, fix all Critical and Important findings through focused RED/GREEN tests, and rerun the complete pristine verification matrix before marking the change ready for spec sync and archive.
