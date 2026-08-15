@@ -153,9 +153,6 @@ class RetentionExecutionStatus(StrEnum):
 
 class RetentionExecution(PublicModel):
     status: RetentionExecutionStatus
-    raw_payload: dict[str, Any] | None = None
-    normalized: NormalizedMetadata | None = None
-    policy: RetentionPolicy | None = None
     error_code: str | None = None
 
 

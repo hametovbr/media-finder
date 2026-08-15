@@ -239,6 +239,11 @@ class FailingTransport:
         )
 
 
+class MalformedAuthorityTransport:
+    def get_json(self, path: str, params: dict[str, str]) -> dict:
+        raise RuntimeError("https://example.test:TOKEN/private?key=SECRET")
+
+
 def test_tmdb_transport_failures_are_standardized_and_secret_safe() -> None:
     provider = TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), FailingTransport())
     with pytest.raises(ModuleError) as captured:
@@ -251,3 +256,14 @@ def test_tmdb_transport_failures_are_standardized_and_secret_safe() -> None:
     assert "passkey" not in rendered
     assert "api_key" not in rendered
     assert "https://api.example.test" in rendered
+
+
+def test_tmdb_malformed_authority_error_cannot_escape_secondary_redaction() -> None:
+    provider = TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), MalformedAuthorityTransport())
+    with pytest.raises(ModuleError) as captured:
+        provider.fetch("movie", "129", "en-US")
+    rendered = f"{captured.value} {captured.value.safe_details}"
+    assert captured.value.code == "metadata_provider_unavailable"
+    assert "TOKEN" not in rendered
+    assert "SECRET" not in rendered
+    assert "https://" not in rendered

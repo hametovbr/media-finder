@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from media_finder.db import create_database, migrate_to_head, session_factory
+from media_finder.sdk._retention import InternalRetentionResult
 from media_finder.sdk.types import (
     Attribution,
     CorrelationResult,
@@ -84,8 +85,10 @@ class FakeProvider:
     def plan_retention(self, policy, now) -> RetentionAction:
         return RetentionAction(kind=RetentionActionKind.NONE)
 
-    def execute_retention(self, subject, action, now) -> RetentionExecution:
-        return RetentionExecution(status=RetentionExecutionStatus.NOOP)
+    def execute_retention(self, subject, action, now) -> InternalRetentionResult:
+        return InternalRetentionResult(
+            outcome=RetentionExecution(status=RetentionExecutionStatus.NOOP)
+        )
 
 
 class FakeClient:

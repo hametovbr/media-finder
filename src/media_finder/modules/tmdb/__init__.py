@@ -7,6 +7,7 @@ from dateutil.relativedelta import relativedelta
 from pydantic import BaseModel, Field, field_validator
 
 from ...config import EnvReference, safe_url_origin
+from ...sdk._retention import InternalRetentionResult
 from ...sdk.errors import ModuleError
 from ...sdk.protocols import JsonTransport
 from ...sdk.types import (
@@ -185,15 +186,21 @@ class TmdbProvider:
 
     def execute_retention(
         self, subject: RetentionSubject, action: RetentionAction, now: datetime
-    ) -> RetentionExecution:
+    ) -> InternalRetentionResult:
         if action.kind is RetentionActionKind.PURGE:
-            return RetentionExecution(status=RetentionExecutionStatus.PURGED)
+            return InternalRetentionResult(
+                outcome=RetentionExecution(status=RetentionExecutionStatus.PURGED)
+            )
         if action.kind is not RetentionActionKind.REFRESH:
-            return RetentionExecution(status=RetentionExecutionStatus.NOOP)
+            return InternalRetentionResult(
+                outcome=RetentionExecution(status=RetentionExecutionStatus.NOOP)
+            )
         if self.config is None or self.transport is None:
-            return RetentionExecution(
-                status=RetentionExecutionStatus.FAILED,
-                error_code="metadata_provider_not_configured",
+            return InternalRetentionResult(
+                outcome=RetentionExecution(
+                    status=RetentionExecutionStatus.FAILED,
+                    error_code="metadata_provider_not_configured",
+                )
             )
         path_kind = "tv" if subject.media_kind is MediaKind.SERIES else "movie"
         try:
@@ -202,9 +209,13 @@ class TmdbProvider:
                 raw, subject.media_kind.value, subject.external_id, subject.locale
             )
         except ModuleError as error:
-            return RetentionExecution(status=RetentionExecutionStatus.FAILED, error_code=error.code)
-        return RetentionExecution(
-            status=RetentionExecutionStatus.REFRESHED,
+            return InternalRetentionResult(
+                outcome=RetentionExecution(
+                    status=RetentionExecutionStatus.FAILED, error_code=error.code
+                )
+            )
+        return InternalRetentionResult(
+            outcome=RetentionExecution(status=RetentionExecutionStatus.REFRESHED),
             raw_payload=raw,
             normalized=normalized,
             policy=self.retention_for(now),
@@ -220,7 +231,10 @@ class TmdbProvider:
             return self.transport.get_json(path, params)
         except Exception as error:
             details = {"provider": self.manifest.key}
-            origin = safe_url_origin(str(error))
+            try:
+                origin = safe_url_origin(str(error))
+            except Exception:
+                origin = None
             if origin is not None:
                 details["upstream_origin"] = origin
             raise ModuleError(

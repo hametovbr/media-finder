@@ -54,15 +54,15 @@ class MaintenanceCoordinator:
                     policy=policy,
                 )
                 result = provider.execute_retention(subject, action, now)
-                revision.maintenance_status = result.status.value
-                revision.maintenance_error_code = result.error_code
+                revision.maintenance_status = result.outcome.status.value
+                revision.maintenance_error_code = result.outcome.error_code
                 revision.maintenance_attempted_at = now
-                if result.status is RetentionExecutionStatus.PURGED:
+                if result.outcome.status is RetentionExecutionStatus.PURGED:
                     revision.raw_payload = None
                     revision.normalized_payload = None
                     revision.effective_payload = None
                     revision.expired_at = now
-                elif result.status is RetentionExecutionStatus.REFRESHED:
+                elif result.outcome.status is RetentionExecutionStatus.REFRESHED:
                     if (
                         result.raw_payload is None
                         or result.normalized is None

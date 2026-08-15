@@ -5,6 +5,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
+from ._retention import InternalRetentionResult
 from .types import (
     Attribution,
     CorrelationResult,
@@ -14,7 +15,6 @@ from .types import (
     ModuleManifest,
     NormalizedMetadata,
     RetentionAction,
-    RetentionExecution,
     RetentionPolicy,
     RetentionSubject,
     SubmissionResult,
@@ -37,7 +37,7 @@ class MetadataProvider(Protocol):
     def plan_retention(self, policy: RetentionPolicy, now: datetime) -> RetentionAction: ...
     def execute_retention(
         self, subject: RetentionSubject, action: RetentionAction, now: datetime
-    ) -> RetentionExecution: ...
+    ) -> InternalRetentionResult: ...
 
 
 @runtime_checkable

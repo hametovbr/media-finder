@@ -37,22 +37,27 @@ def resolve_env_reference(reference: EnvReference) -> SecretStr:
     return SecretStr(value)
 
 
+def _origin(value: str) -> str | None:
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return None
+        parsed_port = parsed.port
+    except (UnicodeError, ValueError):
+        return None
+    port = f":{parsed_port}" if parsed_port is not None else ""
+    return urlunsplit((parsed.scheme, parsed.hostname + port, "", "", ""))
+
+
 def _safe_url(match: re.Match[str]) -> str:
-    parsed = urlsplit(match.group(0))
-    hostname = parsed.hostname or ""
-    port = f":{parsed.port}" if parsed.port else ""
-    return urlunsplit((parsed.scheme, hostname + port, "", "", ""))
+    return _origin(match.group(0)) or "[REDACTED]"
 
 
 def safe_url_origin(value: str) -> str | None:
     match = URL.search(value)
     if match is None:
         return None
-    parsed = urlsplit(match.group(0))
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        return None
-    port = f":{parsed.port}" if parsed.port else ""
-    return urlunsplit((parsed.scheme, parsed.hostname + port, "", "", ""))
+    return _origin(match.group(0))
 
 
 def redact(value: str, *, secrets: list[str] | tuple[str, ...] = ()) -> str:

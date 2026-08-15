@@ -4,7 +4,7 @@ from media_finder.modules.manual import ManualProvider
 from media_finder.modules.tmdb import TmdbConfig, TmdbProvider
 from media_finder.sdk.conformance import assert_client_conforms, assert_provider_conforms
 from media_finder.sdk.settings import describe_settings
-from media_finder.sdk.types import ModuleManifest
+from media_finder.sdk.types import ModuleManifest, PublicModel
 
 
 class Config(BaseModel):
@@ -45,3 +45,20 @@ def test_real_metadata_providers_conform_without_application_dependencies() -> N
     assert_provider_conforms(
         TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), RealProviderTransport())
     )
+
+
+def test_public_models_never_contain_raw_provider_payload_fields() -> None:
+    pending = list(PublicModel.__subclasses__())
+    seen: set[type[PublicModel]] = set()
+    while pending:
+        model = pending.pop()
+        if model in seen:
+            continue
+        seen.add(model)
+        pending.extend(model.__subclasses__())
+        forbidden = {
+            name
+            for name in model.model_fields
+            if name in {"raw_payload", "provider_payload"} or name.startswith("raw_provider")
+        }
+        assert not forbidden, f"{model.__name__} exposes {sorted(forbidden)}"

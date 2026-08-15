@@ -8,6 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from ...sdk._retention import InternalRetentionResult
 from ...sdk.errors import ModuleError
 from ...sdk.types import (
     Attribution,
@@ -173,8 +174,10 @@ class ManualProvider:
 
     def execute_retention(
         self, subject: RetentionSubject, action: RetentionAction, now: Any
-    ) -> RetentionExecution:
-        return RetentionExecution(status=RetentionExecutionStatus.NOOP)
+    ) -> InternalRetentionResult:
+        return InternalRetentionResult(
+            outcome=RetentionExecution(status=RetentionExecutionStatus.NOOP)
+        )
 
     @staticmethod
     def _normalize(document: ManualDocumentV1, external_id: str) -> NormalizedMetadata:

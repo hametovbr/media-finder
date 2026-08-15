@@ -1,6 +1,12 @@
 import pytest
 
-from media_finder.config import EnvReference, SettingsRepository, redact, resolve_env_reference
+from media_finder.config import (
+    EnvReference,
+    SettingsRepository,
+    redact,
+    resolve_env_reference,
+    safe_url_origin,
+)
 
 
 def test_only_valid_environment_references_are_persistable(monkeypatch) -> None:
@@ -28,6 +34,14 @@ def test_redaction_drops_sensitive_url_paths_queries_and_fragments() -> None:
         secrets=["hidden"],
     )
     assert result == "upstream https://example.test"
+
+
+def test_malformed_authority_is_omitted_without_leaking_secret() -> None:
+    diagnostic = "failed https://example.test:TOKEN/private?api_key=SECRET#fragment"
+    rendered = redact(diagnostic, secrets=["SECRET"])
+    assert rendered == "failed [REDACTED]"
+    assert safe_url_origin(diagnostic) is None
+    assert "TOKEN" not in rendered
 
 
 def test_settings_repository_persists_only_secret_reference(database) -> None:
