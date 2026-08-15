@@ -185,18 +185,9 @@ def test_runtime_module_discovery_is_absent() -> None:
         for path in sorted((directory / "src").rglob("*.py")):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             for node in ast.walk(tree):
-                if (
-                    isinstance(node, ast.Call)
-                    and (
-                        (
-                            isinstance(node.func, ast.Attribute)
-                            and node.func.attr in forbidden_calls
-                        )
-                        or (
-                            isinstance(node.func, ast.Name)
-                            and node.func.id in forbidden_calls
-                        )
-                    )
+                if isinstance(node, ast.Call) and (
+                    (isinstance(node.func, ast.Attribute) and node.func.attr in forbidden_calls)
+                    or (isinstance(node.func, ast.Name) and node.func.id in forbidden_calls)
                 ):
                     violations.append(f"{path.relative_to(ROOT)}:{node.lineno}")
 

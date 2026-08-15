@@ -5,44 +5,40 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Protocol
 
 from packaging.version import Version
 
 from .environment import ResolvedModuleEnvironment
 from .manifest import EnvironmentVariableSpec, ModuleKind, ModuleManifest
+from .protocols import DownloadClient, MetadataProvider, MetadataRetentionPolicy, ReleaseProvider
 
 SDK_VERSION = Version("1.0.0")
 SUPPORTED_CONTRACT_VERSION = "1"
 
 
-class CloseableModule(Protocol):
-    """Minimum lifecycle surface returned by a module factory."""
-
-    def close(self) -> None: ...
-
-
-type ModuleFactory = Callable[[ResolvedModuleEnvironment], CloseableModule]
-type RetentionFactory = Callable[[], CloseableModule]
+type MetadataFactory = Callable[[ResolvedModuleEnvironment], MetadataProvider]
+type RetentionFactory = Callable[[], MetadataRetentionPolicy]
+type ReleaseFactory = Callable[[ResolvedModuleEnvironment], ReleaseProvider]
+type DownloadFactory = Callable[[ResolvedModuleEnvironment], DownloadClient]
 
 
 @dataclass(frozen=True, slots=True)
 class MetadataProviderRegistration:
     manifest: ModuleManifest
-    build: ModuleFactory
+    build: MetadataFactory
     retention: RetentionFactory
 
 
 @dataclass(frozen=True, slots=True)
 class ReleaseProviderRegistration:
     manifest: ModuleManifest
-    build: ModuleFactory
+    build: ReleaseFactory
 
 
 @dataclass(frozen=True, slots=True)
 class DownloadClientRegistration:
     manifest: ModuleManifest
-    build: ModuleFactory
+    build: DownloadFactory
 
 
 type MetadataRegistrationMap = Mapping[str, MetadataProviderRegistration]
@@ -153,7 +149,6 @@ def _merge_environment(
 __all__ = [
     "SDK_VERSION",
     "SUPPORTED_CONTRACT_VERSION",
-    "CloseableModule",
     "DownloadClientRegistration",
     "MetadataProviderRegistration",
     "ReleaseProviderRegistration",

@@ -7,9 +7,13 @@ from typing import cast
 
 import pytest
 from media_finder_sdk import (
+    DownloadClient,
     DownloadClientRegistration,
+    MetadataProvider,
     MetadataProviderRegistration,
+    MetadataRetentionPolicy,
     ModuleKind,
+    ReleaseProvider,
     ReleaseProviderRegistration,
     StaticModuleRegistry,
     parse_manifest,
@@ -30,8 +34,8 @@ def _metadata(**overrides: object) -> MetadataProviderRegistration:
     manifest = parse_manifest(manifest_toml(**overrides))  # type: ignore[arg-type]
     return MetadataProviderRegistration(
         manifest=manifest,
-        build=lambda _environment: _Closeable(),
-        retention=lambda: _Closeable(),
+        build=lambda _environment: cast(MetadataProvider, _Closeable()),
+        retention=lambda: cast(MetadataRetentionPolicy, _Closeable()),
     )
 
 
@@ -45,7 +49,7 @@ def test_registry_exposes_separate_immutable_typed_collections() -> None:
                 capabilities=("search", "resolve", "magnet"),
             )
         ),
-        build=lambda _environment: _Closeable(),
+        build=lambda _environment: cast(ReleaseProvider, _Closeable()),
     )
     download = DownloadClientRegistration(
         manifest=parse_manifest(
@@ -55,7 +59,7 @@ def test_registry_exposes_separate_immutable_typed_collections() -> None:
                 capabilities=("destinations", "submit", "correlation", "magnet"),
             )
         ),
-        build=lambda _environment: _Closeable(),
+        build=lambda _environment: cast(DownloadClient, _Closeable()),
     )
 
     registry = StaticModuleRegistry.create(
@@ -83,8 +87,8 @@ def test_registry_rejects_duplicate_global_identity_and_wrong_typed_kind() -> No
                 capabilities=("search", "resolve", "torrent"),
             )
         ),
-        build=lambda _environment: _Closeable(),
-        retention=lambda: _Closeable(),
+        build=lambda _environment: cast(MetadataProvider, _Closeable()),
+        retention=lambda: cast(MetadataRetentionPolicy, _Closeable()),
     )
     with pytest.raises(ValueError, match="module_registration_kind_mismatch"):
         StaticModuleRegistry.create(metadata=(wrong_kind,))
