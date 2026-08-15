@@ -44,7 +44,7 @@ class ProviderConformanceFixture:
     created_at: datetime
     retention_check_at: datetime
     expected_retention_action: RetentionActionKind
-    expected_error_code: str | None = None
+    expected_error_code: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,13 +110,12 @@ def assert_provider_conforms(
     assert action.kind is fixture.expected_retention_action
     warning = provider.export_warning(policy, fixture.retention_check_at)
     assert warning is None or isinstance(warning, ExportWarning)
-    if fixture.expected_error_code is not None:
-        try:
-            provider.fetch(fixture.kind.value, "invalid", fixture.locale)
-        except ModuleError as error:
-            assert error.code == fixture.expected_error_code
-        else:
-            raise AssertionError("provider fixture expected a standardized error")
+    try:
+        provider.fetch(fixture.kind.value, "invalid", fixture.locale)
+    except ModuleError as error:
+        assert error.code == fixture.expected_error_code
+    else:
+        raise AssertionError("provider fixture expected a standardized error")
 
 
 def assert_client_conforms(client: DownloadClient, fixture: ClientConformanceFixture) -> None:

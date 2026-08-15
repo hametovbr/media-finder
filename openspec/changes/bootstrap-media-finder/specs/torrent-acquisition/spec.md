@@ -70,7 +70,7 @@ The system SHALL submit the exact correlation token `mf-acq-<acquisition-uuid>`.
 
 #### Scenario: Live integration construction fails
 - **WHEN** Prowlarr validation or a metadata-provider or download-client builder fails after creating one or more HTTP clients
-- **THEN** the runtime immediately closes and forgets every client created by that failed attempt, including across repeated failures
+- **THEN** the runtime validates before caching, immediately closes and forgets every client created by that failed attempt, including across repeated failures, and leaves unrelated successful cached integrations open
 
 ### Requirement: Bounded acquisition states
 The MVP SHALL expose only `pending`, `submitted`, and `failed` acquisition states and SHALL NOT track progress after successful submission.

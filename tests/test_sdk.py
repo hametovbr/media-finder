@@ -1,4 +1,5 @@
 import ast
+import inspect
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -116,6 +117,7 @@ def test_real_metadata_providers_conform_without_application_dependencies() -> N
             created_at=created,
             retention_check_at=created,
             expected_retention_action=RetentionActionKind.NONE,
+            expected_error_code="manual_import_invalid",
         ),
     )
     assert_provider_conforms(
@@ -293,5 +295,11 @@ def test_provider_conformance_rejects_missing_essential_capabilities(fake_provid
                 created_at=datetime(2026, 1, 1, tzinfo=UTC),
                 retention_check_at=datetime(2026, 1, 1, tzinfo=UTC),
                 expected_retention_action=RetentionActionKind.NONE,
+                expected_error_code="fixture_identity_invalid",
             ),
         )
+
+
+def test_provider_conformance_fixture_requires_a_standardized_error_code() -> None:
+    parameter = inspect.signature(ProviderConformanceFixture).parameters["expected_error_code"]
+    assert parameter.default is inspect.Parameter.empty

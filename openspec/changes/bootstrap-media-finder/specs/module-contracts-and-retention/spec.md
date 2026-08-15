@@ -27,7 +27,7 @@ A metadata-provider module SHALL expose configuration validation, successful sea
 
 #### Scenario: Conform an external provider
 - **WHEN** a test provider implements the public metadata contract using only its fixtures and public types
-- **THEN** the shared conformance suite unconditionally validates successful search, fetch, normalization, locale, identity, standardized errors, attribution, and retention without knowledge of the provider internals or accepting omitted essential capability declarations
+- **THEN** the shared conformance suite requires an expected safe error code and unconditionally validates successful search, fetch, normalization, locale, identity, that standardized error, attribution, and retention without knowledge of the provider internals or accepting omitted essential capability declarations
 
 #### Scenario: Conform the Manual provider
 - **WHEN** the Manual provider is supplied an in-memory conformance fixture identity

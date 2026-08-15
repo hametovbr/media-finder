@@ -104,6 +104,7 @@ class DefaultRuntimeFactory:
             provider = registration.build(
                 parsed.model_dump(mode="json"), self._new_http_client, self._secret_resolver
             )
+            provider.validate_config()
             self._metadata[cache_key] = provider
             return RuntimeResult(provider)
         except Exception:
@@ -149,6 +150,7 @@ class DefaultRuntimeFactory:
             client = registration.build(
                 parsed.model_dump(mode="json"), self._new_http_client, self._secret_resolver
             )
+            client.validate_config()
             self._download_clients[cache_key] = client
             return RuntimeResult(client)
         except Exception:
@@ -199,10 +201,7 @@ class RuntimeResolver:
         if payload is None:
             return RuntimeResult(None, "metadata_provider_not_configured")
         try:
-            result = self._factory.metadata_provider(key, payload)
-            if result.value is not None:
-                result.value.validate_config()
-            return result
+            return self._factory.metadata_provider(key, payload)
         except Exception:
             return RuntimeResult(None, "metadata_provider_configuration_invalid")
 
@@ -241,8 +240,6 @@ class RuntimeResolver:
         try:
             if self._factory is not None:
                 result = self._factory.download_client(instance)
-                if result.value is not None:
-                    result.value.validate_config()
             elif self._client_loader is not None:
                 result = RuntimeResult(self._client_loader(instance))
             else:
