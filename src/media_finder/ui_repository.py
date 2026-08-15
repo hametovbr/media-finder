@@ -10,9 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .models import (
     Acquisition,
-    AppSetting,
     Collection,
-    DownloadClientInstance,
     MediaItem,
     MetadataRevision,
 )
@@ -123,33 +121,6 @@ class UIRepository:
                 metadata,
             )
 
-    def clients(self, *, archived: bool = False) -> list[DownloadClientInstance]:
-        with self._sessions() as database:
-            return list(
-                database.scalars(
-                    select(DownloadClientInstance)
-                    .where(
-                        DownloadClientInstance.archived_at.is_not(None)
-                        if archived
-                        else DownloadClientInstance.archived_at.is_(None)
-                    )
-                    .order_by(DownloadClientInstance.name)
-                )
-            )
-
-    def change_client(self, client_id: str, *, restore: bool) -> bool:
-        with self._sessions() as database:
-            instance = database.get(DownloadClientInstance, client_id)
-            if instance is None:
-                return False
-            instance.archived_at = None if restore else datetime.now(UTC)
-            database.commit()
-            return True
-
-    def has_setting(self, key: str) -> bool:
-        with self._sessions() as database:
-            return database.get(AppSetting, key) is not None
-
     def create_collection(self, name: str) -> None:
         with self._sessions() as database:
             database.add(Collection(name=name))
@@ -186,13 +157,3 @@ class UIRepository:
                 item.collection_id = collection_id
             database.commit()
             return "ok"
-
-    def store_setting(self, key: str, payload: dict[str, Any]) -> None:
-        with self._sessions() as database:
-            setting = database.get(AppSetting, key)
-            if setting is None:
-                setting = AppSetting(key=key, value_payload=payload, secret_reference=False)
-                database.add(setting)
-            else:
-                setting.value_payload = payload
-            database.commit()

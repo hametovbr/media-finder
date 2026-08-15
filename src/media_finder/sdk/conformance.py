@@ -1,13 +1,23 @@
 """Small public conformance assertions usable by third-party module fixtures."""
 
 import inspect
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from .errors import ModuleError
 from .protocols import DownloadClient, MetadataProvider
+from .registration import (
+    DownloadClientRegistration,
+    EnvironmentConfigurationError,
+    HttpClientFactory,
+    MetadataProviderRegistration,
+    SecretResolver,
+    resolve_environment,
+)
 from .types import (
+    EnvironmentVariableSpec,
     ExportWarning,
     MagnetArtifact,
     MediaKind,
@@ -33,6 +43,28 @@ FORBIDDEN_ARGUMENTS = {
 ESSENTIAL_PROVIDER_CAPABILITIES = frozenset({"search", "fetch", "normalize"})
 
 
+def assert_environment_conforms(
+    declarations: tuple[EnvironmentVariableSpec, ...],
+    values: Mapping[str, str],
+) -> None:
+    """Exercise success and every required missing-variable boundary."""
+
+    assert resolve_environment(declarations, values) == dict(values)
+    for declaration in declarations:
+        if not declaration.required:
+            continue
+        missing_values = dict(values)
+        missing_values.pop(declaration.name, None)
+        try:
+            resolve_environment(declarations, missing_values)
+        except EnvironmentConfigurationError as error:
+            assert declaration.name in error.missing
+            for other in values.values():
+                assert other not in str(error)
+        else:
+            raise AssertionError(f"missing variable was accepted: {declaration.name}")
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderConformanceFixture:
     query: str
@@ -55,6 +87,61 @@ class ClientConformanceFixture:
     torrent: TorrentArtifact | None = None
     error_destination: str | None = None
     expected_error_code: str | None = None
+
+
+def assert_provider_registration_conforms(
+    registration: MetadataProviderRegistration,
+    expected_environment: tuple[EnvironmentVariableSpec, ...],
+    values: Mapping[str, str],
+    http_client_factory: HttpClientFactory,
+) -> MetadataProvider:
+    """Exercise exact declarations and successful production construction."""
+
+    assert registration.environment == expected_environment, "environment declaration mismatch"
+    assert_environment_conforms(registration.environment, values)
+    provider = registration.build(
+        resolve_environment(registration.environment, values),
+        http_client_factory,
+        _fixture_secret_resolver(registration.environment, values),
+    )
+    assert isinstance(provider, MetadataProvider)
+    assert provider.manifest.key == registration.key
+    provider.validate_config()
+    return provider
+
+
+def assert_client_registration_conforms(
+    registration: DownloadClientRegistration,
+    expected_environment: tuple[EnvironmentVariableSpec, ...],
+    values: Mapping[str, str],
+    http_client_factory: HttpClientFactory,
+) -> DownloadClient:
+    """Exercise exact declarations and successful production construction."""
+
+    assert registration.environment == expected_environment, "environment declaration mismatch"
+    assert_environment_conforms(registration.environment, values)
+    client = registration.build(
+        resolve_environment(registration.environment, values),
+        http_client_factory,
+        _fixture_secret_resolver(registration.environment, values),
+    )
+    assert isinstance(client, DownloadClient)
+    assert client.manifest.key == registration.key
+    client.validate_config()
+    return client
+
+
+def _fixture_secret_resolver(
+    declarations: tuple[EnvironmentVariableSpec, ...], values: Mapping[str, str]
+) -> SecretResolver:
+    declared = {declaration.name for declaration in declarations}
+
+    def resolve(reference: str) -> str:
+        if not reference.startswith("env:") or reference[4:] not in declared:
+            raise AssertionError("builder requested an undeclared environment variable")
+        return values[reference[4:]]
+
+    return resolve
 
 
 def _assert_boundary(module: object) -> None:

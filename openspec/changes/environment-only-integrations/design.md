@@ -40,6 +40,8 @@ Alternative rejected: one JSON environment variable. It weakens discoverability,
 
 Modules retain typed Pydantic configuration models as an internal validation boundary, but core constructs their input mapping from declared environment variables. The mapping exists only in memory. `RuntimeResolver` no longer queries `AppSetting`; module builders no longer accept operator-selected `env:NAME` references. Secret resolution happens once at construction and remains subject to existing redaction and per-attempt HTTP-client ownership.
 
+Registration conformance compares independent expected declarations, exercises every required-variable omission, validates secret classification, and constructs the production module builder before the fixture-backed behavior suite runs. Runtime shutdown marks the factory closed under the same lock used for cache publication, so an in-flight build cannot repopulate caches or retain a client after shutdown.
+
 TMDB keeps its official HTTPS origin as a module constant. Making the origin an environment option would reopen the credential-forwarding risk already removed by the fixed-origin validation.
 
 Alternative rejected: retaining database payloads as fallback. Two sources of truth would preserve the original ambiguity and make rollback dependent on database state.
@@ -48,7 +50,7 @@ Alternative rejected: retaining database payloads as fallback. Two sources of tr
 
 Acquisition persistence still needs a stable client foreign key. A migration introduces or identifies one system-owned qBittorrent row with a deterministic UUID, fixed display name `qBittorrent`, module key `qbittorrent`, empty configuration payload, and an explicit system-owned marker. Startup idempotently verifies that row. New acquisition discovery, submission, and reconciliation resolve only this row through environment configuration.
 
-Existing client rows are retained because Acquisitions reference them. The migration archives non-system rows and removes their stored configuration payloads so credentials or references are not retained. Historical records remain displayable, but legacy rows cannot be restored, selected, or resolved for new client calls.
+Existing client rows are retained because Acquisitions reference them. The migration archives non-system rows, removes their stored configuration payloads, and deletes legacy provider/Prowlarr `AppSetting` rows so credentials or references are not retained in active storage. It chooses collision-free legacy display names and is idempotent across an interrupted SQLite column-add operation. Historical records remain displayable, but legacy rows cannot be restored, selected, or resolved for new client calls.
 
 Alternative rejected: removing the foreign key or hard-deleting client rows. Either requires a broader acquisition-schema redesign or destroys history.
 

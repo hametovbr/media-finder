@@ -1,40 +1,61 @@
-"""Persisted-settings runtime construction boundary for the browser UI."""
+"""Environment-owned runtime construction boundary for the browser UI."""
 
 from __future__ import annotations
 
-import json
+import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from threading import RLock
-from typing import Protocol, cast
+from typing import Protocol
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
-from sqlalchemy.orm import Session, sessionmaker
 
 from .acquisition import ClientLoader
-from .config import resolve_env_reference
-from .models import AppSetting, DownloadClientInstance
+from .models import DownloadClientInstance
 from .modules.registry import FIRST_PARTY_MODULES
 from .prowlarr import HttpxProwlarrTransport, ProwlarrAdapter, SearchResultCache
 from .sdk.protocols import DownloadClient, MetadataProvider
-from .sdk.registration import StaticModuleRegistry
+from .sdk.registration import (
+    EnvironmentConfigurationError,
+    IntegrationDescriptor,
+    StaticModuleRegistry,
+    resolve_environment,
+)
 from .sdk.settings import EnvReference, validate_service_base_url
-from .sdk.types import Attribution
+from .sdk.types import Attribution, EnvironmentVariableSpec
+from .system_clients import SYSTEM_QBITTORRENT_ID
+
+PROWLARR_INTEGRATION = IntegrationDescriptor(
+    key="prowlarr",
+    environment=(
+        EnvironmentVariableSpec(
+            name="PROWLARR_URL",
+            required=True,
+            secret=False,
+            description_key="integration.prowlarr.environment.url",
+        ),
+        EnvironmentVariableSpec(
+            name="PROWLARR_API_KEY",
+            required=True,
+            secret=True,
+            description_key="integration.prowlarr.environment.api_key",
+        ),
+    ),
+)
 
 
 @dataclass(frozen=True, slots=True)
 class RuntimeResult[T]:
     value: T | None
     error_code: str | None = None
+    missing_variables: tuple[str, ...] = ()
 
 
 class RuntimeFactory(Protocol):
-    def metadata_provider(
-        self, key: str, config: Mapping[str, object]
-    ) -> RuntimeResult[MetadataProvider]: ...
+    def metadata_provider(self, key: str) -> RuntimeResult[MetadataProvider]: ...
 
-    def prowlarr(self, config: Mapping[str, object]) -> RuntimeResult[ProwlarrAdapter]: ...
+    def prowlarr(self) -> RuntimeResult[ProwlarrAdapter]: ...
 
     def download_client(
         self, instance: DownloadClientInstance
@@ -64,31 +85,30 @@ class ProwlarrSettings(BaseModel):
         return EnvReference(value=value).value
 
 
-def _resolve_secret(reference: str) -> str:
-    return resolve_env_reference(EnvReference(value=reference)).get_secret_value()
-
-
 class DefaultRuntimeFactory:
-    """Construct first-party integrations from persisted safe configuration."""
+    """Construct first-party integrations from one process-environment snapshot."""
 
     def __init__(
         self,
         *,
         http_client_factory: Callable[[], httpx.Client] = httpx.Client,
-        secret_resolver: Callable[[str], str] = _resolve_secret,
         registry: StaticModuleRegistry = FIRST_PARTY_MODULES,
+        environment: Mapping[str, str] | None = None,
     ) -> None:
         self._http_client_factory = http_client_factory
-        self._secret_resolver = secret_resolver
+        self._environment = dict(os.environ if environment is None else environment)
+        self._secret_resolver = self._resolve_environment_secret
         self._prowlarr: dict[tuple[str, str], ProwlarrAdapter] = {}
         self._metadata: dict[tuple[str, str], MetadataProvider] = {}
         self._download_clients: dict[tuple[str, str], DownloadClient] = {}
         self._http_clients: list[httpx.Client] = []
         self._registry = registry
         self._lock = RLock()
+        self._closed = False
 
     def close(self) -> None:
         with self._lock:
+            self._closed = True
             clients = self._http_clients
             self._http_clients = []
             self._prowlarr.clear()
@@ -96,43 +116,62 @@ class DefaultRuntimeFactory:
             self._download_clients.clear()
         self._close_clients(clients)
 
-    def metadata_provider(
-        self, key: str, config: Mapping[str, object]
-    ) -> RuntimeResult[MetadataProvider]:
+    def metadata_provider(self, key: str) -> RuntimeResult[MetadataProvider]:
+        with self._lock:
+            if self._closed:
+                return RuntimeResult(None, "integration_runtime_closed")
         registration = self._registry.metadata_providers.get(key)
         if registration is None:
             return RuntimeResult(None, "metadata_provider_not_found")
         owned_clients: list[httpx.Client] = []
         try:
-            parsed = registration.config_model.model_validate(config)
-            cache_key = (key, json.dumps(parsed.model_dump(mode="json"), sort_keys=True))
+            environment = resolve_environment(registration.environment, self._environment)
+            cache_key = (key, "environment")
             with self._lock:
                 existing = self._metadata.get(cache_key)
             if existing is not None:
                 return RuntimeResult(existing)
             provider = registration.build(
-                parsed.model_dump(mode="json"),
+                environment,
                 self._attempt_client_factory(owned_clients),
                 self._secret_resolver,
             )
             provider.validate_config()
             with self._lock:
-                existing = self._metadata.get(cache_key)
-                if existing is None:
+                if self._closed:
+                    existing = None
+                    runtime_closed = True
+                else:
+                    runtime_closed = False
+                    existing = self._metadata.get(cache_key)
+                if not runtime_closed and existing is None:
                     self._metadata[cache_key] = provider
                     self._http_clients.extend(owned_clients)
                     return RuntimeResult(provider)
+            if runtime_closed:
+                self._close_clients(owned_clients)
+                return RuntimeResult(None, "integration_runtime_closed")
             self._close_clients(owned_clients)
             return RuntimeResult(existing)
+        except EnvironmentConfigurationError as error:
+            self._close_clients(owned_clients)
+            return RuntimeResult(None, error.code, error.missing)
         except Exception:
             self._close_clients(owned_clients)
             return RuntimeResult(None, "metadata_provider_configuration_invalid")
 
-    def prowlarr(self, config: Mapping[str, object]) -> RuntimeResult[ProwlarrAdapter]:
+    def prowlarr(self) -> RuntimeResult[ProwlarrAdapter]:
+        with self._lock:
+            if self._closed:
+                return RuntimeResult(None, "integration_runtime_closed")
         owned_clients: list[httpx.Client] = []
         try:
-            parsed = ProwlarrSettings.model_validate(config)
-            key = (str(parsed.base_url), parsed.api_key_ref)
+            environment = resolve_environment(PROWLARR_INTEGRATION.environment, self._environment)
+            parsed = ProwlarrSettings(
+                base_url=HttpUrl(environment["PROWLARR_URL"]),
+                api_key_ref="env:PROWLARR_API_KEY",
+            )
+            key = ("environment", "prowlarr")
             with self._lock:
                 existing = self._prowlarr.get(key)
             if existing is not None:
@@ -147,46 +186,70 @@ class DefaultRuntimeFactory:
             transport.validate()
             adapter = ProwlarrAdapter(transport, SearchResultCache())
             with self._lock:
-                existing = self._prowlarr.get(key)
-                if existing is None:
+                if self._closed:
+                    existing = None
+                    runtime_closed = True
+                else:
+                    runtime_closed = False
+                    existing = self._prowlarr.get(key)
+                if not runtime_closed and existing is None:
                     self._prowlarr[key] = adapter
                     self._http_clients.extend(owned_clients)
                     return RuntimeResult(adapter)
+            if runtime_closed:
+                self._close_clients(owned_clients)
+                return RuntimeResult(None, "integration_runtime_closed")
             self._close_clients(owned_clients)
             return RuntimeResult(existing)
+        except EnvironmentConfigurationError as error:
+            self._close_clients(owned_clients)
+            return RuntimeResult(None, error.code, error.missing)
         except Exception:
             self._close_clients(owned_clients)
             return RuntimeResult(None, "prowlarr_configuration_invalid")
 
     def download_client(self, instance: DownloadClientInstance) -> RuntimeResult[DownloadClient]:
+        with self._lock:
+            if self._closed:
+                return RuntimeResult(None, "integration_runtime_closed")
+        if instance.id != SYSTEM_QBITTORRENT_ID or not instance.system_owned:
+            return RuntimeResult(None, "download_client_system_required")
         registration = self._registry.download_clients.get(instance.module_key)
         if registration is None:
             return RuntimeResult(None, "download_client_module_unknown")
         owned_clients: list[httpx.Client] = []
         try:
-            parsed = registration.config_model.model_validate(instance.config_payload)
-            cache_key = (
-                instance.id,
-                json.dumps(parsed.model_dump(mode="json"), sort_keys=True),
-            )
+            environment = resolve_environment(registration.environment, self._environment)
+            cache_key = (registration.key, "environment")
             with self._lock:
                 existing = self._download_clients.get(cache_key)
             if existing is not None:
                 return RuntimeResult(existing)
             client = registration.build(
-                parsed.model_dump(mode="json"),
+                environment,
                 self._attempt_client_factory(owned_clients),
                 self._secret_resolver,
             )
             client.validate_config()
             with self._lock:
-                existing = self._download_clients.get(cache_key)
-                if existing is None:
+                if self._closed:
+                    existing = None
+                    runtime_closed = True
+                else:
+                    runtime_closed = False
+                    existing = self._download_clients.get(cache_key)
+                if not runtime_closed and existing is None:
                     self._download_clients[cache_key] = client
                     self._http_clients.extend(owned_clients)
                     return RuntimeResult(client)
+            if runtime_closed:
+                self._close_clients(owned_clients)
+                return RuntimeResult(None, "integration_runtime_closed")
             self._close_clients(owned_clients)
             return RuntimeResult(existing)
+        except EnvironmentConfigurationError as error:
+            self._close_clients(owned_clients)
+            return RuntimeResult(None, error.code, error.missing)
         except Exception:
             self._close_clients(owned_clients)
             return RuntimeResult(None, "download_client_configuration_invalid")
@@ -206,20 +269,38 @@ class DefaultRuntimeFactory:
         for client in clients:
             client.close()
 
+    def _resolve_environment_secret(self, reference: str) -> str:
+        variable_name = EnvReference(value=reference).variable_name
+        return self._environment[variable_name]
+
+    def environment_is_set(self, name: str) -> bool:
+        """Expose presence only; never return environment values to the UI."""
+
+        return bool(self._environment.get(name, "").strip())
+
+    def metadata_provider_environment_configured(self, key: str) -> bool:
+        """Check required declarations without constructing or probing a provider."""
+
+        registration = self._registry.metadata_providers.get(key)
+        if registration is None:
+            return False
+        return all(
+            not declaration.required or self.environment_is_set(declaration.name)
+            for declaration in registration.environment
+        )
+
 
 class RuntimeResolver:
-    """Resolve every live integration from the same persisted configuration source."""
+    """Resolve every live integration from one environment-owned runtime source."""
 
     def __init__(
         self,
-        sessions: sessionmaker[Session],
         *,
         factory: RuntimeFactory | None,
         providers: Mapping[str, MetadataProvider],
         prowlarr: ProwlarrAdapter | None,
         client_loader: ClientLoader | None,
     ) -> None:
-        self._sessions = sessions
         self._factory = factory
         self._providers = dict(providers)
         self._prowlarr = prowlarr
@@ -235,14 +316,8 @@ class RuntimeResolver:
             return RuntimeResult(None, "metadata_provider_not_found")
         if self._factory is None:
             return RuntimeResult(prototype)
-        payload = self._setting(f"metadata_provider:{key}")
-        if payload is None:
-            try:
-                payload = prototype.config_model.model_validate({}).model_dump(mode="json")
-            except Exception:
-                return RuntimeResult(None, "metadata_provider_not_configured")
         try:
-            return self._factory.metadata_provider(key, payload)
+            return self._factory.metadata_provider(key)
         except Exception:
             return RuntimeResult(None, "metadata_provider_configuration_invalid")
 
@@ -259,15 +334,10 @@ class RuntimeResolver:
 
         attributions: list[Attribution] = []
         for key, provider in self._providers.items():
-            configured = (
-                self._factory is None or self._setting(f"metadata_provider:{key}") is not None
-            )
-            if not configured:
-                try:
-                    provider.config_model.model_validate({})
-                    configured = True
-                except Exception:
-                    pass
+            configured = True
+            if self._factory is not None:
+                probe = getattr(self._factory, "metadata_provider_environment_configured", None)
+                configured = bool(probe(key)) if callable(probe) else True
             if configured:
                 attributions.append(provider.attribution())
         return attributions
@@ -278,15 +348,14 @@ class RuntimeResolver:
                 self._prowlarr,
                 None if self._prowlarr is not None else "prowlarr_not_configured",
             )
-        payload = self._setting("prowlarr")
-        if payload is None:
-            return RuntimeResult(None, "prowlarr_not_configured")
         try:
-            return self._factory.prowlarr(payload)
+            return self._factory.prowlarr()
         except Exception:
             return RuntimeResult(None, "prowlarr_configuration_invalid")
 
     def download_client(self, instance: DownloadClientInstance) -> RuntimeResult[DownloadClient]:
+        if instance.id != SYSTEM_QBITTORRENT_ID or not instance.system_owned:
+            return RuntimeResult(None, "download_client_system_required")
         try:
             if self._factory is not None:
                 result = self._factory.download_client(instance)
@@ -314,11 +383,8 @@ class RuntimeResolver:
             return False
         return True
 
-    def _setting(self, key: str) -> dict[str, object] | None:
-        with self._sessions() as database:
-            setting = database.get(AppSetting, key)
-            return (
-                cast(dict[str, object], dict(setting.value_payload))
-                if setting is not None
-                else None
-            )
+    def environment_is_set(self, name: str) -> bool:
+        if self._factory is None:
+            return False
+        probe = getattr(self._factory, "environment_is_set", None)
+        return bool(probe(name)) if callable(probe) else False

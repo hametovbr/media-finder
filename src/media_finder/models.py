@@ -122,6 +122,7 @@ class DownloadClientInstance(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     module_key: Mapped[str] = mapped_column(String(100), nullable=False)
     config_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    system_owned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

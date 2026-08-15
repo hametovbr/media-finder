@@ -12,7 +12,6 @@ import httpx
 import pytest
 import uvicorn
 from fastapi.responses import Response
-from fastapi.testclient import TestClient
 from playwright.sync_api import Browser, Page, Playwright, sync_playwright
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -37,6 +36,7 @@ from media_finder.sdk.types import (
     RetentionPolicy,
     SubmissionResult,
 )
+from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 from media_finder.ui import create_ui_app
 
 
@@ -192,7 +192,7 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     database_url = f"sqlite:///{tmp_path / 'browser.db'}"
     migrate_to_head(database_url)
     monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long browser test secret")
-    clients = {"First": BrowserClient("first"), "Second": BrowserClient("second")}
+    clients = {"qBittorrent": BrowserClient("second")}
 
     def load_client(instance: DownloadClientInstance) -> BrowserClient:
         return clients.setdefault(instance.name, BrowserClient(instance.name.casefold()))
@@ -216,9 +216,8 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     sessions = session_factory(app.state.engine)
     with sessions() as session:
-        first = DownloadClientInstance(name="First", module_key="fixture", config_payload={})
-        second = DownloadClientInstance(name="Second", module_key="fixture", config_payload={})
-        session.add_all([first, second])
+        system = session.get(DownloadClientInstance, SYSTEM_QBITTORRENT_ID)
+        assert system is not None
         item = MediaItem(provider_key="manual", external_id=str(uuid4()), kind="movie")
         session.add(item)
         session.flush()
@@ -232,7 +231,7 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         pending = Acquisition(
             media_item_id=item.id,
             metadata_revision_id=revision.id,
-            download_client_instance_id=second.id,
+            download_client_instance_id=system.id,
             idempotency_key="pending-browser",
             naming_profile="jellyfin-v1",
             status="pending",
@@ -262,10 +261,12 @@ def default_runtime_browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     database_url = f"sqlite:///{tmp_path / 'default-browser.db'}"
     migrate_to_head(database_url)
     monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long browser test secret")
-    monkeypatch.setenv("TMDB_API_TOKEN", "tmdb")
+    monkeypatch.setenv("TMDB_TOKEN", "tmdb")
+    monkeypatch.setenv("PROWLARR_URL", "https://prowlarr.example.test")
     monkeypatch.setenv("PROWLARR_API_KEY", "prowlarr")
-    monkeypatch.setenv("QB_USERNAME", "user")
-    monkeypatch.setenv("QB_PASSWORD", "password")
+    monkeypatch.setenv("QBITTORRENT_URL", "https://qb.example.test")
+    monkeypatch.setenv("QBITTORRENT_USERNAME", "user")
+    monkeypatch.setenv("QBITTORRENT_PASSWORD", "password")
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/configuration"):
@@ -280,47 +281,6 @@ def default_runtime_browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
     def factory() -> httpx.Client:
         return httpx.Client(transport=httpx.MockTransport(handler))
-
-    first = create_ui_app(
-        database_url,
-        session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
-        http_client_factory=factory,
-    )
-    with TestClient(first) as client:
-        csrf_match = re.search(r'name="csrf" value="([^"]+)"', client.get("/").text)
-        assert csrf_match
-        csrf = csrf_match.group(1)
-        settings = (
-            (
-                "/ui/settings/providers/tmdb",
-                {
-                    "csrf": csrf,
-                    "api_token": "env:TMDB_API_TOKEN",
-                    "base_url": "https://api.themoviedb.org/3",
-                },
-            ),
-            (
-                "/ui/settings/prowlarr",
-                {
-                    "csrf": csrf,
-                    "base_url": "https://prowlarr.example.test",
-                    "api_key_ref": "env:PROWLARR_API_KEY",
-                },
-            ),
-            (
-                "/ui/settings/clients",
-                {
-                    "csrf": csrf,
-                    "name": "Rebuilt qB",
-                    "module_key": "qbittorrent",
-                    "base_url": "https://qb.example.test",
-                    "username_ref": "env:QB_USERNAME",
-                    "password_ref": "env:QB_PASSWORD",
-                },
-            ),
-        )
-        for path, payload in settings:
-            assert client.post(path, data=payload, follow_redirects=False).status_code == 303
 
     rebuilt = create_ui_app(
         database_url,
@@ -337,6 +297,50 @@ def default_runtime_browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     if not server.started:
         raise RuntimeError("default runtime browser server did not start")
     yield BrowserSite(f"http://127.0.0.1:{port}", rebuilt, "")
+    server.should_exit = True
+    thread.join(timeout=10)
+
+
+@pytest.fixture
+def unavailable_runtime_browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    database_url = f"sqlite:///{tmp_path / 'unavailable-browser.db'}"
+    migrate_to_head(database_url)
+    environment = {
+        "TMDB_TOKEN": "browser-tmdb-secret",
+        "PROWLARR_URL": "https://prowlarr.example.test",
+        "PROWLARR_API_KEY": "browser-prowlarr-secret",
+        "QBITTORRENT_URL": "https://qb.example.test",
+        "QBITTORRENT_USERNAME": "browser-qb-user",
+        "QBITTORRENT_PASSWORD": "browser-qb-password",
+    }
+    monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long browser test secret")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.themoviedb.org":
+            return httpx.Response(200, json={})
+        if request.url.host == "prowlarr.example.test":
+            return httpx.Response(503, text="never-render-upstream-body")
+        if request.url.path == "/api/v2/auth/login":
+            return httpx.Response(200, text="Ok.")
+        return httpx.Response(200, json={})
+
+    app = create_ui_app(
+        database_url,
+        session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
+        environment=environment,
+        http_client_factory=lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    app.state.test_environment_values = tuple(environment.values())
+    port = _port()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not server.started and time.monotonic() < deadline:
+        time.sleep(0.02)
+    if not server.started:
+        raise RuntimeError("unavailable runtime browser server did not start")
+    yield BrowserSite(f"http://127.0.0.1:{port}", app, "")
     server.should_exit = True
     thread.join(timeout=10)
 
@@ -482,7 +486,7 @@ def test_grouped_provider_duplicate_and_similarity_confirmation(
     page.context.close()
 
 
-def test_release_client_switch_idempotent_submit_and_pending_reconcile(
+def test_single_client_idempotent_submit_and_pending_reconcile(
     browser: Browser, browser_site: BrowserSite
 ) -> None:
     page, failures = _strict_page(browser)
@@ -490,7 +494,6 @@ def test_release_client_switch_idempotent_submit_and_pending_reconcile(
     page.get_by_label("Free query").fill("Pending Movie")
     page.get_by_role("button", name="Search torrents").click()
     page.get_by_test_id("release-result").get_by_role("radio").check()
-    page.get_by_test_id("client-select").select_option(label="Second")
     page.get_by_test_id("destination-select").wait_for()
     assert page.get_by_test_id("destination-select").input_value() == "second"
     payload = {
@@ -498,11 +501,10 @@ def test_release_client_switch_idempotent_submit_and_pending_reconcile(
         "release_token": page.get_by_test_id("release-result")
         .get_by_role("radio")
         .get_attribute("value"),
-        "client_instance_id": page.get_by_test_id("client-select").input_value(),
         "destination": "second",
         "idempotency_key": page.locator('input[name="idempotency_key"]').input_value(),
     }
-    browser_site.app.state.browser_clients["Second"].destination = "current"
+    browser_site.app.state.browser_clients["qBittorrent"].destination = "current"
     page.get_by_test_id("submit-acquisition").click()
     page.get_by_role("alert").wait_for()
     assert page.get_by_role("alert").locator("code").inner_text() == (
@@ -549,18 +551,9 @@ def test_settings_collection_controls_russian_csrf_and_accessibility(
     page, failures = _strict_page(browser)
     page.goto(f"{browser_site.url}/settings")
     checklist = page.get_by_test_id("readiness-checklist")
-    assert "Ready: Prowlarr" in checklist.inner_text()
-    assert "Ready: First" in checklist.inner_text()
-    client_form = page.get_by_test_id("client-module-qbittorrent")
-    client_form.get_by_label("Instance name").fill("Third")
-    client_form.get_by_label("Base URL").fill("https://qb.example.test")
-    client_form.get_by_label("Username environment reference").fill("env:QB_USERNAME")
-    client_form.get_by_label("Password environment reference").fill("env:QB_PASSWORD")
-    client_form.get_by_role("button", name="Save").click()
-    page.wait_for_url("**/settings?saved=1")
-    assert page.get_by_role("status").inner_text() == "Settings saved."
-    assert page.evaluate("document.activeElement.id") == "ui-feedback"
-    assert "Ready: Third" in page.get_by_test_id("readiness-checklist").inner_text()
+    assert checklist.locator('[data-environment-variable="PROWLARR_URL"]').is_visible()
+    assert checklist.locator('[data-environment-variable="QBITTORRENT_URL"]').is_visible()
+    assert page.locator('form[action^="/ui/settings/"]').count() == 0
 
     page.get_by_label("New collection").fill("Browser Collection")
     page.get_by_role("button", name="Create collection").click()
@@ -599,15 +592,21 @@ def test_settings_collection_controls_russian_csrf_and_accessibility(
     page.context.close()
 
 
-def test_browser_observes_default_runtime_after_persisted_app_reconstruction(
+def test_browser_observes_default_runtime_from_environment(
     browser: Browser, default_runtime_browser_site: BrowserSite
 ) -> None:
     page, failures = _strict_page(browser)
     page.goto(f"{default_runtime_browser_site.url}/settings")
     checklist = page.get_by_test_id("readiness-checklist")
-    assert checklist.locator('[data-readiness="tmdb:ready"]').is_visible()
-    assert checklist.locator('[data-readiness="prowlarr:ready"]').is_visible()
-    assert checklist.locator('[data-readiness="client:ready"]').is_visible()
+    assert checklist.locator(
+        '[data-integration="tmdb"][data-integration-state="ready"]'
+    ).is_visible()
+    assert checklist.locator(
+        '[data-integration="prowlarr"][data-integration-state="ready"]'
+    ).is_visible()
+    assert checklist.locator(
+        '[data-integration="qbittorrent"][data-integration-state="ready"]'
+    ).is_visible()
     _axe(page, default_runtime_browser_site)
     page.goto(f"{default_runtime_browser_site.url}/about")
     assert "User-provided metadata" in page.locator("main").inner_text()
@@ -617,7 +616,33 @@ def test_browser_observes_default_runtime_after_persisted_app_reconstruction(
     page.context.close()
 
 
-def test_metadata_locale_poster_placeholder_and_client_archive_browser(
+def test_browser_shows_unavailable_without_values_and_rejects_legacy_routes(
+    browser: Browser, unavailable_runtime_browser_site: BrowserSite
+) -> None:
+    page, failures = _strict_page(browser)
+    page.goto(f"{unavailable_runtime_browser_site.url}/settings")
+    assert page.locator(
+        '[data-integration="prowlarr"][data-integration-state="unavailable"]'
+    ).is_visible()
+    assert page.locator('[data-integration="tmdb"][data-integration-state="ready"]').is_visible()
+    for value in unavailable_runtime_browser_site.app.state.test_environment_values:
+        assert value not in page.locator("main").inner_text()
+    legacy = page.request.post(
+        f"{unavailable_runtime_browser_site.url}/ui/settings/prowlarr",
+        form={},
+        max_redirects=0,
+    )
+    assert legacy.status in {404, 405}
+    page.get_by_test_id("locale-switcher").select_option("ru")
+    page.wait_for_load_state("networkidle")
+    prowlarr = page.locator('[data-integration="prowlarr"]')
+    assert "Недоступно" in prowlarr.inner_text()
+    _axe(page, unavailable_runtime_browser_site)
+    assert failures == []
+    page.context.close()
+
+
+def test_metadata_locale_poster_placeholder_and_read_only_settings_browser(
     browser: Browser, browser_site: BrowserSite
 ) -> None:
     page, failures = _strict_page(browser, locale="ru-RU")
@@ -636,29 +661,11 @@ def test_metadata_locale_poster_placeholder_and_client_archive_browser(
     page.goto(browser_site.url)
     assert page.get_by_test_id("poster-placeholder").first.is_visible()
     page.goto(f"{browser_site.url}/settings")
-    active = page.get_by_role("heading", name="Active download clients").locator("..")
-    first = active.get_by_text("First", exact=True).locator("..")
-    first.get_by_role("button", name="Archive download client").click()
-    page.wait_for_url("**/settings?client=archived")
-    assert (
-        page.get_by_role("status", name="")
-        .filter(has_text="Download client archived.")
-        .is_visible()
-    )
-    archived = page.get_by_role("heading", name="Archived download clients").locator("..")
-    archived.get_by_text("First", exact=True).locator("..").get_by_role(
-        "button", name="Restore download client"
-    ).click()
-    page.wait_for_url("**/settings?client=restored")
-    assert "Download client restored." in page.locator("main").inner_text()
+    assert page.locator('form[action^="/ui/settings/"]').count() == 0
+    assert page.locator('[data-environment-variable="QBITTORRENT_PASSWORD"]').is_visible()
     page.get_by_test_id("locale-switcher").select_option("ru")
     page.wait_for_load_state("networkidle")
-    active = page.get_by_role("heading", name="Активные клиенты загрузки").locator("..")
-    active.get_by_text("First", exact=True).locator("..").get_by_role(
-        "button", name="Архивировать клиент загрузки"
-    ).click()
-    page.wait_for_url("**/settings?client=archived")
-    assert "Клиент загрузки архивирован." in page.locator("main").inner_text()
+    assert page.locator('[data-environment-variable="TMDB_TOKEN"]').is_visible()
     _axe(page, browser_site)
     assert failures == []
     page.context.close()

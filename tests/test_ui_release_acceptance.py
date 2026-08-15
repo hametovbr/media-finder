@@ -264,7 +264,7 @@ def test_catalog_renders_safe_lazy_poster_and_placeholder(acceptance_app) -> Non
     assert 'data-testid="poster-placeholder"' in page.text
 
 
-def test_download_client_archive_restore_lifecycle_is_visible_and_enforced(
+def test_legacy_download_client_lifecycle_is_absent_and_unreachable(
     acceptance_app,
 ) -> None:
     sessions = session_factory(acceptance_app.state.engine)
@@ -291,22 +291,21 @@ def test_download_client_archive_restore_lifecycle_is_visible_and_enforced(
     with TestClient(acceptance_app) as client:
         settings = client.get("/settings")
         csrf = _csrf(settings.text)
-        assert f'action="/ui/settings/clients/{instance_id}/archive"' in settings.text
+        assert f'action="/ui/settings/clients/{instance_id}/archive"' not in settings.text
         archived = client.post(
             f"/ui/settings/clients/{instance_id}/archive",
             data={"csrf": csrf},
             follow_redirects=False,
         )
-        assert archived.status_code == 303
+        assert archived.status_code in {404, 405}
         unavailable = client.post(
             f"/ui/clients/{instance_id}/destinations",
             data={"csrf": csrf},
         )
-        assert unavailable.status_code == 422
-        assert 'data-error-code="download_client_archived"' in unavailable.text
+        assert unavailable.status_code in {404, 405}
         settings = client.get("/settings?clients=archived")
-        assert "Archived download clients" in settings.text
-        assert f'action="/ui/settings/clients/{instance_id}/restore"' in settings.text
+        assert "Archived download clients" not in settings.text
+        assert f'action="/ui/settings/clients/{instance_id}/restore"' not in settings.text
         release = client.get(f"/items/{item_id}/releases")
         assert "Living room" not in release.text
         restored = client.post(
@@ -314,8 +313,8 @@ def test_download_client_archive_restore_lifecycle_is_visible_and_enforced(
             data={"csrf": csrf},
             follow_redirects=False,
         )
-        assert restored.status_code == 303
+        assert restored.status_code in {404, 405}
 
     with sessions() as database:
         persisted = database.get(DownloadClientInstance, instance_id)
-        assert persisted is not None and persisted.archived_at is None
+        assert persisted is not None and persisted.system_owned is False

@@ -5,14 +5,11 @@ import re
 from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import SecretStr
-from sqlalchemy.orm import Session
 
-from .models import AppSetting
 from .sdk.settings import EnvReference
 
 __all__ = [
     "EnvReference",
-    "SettingsRepository",
     "redact",
     "resolve_env_reference",
     "safe_url_origin",
@@ -58,26 +55,3 @@ def redact(value: str, *, secrets: list[str] | tuple[str, ...] = ()) -> str:
     for secret in sorted((item for item in secrets if item), key=len, reverse=True):
         safe = safe.replace(secret, "[REDACTED]")
     return safe
-
-
-class SettingsRepository:
-    """Persist configuration values while keeping resolved secrets out of storage."""
-
-    def __init__(self, session: Session) -> None:
-        self.session = session
-
-    def set_secret_reference(self, key: str, value: str) -> None:
-        reference = EnvReference(value=value)
-        setting = self.session.get(AppSetting, key)
-        if setting is None:
-            setting = AppSetting(key=key, value_payload={}, secret_reference=True)
-            self.session.add(setting)
-        setting.value_payload = {"reference": reference.value}
-        setting.secret_reference = True
-        self.session.commit()
-
-    def get_reference(self, key: str) -> EnvReference | None:
-        setting = self.session.get(AppSetting, key)
-        if setting is None or not setting.secret_reference:
-            return None
-        return EnvReference(value=setting.value_payload["reference"])

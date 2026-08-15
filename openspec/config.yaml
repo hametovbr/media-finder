@@ -6,7 +6,7 @@ context: |
   It does not scan, mux, move, or monitor media files and does not invoke Jellyfin.
   Provider-specific retention belongs exclusively to metadata-provider modules.
   Naming and exports must not assume a media-container extension.
-  Secrets come from environment variables; persistence stores only env:NAME references.
+  First-party integrations declare exact environment variables; integration values and environment references are never persisted.
 rules:
   proposal:
     - State product-boundary additions and removals explicitly.

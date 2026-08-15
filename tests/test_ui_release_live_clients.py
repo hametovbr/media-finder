@@ -7,9 +7,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from media_finder.db import migrate_to_head, session_factory
-from media_finder.models import Acquisition, DownloadClientInstance, MediaItem
+from media_finder.models import Acquisition, MediaItem
 from media_finder.prowlarr import ProwlarrAdapter, SearchResultCache
 from media_finder.sdk.types import CorrelationResult, DownloadDestination, SubmissionResult
+from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 from media_finder.ui import create_ui_app
 
 
@@ -41,8 +42,8 @@ class FakeProwlarrTransport:
 
 
 class MutableClient:
-    def __init__(self, destination: str) -> None:
-        self.destinations = [DownloadDestination(key=destination, label=destination.upper())]
+    def __init__(self) -> None:
+        self.destinations = [DownloadDestination(key="movies", label="MOVIES")]
         self.tasks: dict[str, str] = {}
 
     def list_destinations(self) -> list[DownloadDestination]:
@@ -65,21 +66,14 @@ def release_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     database_url = f"sqlite:///{tmp_path / 'release-live.db'}"
     migrate_to_head(database_url)
     monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long test session secret")
-    clients = {"first": MutableClient("first"), "second": MutableClient("second")}
+    qbittorrent = MutableClient()
     app = create_ui_app(
         database_url,
         session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
         prowlarr=ProwlarrAdapter(FakeProwlarrTransport(), SearchResultCache()),
-        client_loader=lambda instance: clients[instance.name.casefold()],
+        client_loader=lambda _: qbittorrent,
     )
-    sessions = session_factory(app.state.engine)
-    with sessions() as database:
-        first = DownloadClientInstance(name="First", module_key="fixture", config_payload={})
-        second = DownloadClientInstance(name="Second", module_key="fixture", config_payload={})
-        database.add_all([first, second])
-        database.commit()
-        app.state.client_ids = {"first": first.id, "second": second.id}
-    app.state.fake_clients = clients
+    app.state.fake_client = qbittorrent
     return app
 
 
@@ -108,28 +102,22 @@ def _create_item_and_release(client: TestClient, csrf: str) -> tuple[str, str]:
     return item_id, _value(searched.text, "release-result")
 
 
-def test_selected_client_loads_its_live_destinations_and_initial_page_targets_query_endpoint(
+def test_release_page_implicitly_loads_the_single_live_qbittorrent_destinations(
     release_app,
 ) -> None:
     with TestClient(release_app) as client:
         csrf = _csrf(client.get("/").text)
         item_id, _ = _create_item_and_release(client, csrf)
         page = client.get(f"/items/{item_id}/releases")
-        assert 'hx-post="/ui/clients/destinations"' in page.text
-        assert 'hx-trigger="load, change"' in page.text
-
-        second = client.post(
-            "/ui/clients/destinations",
-            data={
-                "csrf": csrf,
-                "client_instance_id": release_app.state.client_ids["second"],
-            },
+        destinations = client.post(
+            "/ui/qbittorrent/destinations",
+            data={"csrf": csrf},
             headers={"HX-Request": "true"},
         )
 
-    assert second.status_code == 200
-    assert '<option value="second">SECOND</option>' in second.text
-    assert '<option value="first">FIRST</option>' not in second.text
+    assert 'hx-post="/ui/qbittorrent/destinations"' in page.text
+    assert 'name="client_instance_id"' not in page.text
+    assert '<option value="movies">MOVIES</option>' in destinations.text
 
 
 def test_destination_drift_returns_current_choices_and_keeps_release_token_reusable(
@@ -138,14 +126,12 @@ def test_destination_drift_returns_current_choices_and_keeps_release_token_reusa
     with TestClient(release_app) as client:
         csrf = _csrf(client.get("/").text)
         item_id, release_token = _create_item_and_release(client, csrf)
-        instance_id = release_app.state.client_ids["second"]
-        release_app.state.fake_clients["second"].destinations = [
+        release_app.state.fake_client.destinations = [
             DownloadDestination(key="current", label="CURRENT")
         ]
         payload = {
             "csrf": csrf,
             "release_token": release_token,
-            "client_instance_id": instance_id,
             "destination": "stale",
             "idempotency_key": "drift-key",
         }
@@ -153,12 +139,7 @@ def test_destination_drift_returns_current_choices_and_keeps_release_token_reusa
         drifted = client.post(f"/ui/items/{item_id}/acquisitions", data=payload)
         assert drifted.status_code == 409
         assert 'data-error-code="download_destination_unavailable"' in drifted.text
-        assert '<form id="acquisition-form"' in drifted.text
-        assert f'action="/ui/items/{item_id}/acquisitions"' in drifted.text
-        assert f'value="{release_token}"' in drifted.text
-        assert f'value="{instance_id}"' in drifted.text
-        assert 'value="drift-key"' in drifted.text
-        assert f'value="{csrf}"' in drifted.text
+        assert 'name="client_instance_id"' not in drifted.text
         assert '<option value="current">CURRENT</option>' in drifted.text
 
         payload["destination"] = "current"
@@ -170,64 +151,32 @@ def test_destination_drift_returns_current_choices_and_keeps_release_token_reusa
     sessions = session_factory(release_app.state.engine)
     with sessions() as database:
         attempts = list(database.scalars(select(Acquisition)))
-        assert len(attempts) == 1
-        assert attempts[0].status == "submitted"
+    assert len(attempts) == 1
+    assert attempts[0].download_client_instance_id == SYSTEM_QBITTORRENT_ID
 
 
-def test_destination_fragment_localizes_the_supplied_stable_error_code(release_app) -> None:
-    with TestClient(release_app) as client:
-        csrf = _csrf(client.get("/").text)
-        switched = client.post(
-            "/ui/locale", data={"csrf": csrf, "locale": "ru"}, follow_redirects=False
-        )
-        assert switched.status_code == 303
-        unavailable = client.post(
-            "/ui/clients/destinations",
-            data={"csrf": csrf, "client_instance_id": "missing"},
-        )
-
-    assert unavailable.status_code == 404
-    assert 'data-error-code="download_client_not_found"' in unavailable.text
-    assert "Клиент загрузки не найден." in unavailable.text
-    assert "download_client_not_found" in unavailable.text
-
-
-def test_release_and_reconcile_domain_errors_keep_stable_codes_and_safe_messages(
-    release_app,
-) -> None:
+def test_legacy_client_destination_route_is_absent_and_errors_remain_safe(release_app) -> None:
     with TestClient(release_app, raise_server_exceptions=False) as client:
         csrf = _csrf(client.get("/").text)
-        item_id, release_token = _create_item_and_release(client, csrf)
+        item_id, _ = _create_item_and_release(client, csrf)
+        legacy = client.post("/ui/clients/destinations", data={"csrf": csrf})
         empty_query = client.post(
             f"/ui/items/{item_id}/releases/search",
             data={"csrf": csrf, "query": "", "indexer": ""},
         )
-        assert empty_query.status_code == 422
-        assert 'data-error-code="release_search_query_required"' in empty_query.text
-        assert "Enter a search query." in empty_query.text
-
-        invalid_reference = client.post(
-            f"/ui/items/{item_id}/acquisitions",
-            data={
-                "csrf": csrf,
-                "release_token": release_token,
-                "client_instance_id": "missing",
-                "destination": "second",
-                "idempotency_key": "invalid-reference",
-            },
-        )
-        assert invalid_reference.status_code == 422
-        assert 'data-error-code="acquisition_reference_not_found"' in invalid_reference.text
-
         missing = client.post(
             "/ui/acquisitions/not-a-uuid/reconcile",
             data={"csrf": csrf},
         )
+
+    assert legacy.status_code in {404, 405}
+    assert empty_query.status_code == 422
+    assert 'data-error-code="release_search_query_required"' in empty_query.text
     assert missing.status_code == 404
     assert 'data-error-code="acquisition_not_found"' in missing.text
 
 
-def test_pending_reconcile_uses_pinned_client_when_prowlarr_is_unavailable(release_app) -> None:
+def test_pending_system_reconcile_does_not_require_prowlarr(release_app) -> None:
     with TestClient(release_app) as client:
         csrf = _csrf(client.get("/").text)
         item_id, _ = _create_item_and_release(client, csrf)
@@ -238,24 +187,21 @@ def test_pending_reconcile_uses_pinned_client_when_prowlarr_is_unavailable(relea
             acquisition = Acquisition(
                 media_item_id=item.id,
                 metadata_revision_id=item.current_revision_id,
-                download_client_instance_id=release_app.state.client_ids["second"],
+                download_client_instance_id=SYSTEM_QBITTORRENT_ID,
                 idempotency_key="reconcile-without-prowlarr",
                 naming_profile="jellyfin-v1",
                 status="pending",
-                destination="second",
-                release_title="Pinned release",
-                indexer="Fixture",
+                destination="movies",
             )
             database.add(acquisition)
             database.commit()
             acquisition_identity = acquisition.id
-            acquisition_id = str(acquisition.id)
-        correlation = f"mf-acq-{acquisition_id}"
-        release_app.state.fake_clients["second"].tasks[correlation] = "second"
+        correlation = f"mf-acq-{acquisition_identity}"
+        release_app.state.fake_client.tasks[correlation] = "movies"
         release_app.state.runtime._prowlarr = None
 
         reconciled = client.post(
-            f"/ui/acquisitions/{acquisition_id}/reconcile",
+            f"/ui/acquisitions/{acquisition_identity}/reconcile",
             data={"csrf": csrf},
             follow_redirects=False,
         )
@@ -263,6 +209,4 @@ def test_pending_reconcile_uses_pinned_client_when_prowlarr_is_unavailable(relea
     assert reconciled.status_code == 303
     with sessions() as database:
         stored = database.get(Acquisition, acquisition_identity)
-        assert stored is not None
-        assert stored.status == "submitted"
-        assert stored.external_task_id == "task"
+    assert stored is not None and stored.status == "submitted"

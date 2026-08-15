@@ -21,6 +21,22 @@ class ModuleKind(StrEnum):
     DOWNLOAD_CLIENT = "download_client"
 
 
+class EnvironmentVariableSpec(PublicModel):
+    """Public, value-free declaration of one exact process variable."""
+
+    name: Annotated[str, Field(pattern=r"^[A-Z][A-Z0-9_]*$")]
+    required: bool
+    secret: bool
+    description_key: Annotated[str, Field(min_length=1)]
+
+    @field_validator("description_key")
+    @classmethod
+    def require_description_key(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("environment_description_key_empty")
+        return value
+
+
 class ModuleManifest(PublicModel):
     key: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]*$")]
     version: Annotated[str, Field(pattern=r"^\d+\.\d+\.\d+$")]

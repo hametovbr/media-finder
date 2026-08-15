@@ -20,3 +20,33 @@ msgstr "The torrent search returned too many results."
 
 msgid "The torrent artifact is too large."
 msgstr "The torrent artifact is too large."
+
+msgid "Integration diagnostics"
+msgstr "Integration diagnostics"
+
+msgid "Missing"
+msgstr "Missing"
+
+msgid "Unavailable"
+msgstr "Unavailable"
+
+msgid "Set"
+msgstr "Set"
+
+msgid "required"
+msgstr "required"
+
+msgid "optional"
+msgstr "optional"
+
+msgid "secret"
+msgstr "secret"
+
+msgid "non-secret"
+msgstr "non-secret"
+
+msgid "Prowlarr base URL"
+msgstr "Prowlarr base URL"
+
+msgid "Prowlarr API key"
+msgstr "Prowlarr API key"

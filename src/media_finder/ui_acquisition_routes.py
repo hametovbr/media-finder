@@ -6,10 +6,10 @@ import secrets
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select
 
 from .acquisition import AcquisitionRequest, AcquisitionService, DestinationUnavailable
 from .models import DownloadClientInstance, MediaItem
+from .system_clients import SYSTEM_QBITTORRENT_ID
 from .ui_context import UIContext
 from .ui_i18n import code_for_exception, message_for
 from .ui_security import translation
@@ -48,13 +48,6 @@ def acquisition_router(context: UIContext) -> APIRouter:
         locale = context.locale_for(request, session)
         with context.sessions() as database:
             item = database.get(MediaItem, item_id)
-            clients = list(
-                database.scalars(
-                    select(DownloadClientInstance).where(
-                        DownloadClientInstance.archived_at.is_(None)
-                    )
-                )
-            )
         if item is None:
             return context.ui_error(request, "media_item_not_found", 404)
         response = context.render(
@@ -62,7 +55,6 @@ def acquisition_router(context: UIContext) -> APIRouter:
             locale=locale,
             session=session,
             item_id=item_id,
-            clients=clients,
             idempotency_key=secrets.token_urlsafe(24),
         )
         if fresh:
@@ -107,17 +99,9 @@ def acquisition_router(context: UIContext) -> APIRouter:
                 )
         return destinations_response(destinations, locale=locale)
 
-    @router.post("/ui/clients/destinations", response_class=HTMLResponse)
-    async def selected_client_destinations(request: Request) -> HTMLResponse:
-        checked = await context.checked_form(request)
-        if checked is None:
-            return context.denied(request)
-        _, form = checked
-        return await load_destinations(request, form.get("client_instance_id", ""))
-
-    @router.post("/ui/clients/{client_id}/destinations", response_class=HTMLResponse)
-    async def client_destinations(request: Request, client_id: str) -> HTMLResponse:
-        return await load_destinations(request, client_id)
+    @router.post("/ui/qbittorrent/destinations", response_class=HTMLResponse)
+    async def system_qbittorrent_destinations(request: Request) -> HTMLResponse:
+        return await load_destinations(request, SYSTEM_QBITTORRENT_ID)
 
     @router.post("/ui/items/{item_id}/acquisitions")
     async def submit_acquisition(request: Request, item_id: str) -> HTMLResponse:
@@ -138,7 +122,7 @@ def acquisition_router(context: UIContext) -> APIRouter:
                     AcquisitionRequest(
                         media_item_id=item.id,
                         metadata_revision_id=item.current_revision_id,
-                        client_instance_id=form.get("client_instance_id", ""),
+                        client_instance_id=SYSTEM_QBITTORRENT_ID,
                         destination=form.get("destination", ""),
                         release_token=form.get("release_token", ""),
                         idempotency_key=form.get("idempotency_key", ""),
@@ -154,7 +138,6 @@ def acquisition_router(context: UIContext) -> APIRouter:
                     error_label=lambda value: message_for(value, locale),
                     csrf=session["csrf"],
                     release_token=form.get("release_token", ""),
-                    client_instance_id=form.get("client_instance_id", ""),
                     idempotency_key=form.get("idempotency_key", ""),
                     _=translation(locale).gettext,
                 )

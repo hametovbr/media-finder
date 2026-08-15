@@ -5,7 +5,7 @@
 - Write repository documentation and developer-facing prose in English. Russian is limited to localization catalogs, localization tests, and user metadata fixtures.
 - Treat `openspec/` as the source of truth for behavior, UX, architecture, APIs, schemas, and module contracts.
 - Keep Media Finder a catalog and acquisition control plane. It does not scan, mux, move, or monitor media files and does not invoke Jellyfin.
-- Keep secrets in environment variables, persist only `env:NAME` references, and redact secrets and sensitive URLs from errors and logs.
+- Keep secrets in environment variables and redact secrets and sensitive URLs from errors and logs. First-party integrations declare exact environment variables and never persist integration values or environment references.
 
 ## Spec-driven development
 

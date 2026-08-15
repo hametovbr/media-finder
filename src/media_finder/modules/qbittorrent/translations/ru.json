@@ -1,6 +1,9 @@
 {
   "module.qbittorrent.base_url": "Базовый URL",
   "module.qbittorrent.name": "qBittorrent",
+  "module.qbittorrent.environment.url": "Базовый URL qBittorrent",
+  "module.qbittorrent.environment.username": "Имя пользователя qBittorrent",
+  "module.qbittorrent.environment.password": "Пароль qBittorrent",
   "module.qbittorrent.password_ref": "Ссылка на переменную среды с паролем",
   "module.qbittorrent.username_ref": "Ссылка на переменную среды с именем пользователя"
 }
