@@ -11,6 +11,14 @@ Metadata-provider and download-client modules SHALL be isolated Python packages 
 - **WHEN** a contributor adds a conforming module through a repository change
 - **THEN** the production build includes it without requiring runtime package installation
 
+#### Scenario: Compose registered first-party modules
+- **WHEN** core constructs settings, retention, or a live module instance
+- **THEN** it uses one static public registration boundary rather than provider- or client-specific switches
+
+#### Scenario: Discover the built-in Manual provider
+- **WHEN** no persisted configuration is required for the built-in Manual provider
+- **THEN** generic runtime and UI composition construct it from its empty typed configuration through the same immutable registry used for every other metadata provider, including attribution and no-op retention
+
 ### Requirement: Module manifests and configuration
 Every module SHALL provide a manifest, typed configuration schema, translations, fixtures, capabilities, configuration validation, and conformance-test compatibility. Core SHALL render settings from the schema and SHALL reject module-supplied HTML or JavaScript.
 
@@ -19,18 +27,26 @@ Every module SHALL provide a manifest, typed configuration schema, translations,
 - **THEN** core renders generic localized controls without loading module templates or scripts
 
 ### Requirement: Metadata-provider contract
-A metadata-provider module SHALL expose configuration validation, search, fetch, normalization, attribution, standardized errors, and provider-owned retention hooks without direct database or UI-template access.
+A metadata-provider module SHALL expose configuration validation, successful search, successful identity-based fetch, normalization, attribution, standardized errors, provider-owned retention hooks, and a typed export-warning hook without direct database or UI-template access. Every provider manifest SHALL advertise `search`, `fetch`, and `normalize` as essential capabilities. The export-warning hook SHALL return only deeply immutable, allowlisted, validated response-header values or no warning. Core SHALL defensively revalidate a returned warning before consuming it.
 
 #### Scenario: Conform an external provider
 - **WHEN** a test provider implements the public metadata contract using only its fixtures and public types
-- **THEN** the shared conformance suite validates it without knowledge of the provider internals
+- **THEN** the shared conformance suite requires an expected safe error code and unconditionally validates successful search, fetch, normalization, locale, identity, that standardized error, attribution, and retention without knowledge of the provider internals or accepting omitted essential capability declarations
+
+#### Scenario: Conform the Manual provider
+- **WHEN** the Manual provider is supplied an in-memory conformance fixture identity
+- **THEN** it searches and fetches that fixture through the same public protocol without database or UI access
+
+#### Scenario: Supply an export warning
+- **WHEN** a provider has a retention deadline that external processors need to know
+- **THEN** its export-warning hook returns validated safe headers through the public provider contract without a provider-specific core branch
 
 ### Requirement: Download-client contract
 A download-client module SHALL validate configuration, list live destinations, submit either a magnet URI or in-memory torrent bytes, find a task by correlation token, and guarantee exact preservation of that token without direct database or UI-template access.
 
 #### Scenario: Conform an external client
 - **WHEN** a test client implements the public download-client contract using only its fixtures and public types
-- **THEN** the shared conformance suite validates destination listing, both artifact forms, correlation preservation, and lookup
+- **THEN** the shared capability-aware conformance suite validates destination listing, only its declared artifact forms, correlation preservation, standardized errors, and lookup
 
 ### Requirement: Provider-owned retention
 Each metadata provider SHALL determine whether and when its derived payload needs refresh or expiry. Core SHALL only invoke generic due hooks at application startup and once per day and persist their outcomes; core SHALL NOT encode a provider name or provider-specific duration. Core SHALL invoke every installed and registered provider type that owns persisted revisions, even when no active provider instance is currently configured.
@@ -42,6 +58,14 @@ Each metadata provider SHALL determine whether and when its derived payload need
 #### Scenario: TMDB revision reaches expiry
 - **WHEN** a TMDB-derived revision reaches its module-computed `expires_at`
 - **THEN** the TMDB retention hook returns a mandatory purge action for its raw, normalized, and effective provider-derived payload
+
+#### Scenario: Refreshed revision later reaches expiry
+- **WHEN** a revision has refreshed successfully and later reaches its original provider-computed expiry
+- **THEN** core does not refresh it repeatedly and still applies the provider's mandatory purge action
+
+#### Scenario: One retention subject fails unexpectedly
+- **WHEN** a provider or normalized-payload validation unexpectedly fails for one revision
+- **THEN** core rolls back only that revision's savepoint, records a standardized safe failure in an isolated savepoint, and continues maintenance for later revisions, including mandatory purges, without erasing earlier outcomes
 
 #### Scenario: Purge an expired provider payload
 - **WHEN** a provider retention hook returns a purge action

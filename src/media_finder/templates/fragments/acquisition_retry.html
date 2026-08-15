@@ -1,0 +1,9 @@
+<form id="acquisition-form" action="/ui/items/{{ item_id }}/acquisitions" method="post">
+  <p role="alert" aria-live="assertive" data-error-code="{{ error_code }}">{{ error_label(error_code) }} <code>{{ error_code }}</code></p>
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="release_token" value="{{ release_token }}">
+  <input type="hidden" name="client_instance_id" value="{{ client_instance_id }}">
+  <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+  <label>{{ _('Live destination') }} <select name="destination" data-testid="destination-select">{% for destination in destinations %}<option value="{{ destination.key }}">{{ destination.label }}</option>{% endfor %}</select></label>
+  <button data-testid="submit-acquisition">{{ _('Retry acquisition') }}</button>
+</form>

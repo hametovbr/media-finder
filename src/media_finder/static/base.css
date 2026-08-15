@@ -1,0 +1,46 @@
+:root {
+  color-scheme: light;
+  font: 16px/1.5 system-ui, sans-serif;
+  --ink: #151515;
+  --paper: #f5f6f7;
+  --panel: #fff;
+  --accent: #125f99;
+  --focus: #ffbf47;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; color: var(--ink); background: var(--paper); }
+a { color: #084f88; }
+button, input, select, textarea { font: inherit; }
+button, input, select, textarea { border: 2px solid #4a4a4a; border-radius: .3rem; padding: .55rem; background: var(--panel); color: var(--ink); }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 4px solid var(--focus); outline-offset: 3px; }
+.skip-link { position: fixed; left: .75rem; top: -5rem; padding: .6rem; background: var(--panel); z-index: 20; }
+.skip-link:focus { top: .75rem; }
+.shell { min-height: 100vh; display: grid; grid-template-columns: 16rem minmax(0, 1fr); }
+aside { padding: 1rem; background: #e4e8eb; border-right: 2px solid var(--ink); }
+aside h1 { margin-top: 0; }
+nav { display: grid; gap: .5rem; }
+nav a { display: block; padding: .4rem; }
+.collection-link { display: grid; grid-template-columns: 1fr auto; align-items: center; }
+.collection-link form { margin: 0; }
+.collection-link button { padding: .2rem .45rem; }
+.utility { border-top: 1px solid #777; margin-top: 1rem; padding-top: 1rem; }
+main { min-width: 0; padding: 1.25rem; }
+.page-header { display: flex; justify-content: flex-end; }
+.poster-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 1rem; }
+.media-card, fieldset, section[role="alert"] { background: var(--panel); border: 2px solid #333; border-radius: .4rem; padding: 1rem; }
+.poster-frame { position: relative; aspect-ratio: 2 / 3; overflow: hidden; border-radius: .25rem; background: #d9dee2; }
+.poster-placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: #4b555d; font-size: 2rem; font-weight: 800; }
+.poster-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #d9dee2; }
+fieldset { display: grid; gap: .85rem; margin: 1rem 0; }
+label { display: grid; gap: .3rem; max-width: 45rem; }
+textarea { width: 100%; }
+.tabs { display: flex; flex-wrap: wrap; gap: .5rem; margin-block: 1rem; }
+button { cursor: pointer; font-weight: 650; }
+[role="status"], [role="alert"] { padding: .75rem; }
+
+@media (max-width: 760px) {
+  .shell { grid-template-columns: 1fr; }
+  aside { border-right: 0; border-bottom: 2px solid var(--ink); }
+  aside nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

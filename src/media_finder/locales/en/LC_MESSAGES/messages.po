@@ -1,0 +1,22 @@
+msgid ""
+msgstr ""
+"Language: en\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "The release selection expired. Search again."
+msgstr "The release selection expired. Search again."
+
+msgid "A safely hidden error occurred."
+msgstr "A safely hidden error occurred."
+
+msgid "The submitted form is too large."
+msgstr "The submitted form is too large."
+
+msgid "The torrent search response is too large."
+msgstr "The torrent search response is too large."
+
+msgid "The torrent search returned too many results."
+msgstr "The torrent search returned too many results."
+
+msgid "The torrent artifact is too large."
+msgstr "The torrent artifact is too large."

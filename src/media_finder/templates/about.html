@@ -1,0 +1,2 @@
+{% extends "base.html" %}
+{% block content %}<h2>{{ _('About and credits') }}</h2><p>Media Finder 0.1.0 · MIT</p>{% for attribution in attributions %}<section data-testid="attribution-{{ attribution.provider_key }}"><p>{{ attribution.notice }}</p>{% if attribution.url %}<a href="{{ attribution.url }}">{{ attribution.url }}</a>{% endif %}</section>{% endfor %}{% endblock %}

@@ -15,3 +15,5 @@ Include the affected revision, impact, reproduction steps, and any suggested mit
 Media Finder has no user database and trusts authentication performed by an external reverse proxy. Keep the service bound to localhost until that authentication is configured. Supply secrets only through environment variables and use `env:VARIABLE_NAME` references in stored configuration.
 
 Never attach real `.torrent` files, magnet URIs, Prowlarr download URLs, qBittorrent credentials, integration tokens, or database contents to public reports.
+
+Back up the complete `/data` directory before every upgrade. If an upgrade fails after migration begins, restore that backup together with the previous immutable image tag; do not run an older image against a newer schema. See the [operations guide](docs/operations.md) for the supported procedure.

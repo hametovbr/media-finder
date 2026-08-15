@@ -49,7 +49,7 @@ A complete version-1 Manual JSON import SHALL preserve a valid supplied Manual U
 
 #### Scenario: Import an existing Manual identity
 - **WHEN** a version-1 Manual JSON document supplies an external UUID already paired with `provider_key=manual`
-- **THEN** the system opens the existing item, creates no duplicate, and applies no imported metadata until the user explicitly confirms a new revision
+- **THEN** the provider validates and canonicalizes the UUID before lookup, the system opens that existing item, creates no duplicate, and applies no imported metadata until the user explicitly confirms a new revision
 
 #### Scenario: Import episodes into a Manual item
 - **WHEN** a valid atomic CSV episode import creates a new revision
@@ -88,8 +88,16 @@ The Manual provider SHALL support creating and editing movies and series, season
 - **WHEN** a Manual revision remains unchanged for any duration
 - **THEN** its metadata remains exportable without a provider-expiry error
 
+#### Scenario: Edit a rich Manual revision
+- **WHEN** a user changes fields exposed by the structured editor after importing a rich version-1 Manual document
+- **THEN** the new immutable revision applies those visible changes, preserves every unedited normalized field, removes deliberately deleted season or episode rows, and leaves the previous revision unchanged
+
+#### Scenario: Reject a Manual media-kind change
+- **WHEN** a revision for an existing Manual identity declares a different movie or series kind
+- **THEN** the domain rejects the revision without changing the item or its prior revisions
+
 ### Requirement: TMDB metadata provider
-The TMDB provider SHALL search and fetch movies and series in a requested metadata locale, preserve provider provenance, and expose required attribution for About/Credits.
+The TMDB provider SHALL search and fetch movies and series in a requested metadata locale, fetch every advertised TV season including Season 00, preserve provider provenance, normalize real TMDB episode payloads and artwork URLs, and expose required attribution for About/Credits. Its authenticated transport SHALL accept only the canonical HTTPS `api.themoviedb.org/3` base and validated TMDB endpoint shapes and SHALL reject every alternative origin, plaintext scheme, credential, query, fragment, or path that could redirect or disclose its bearer token.
 
 #### Scenario: Search TMDB in a locale
 - **WHEN** a user searches TMDB with a supported metadata locale
@@ -98,6 +106,10 @@ The TMDB provider SHALL search and fetch movies and series in a requested metada
 #### Scenario: Display attribution
 - **WHEN** the About/Credits view is rendered with TMDB configured
 - **THEN** it displays the official TMDB attribution and notice supplied by the module
+
+#### Scenario: Fetch a TV hierarchy
+- **WHEN** TMDB advertises regular seasons and Season 00 for a series
+- **THEN** the provider fetches each season detail and normalizes its real episode hierarchy and available poster and backdrop artwork
 
 ### Requirement: Independent interface locales
 The system SHALL offer English and Russian UI localization, choose the browser locale with English fallback, permit a cookie-based UI locale override, and choose metadata locale independently while defaulting it to the current UI locale.
@@ -109,3 +121,7 @@ The system SHALL offer English and Russian UI localization, choose the browser l
 #### Scenario: Metadata locale override
 - **WHEN** a Russian-UI user selects English metadata
 - **THEN** provider searches and revisions use English metadata while the interface remains Russian
+
+#### Scenario: Interface locale changes after a metadata-locale override
+- **WHEN** a user explicitly selects a metadata locale and later switches the interface locale
+- **THEN** the metadata locale remains selected independently until the user changes it

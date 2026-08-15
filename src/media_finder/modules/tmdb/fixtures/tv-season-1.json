@@ -1,0 +1,30 @@
+{
+  "_id": "fixture-season-one",
+  "id": 9001,
+  "season_number": 1,
+  "name": "Season 1",
+  "overview": "The first season.",
+  "poster_path": "/season-one-poster.jpg",
+  "episodes": [
+    {
+      "id": 911,
+      "episode_number": 1,
+      "season_number": 1,
+      "name": "Pilot",
+      "overview": "The story begins.",
+      "air_date": "2020-03-01",
+      "runtime": 25,
+      "show_id": 900
+    },
+    {
+      "id": 912,
+      "episode_number": 2,
+      "season_number": 1,
+      "name": "Second",
+      "overview": "The story continues.",
+      "air_date": "2020-03-08",
+      "runtime": 26,
+      "show_id": 900
+    }
+  ]
+}

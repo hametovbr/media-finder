@@ -1,4 +1,12 @@
 node_modules/
+.venv/
+.tools/
+__pycache__/
+.pytest_cache/
+.coverage
+.mypy_cache/
+.ruff_cache/
+*.db
 .superpowers/
 .DS_Store
 Thumbs.db

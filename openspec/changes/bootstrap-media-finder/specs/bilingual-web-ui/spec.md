@@ -11,6 +11,10 @@ The UI SHALL provide a desktop-first responsive shell with a collection sidebar,
 - **WHEN** a user selects a collection
 - **THEN** the main view shows its active media cards in a responsive poster grid
 
+#### Scenario: Poster artwork is absent or cannot load
+- **WHEN** a catalog item has no normalized poster artwork or its external image fails
+- **THEN** its card retains a stable poster-shaped local placeholder without requesting a remote fallback asset
+
 ### Requirement: Informative media cards
 Each media card SHALL show title, year, media type, metadata provider, and the latest Acquisition state as `pending`, `submitted`, or `failed` when an attempt exists. A `pending` card SHALL indicate that manual reconciliation may be required and SHALL NOT imply client download progress. Cards SHALL NOT display download progress for any state.
 
@@ -42,6 +46,10 @@ The release-search UI SHALL accept a free query and Prowlarr filters, then requi
 #### Scenario: Submit selected release
 - **WHEN** a user selects a release, client, and current destination and confirms
 - **THEN** the UI initiates one idempotent Acquisition tied to the current metadata revision
+
+#### Scenario: Archive and restore a download-client instance
+- **WHEN** a user archives a download-client instance in Settings
+- **THEN** it remains visible in archived management but is excluded from readiness, release selection, and submission until explicitly restored
 
 ### Requirement: First-run readiness
 The UI SHALL show readiness for TMDB, Prowlarr, and download clients without preventing Manual-only catalog use.

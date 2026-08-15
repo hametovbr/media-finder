@@ -12,7 +12,7 @@ The system SHALL search Prowlarr only after a user supplies or confirms a free-f
 - **THEN** the system presents only torrent results
 
 ### Requirement: Ephemeral release artifacts
-Search results SHALL live only in an in-memory TTL cache, and the browser SHALL receive a safe opaque token. Magnet URIs, torrent bytes, download URLs, and passkey-bearing URL components SHALL NOT be persisted or logged.
+Search results SHALL live only in a bounded in-memory TTL cache, and the browser SHALL receive a safe opaque token. Prowlarr JSON payloads, returned result counts, UI form bodies, and resolved torrent bytes SHALL have enforced bounds with stable safe errors. Magnet URIs, torrent bytes, complete download URLs, and passkey-bearing URL components SHALL NOT be persisted or logged, including by underlying HTTP client loggers.
 
 #### Scenario: Search token expires
 - **WHEN** a user submits an expired opaque result token
@@ -21,6 +21,14 @@ Search results SHALL live only in an in-memory TTL cache, and the browser SHALL 
 #### Scenario: Resolve a selected torrent
 - **WHEN** a valid result token is selected
 - **THEN** the Prowlarr adapter resolves a magnet URI or torrent bytes in memory and does not write the artifact to disk or the database
+
+#### Scenario: Constrain authenticated torrent resolution
+- **WHEN** Prowlarr is configured behind a reverse-proxy path and a selected download URL escapes that normalized path through an unrelated prefix, prefix confusion, or encoded traversal
+- **THEN** the adapter rejects the URL before resolving or sending the API key, while a URL within the configured path remains eligible for in-memory resolution
+
+#### Scenario: Reject oversized integration input
+- **WHEN** a UI form, Prowlarr response, result set, or torrent artifact exceeds its declared bound
+- **THEN** the system rejects it with a stable safe code without persisting or logging sensitive content and a selected release token remains one-use
 
 ### Requirement: Live destination selection
 The system SHALL support named download-client instances and SHALL reload destinations from the selected client immediately before submission. The user SHALL explicitly select a current destination.
@@ -58,11 +66,15 @@ A source-page URL SHALL be accepted only from a dedicated public-page field with
 - **THEN** the snapshot may persist both normalized identifiers without persisting the release artifact or resolution URL
 
 ### Requirement: Exact client correlation
-The system SHALL submit the exact correlation token `mf-acq-<acquisition-uuid>`. The qBittorrent module SHALL store the chosen destination as category and the exact correlation token as a tag.
+The system SHALL submit the exact correlation token `mf-acq-<acquisition-uuid>`. The qBittorrent module SHALL store the chosen destination as category and the exact correlation token as a tag. Authenticated HTTP sessions SHALL be isolated between TMDB, Prowlarr, and every qBittorrent instance so a cookie from one service or port cannot reach another.
 
 #### Scenario: Submit to qBittorrent
 - **WHEN** qBittorrent accepts a selected artifact
 - **THEN** the torrent uses the selected category and an exact `mf-acq-<uuid>` tag, and the Acquisition becomes `submitted`
+
+#### Scenario: Live integration construction fails
+- **WHEN** Prowlarr validation or a metadata-provider or download-client builder fails after creating one or more HTTP clients
+- **THEN** the runtime validates before caching, immediately closes and forgets every client created by that failed attempt, including across repeated failures, and leaves unrelated successful cached integrations open
 
 ### Requirement: Bounded acquisition states
 The MVP SHALL expose only `pending`, `submitted`, and `failed` acquisition states and SHALL NOT track progress after successful submission.
@@ -85,6 +97,10 @@ On submission timeout, the system SHALL immediately query the selected client by
 #### Scenario: Restart finds pending acquisition
 - **WHEN** the service restarts with an Acquisition still `pending`
 - **THEN** it does not automatically resubmit and offers manual reconciliation
+
+#### Scenario: Reconcile after Prowlarr becomes unavailable
+- **WHEN** a pinned `pending` Acquisition is manually reconciled after Prowlarr has been removed or become unavailable
+- **THEN** the system queries only the pinned active download-client instance by the exact correlation token and does not require Prowlarr
 
 #### Scenario: Retry a failed release
 - **WHEN** a user retries after a failed Acquisition

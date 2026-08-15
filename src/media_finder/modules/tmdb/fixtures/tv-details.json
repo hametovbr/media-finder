@@ -1,0 +1,17 @@
+{
+  "id": 900,
+  "name": "Fixture Series",
+  "original_name": "Fixture Series",
+  "overview": "Series plot",
+  "first_air_date": "2020-01-01",
+  "vote_average": 7.8,
+  "poster_path": "/series-poster.jpg",
+  "backdrop_path": "/series-backdrop.jpg",
+  "genres": [{"id": 16, "name": "Animation"}],
+  "production_countries": [{"iso_3166_1": "US", "name": "United States of America"}],
+  "production_companies": [{"id": 12, "name": "Fixture Studio"}],
+  "seasons": [
+    {"id": 9000, "season_number": 0, "name": "Specials", "episode_count": 1},
+    {"id": 9001, "season_number": 1, "name": "Season 1", "episode_count": 2}
+  ]
+}
