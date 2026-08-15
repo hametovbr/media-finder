@@ -39,7 +39,7 @@ Alternatives rejected:
 
 ### 2. Keep domain state explicit and immutable where history matters
 
-Use relational records for Collection, MediaItem, MetadataRevision, Acquisition, DownloadClientInstance, and AppSetting. MediaItem identity is provider-scoped. MetadataRevision stores an envelope plus raw, normalized, overrides, and effective JSON payloads, with a normalized `schema_version` and provenance. Acquisition pins a revision and the `jellyfin-v1` profile.
+Use relational records for Collection, MediaItem, MetadataRevision, Acquisition, DownloadClientInstance, and AppSetting. MediaItem identity is provider-scoped. Core allocates a UUIDv4 once for a new Manual item; schema-v1 Manual JSON preserves a supplied valid UUIDv4 and duplicate imports target the existing identity only with explicit revision confirmation. MetadataRevision stores an envelope plus raw, normalized, overrides, and effective JSON payloads, with a normalized `schema_version` and provenance. Acquisition pins a revision and the `jellyfin-v1` profile.
 
 Archive timestamps replace hard deletion. Database constraints enforce one provider/external identity and one Acquisition per idempotency key. A normalized title/year similarity query informs users but never establishes identity.
 
@@ -80,7 +80,7 @@ Alternatives rejected:
 
 Use a Prowlarr adapter for torrent-only interactive search. Cache normalized search results and their sensitive resolution data in a bounded process-memory TTL cache. Send the browser a random opaque token mapped to a cache entry. Restart or expiry intentionally invalidates outstanding selections.
 
-On selection, reload client destinations, validate the requested destination, create a pending Acquisition transactionally, resolve the magnet or torrent bytes in memory, and call the client. Persist only a sanitized release snapshot. URL sanitization removes userinfo, query, and fragment before storage or logging.
+On selection, reload client destinations, validate the requested destination, create a pending Acquisition transactionally, resolve the magnet or torrent bytes in memory, and call the client. Persist only a sanitized release snapshot. A GUID is retained only when the adapter classifies a bounded opaque value as non-sensitive; URL/path/credential-like or uncertain GUIDs are omitted. A source page must come from a dedicated public-page field. Its userinfo, query, fragment, path parameters, and non-normalized path segments are removed; when path provenance is uncertain, persist only the safe origin or omit the URL. Known and suspected passkeys and rejected values are removed before both persistence and logging.
 
 Alternatives rejected:
 
@@ -103,7 +103,7 @@ Alternatives rejected:
 
 ### 7. Version processor contracts independently of file formats
 
-Protect all `/api/v1/*` routes with one constant-time-checked Bearer token resolved from the environment. Expose current and pinned effective metadata; never raw provider payloads. Use a request-ID middleware and one safe error envelope.
+Protect all `/api/v1/*` routes with one constant-time-checked Bearer token resolved from the environment. Expose current and pinned effective metadata; never raw provider payloads. Use a request-ID middleware and one safe error envelope. Machine error codes are invariant language-neutral identifiers. The server-rendered UI maps each code to localized human-readable English or Russian text and never translates the code itself.
 
 Implement `jellyfin-v1` as a fixed naming service, not a module. Inputs identify a movie, series, season, episode, or ordered episode range and optionally provide a validated extension. Outputs include relative directory, basename, optional extension, full relative path, and NFO filename. Sanitization operates per component, preserves Unicode, rejects traversal, removes control/reserved characters, and protects platform-reserved names. The extension is data, never a built-in container assumption.
 
@@ -119,7 +119,7 @@ Alternatives rejected:
 
 Jinja2 owns full-page rendering and HTMX owns bounded fragment replacement. English is the source locale. Babel/gettext catalogs provide English and Russian strings. UI locale resolution order is an explicit cookie, supported browser preference, then English. Metadata locale is stored independently per request/session and initially inherits UI locale.
 
-The add flow persists a confirmed item before offering release search. Provider results remain separated by source. Session data is cryptographically signed; every mutation requires a session-bound CSRF token. Cookie flags are HttpOnly and SameSite=Lax, with Secure controlled by an HTTPS deployment setting.
+The add flow persists a confirmed item before offering release search. Provider results remain separated by source. Media cards display the latest bounded Acquisition state; `pending` is presented as requiring possible manual reconciliation and never as download progress. Session data is cryptographically signed; every mutation requires a session-bound CSRF token. Cookie flags are HttpOnly and SameSite=Lax, with Secure controlled by an HTTPS deployment setting.
 
 The low-fidelity artifact at `docs/design/wireframe.html` defines the intended navigation and flow, not production assets.
 

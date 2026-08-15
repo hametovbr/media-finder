@@ -37,11 +37,25 @@ Before submitting, the system SHALL create a `pending` Acquisition with a UUID, 
 - **THEN** both responses identify the same Acquisition and at most one client task is created
 
 ### Requirement: Safe release snapshot
-An Acquisition SHALL persist only the release title, indexer, GUID or infohash when available, and a sanitized source-page URL. Sanitization SHALL remove URL userinfo, query, and fragment. It SHALL NOT persist magnet URIs, torrent download URLs, torrent bytes, or potential passkeys.
+An Acquisition SHALL persist only the release title, indexer, a validated safe GUID or canonical infohash when available, and an optional sanitized public source-page URL. A safe GUID SHALL be a 1–255 character ASCII opaque identifier restricted to letters, digits, `.`, `_`, `-`, and `:`, without whitespace, percent encoding, `://`, or path/query/fragment delimiters, and SHALL be explicitly classified as non-sensitive by the adapter. It SHALL NOT be a URL, path, credential, or unclassified token. A canonical infohash SHALL be lowercase hexadecimal with exactly 40 characters for BitTorrent v1 or 64 characters for BitTorrent v2. An uncertain or invalid GUID or infohash SHALL be omitted.
+
+A source-page URL SHALL be accepted only from a dedicated public-page field with `http` or `https` scheme. Sanitization SHALL remove userinfo, query, fragment, path parameters, and every path segment not explicitly produced by an adapter's public-route normalizer. When safe path provenance cannot be established, the system SHALL store only the sanitized origin or omit the URL. The system SHALL omit any URL that is or may be a download URL or contain a passkey, credential, session identifier, or secret-bearing path token. Magnet URIs, torrent download URLs, torrent bytes, potential passkeys, rejected GUIDs, and rejected URL components SHALL NOT be persisted or logged.
 
 #### Scenario: Source URL contains credentials and query
-- **WHEN** a selected result has userinfo, query parameters, and a fragment in its source URL
-- **THEN** the saved source URL contains only a safe scheme, host, port, and path
+- **WHEN** a selected result has userinfo, query parameters, a fragment, and unclassified path segments in its source URL
+- **THEN** the saved value contains at most a safe scheme, host, and port and none of the removed values appear in persistence or logs
+
+#### Scenario: Passkey appears in a URL path
+- **WHEN** a source or download URL contains a known or suspected passkey as a path segment
+- **THEN** the system omits the secret-bearing path or entire URL and the passkey appears in neither persistence nor logs
+
+#### Scenario: GUID is a secret-bearing URL
+- **WHEN** an indexer supplies a URL, path, credential-like value, or unclassified token as its GUID
+- **THEN** the system omits the GUID and does not log its rejected value
+
+#### Scenario: Safe opaque GUID and infohash
+- **WHEN** an adapter supplies an explicitly non-sensitive bounded opaque GUID and a valid canonical infohash
+- **THEN** the snapshot may persist both normalized identifiers without persisting the release artifact or resolution URL
 
 ### Requirement: Exact client correlation
 The system SHALL submit the exact correlation token `mf-acq-<acquisition-uuid>`. The qBittorrent module SHALL store the chosen destination as category and the exact correlation token as a tag.

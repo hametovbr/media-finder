@@ -26,6 +26,35 @@ The system SHALL identify a movie or series by the pair `provider_key` and `exte
 - **WHEN** another provider returns the same normalized title and year with a different provider identity
 - **THEN** the system warns about the similarity but permits a separate item
 
+### Requirement: Manual identity allocation and preservation
+For a newly created Manual item, core SHALL allocate a UUIDv4 external identifier exactly once under `provider_key=manual`. The Manual `external_id` SHALL be immutable across edits, metadata revisions, collection moves, archive/restore, and episode CSV imports. The complete version-1 Manual JSON import schema SHALL define an optional `external_id` UUIDv4 field.
+
+A complete version-1 Manual JSON import SHALL preserve a valid supplied Manual UUIDv4. When the import omits the identifier, core SHALL allocate a new UUIDv4. An invalid supplied identifier SHALL reject the entire import atomically. When `manual + external_id` already exists, the system SHALL target and open that existing item rather than create a duplicate; applying imported metadata to it SHALL require explicit confirmation and SHALL create a new immutable revision.
+
+#### Scenario: Create a Manual item
+- **WHEN** a user creates a Manual movie or series without importing an identity
+- **THEN** core assigns one UUIDv4 external identifier and every subsequent revision preserves it
+
+#### Scenario: Import a portable Manual identity
+- **WHEN** a version-1 Manual JSON document contains a valid external UUIDv4 not present in the catalog
+- **THEN** the new item preserves that UUIDv4 as its immutable Manual external identifier
+
+#### Scenario: Import without a Manual identity
+- **WHEN** a valid version-1 Manual JSON document omits `external_id`
+- **THEN** core allocates a new UUIDv4 and completes the import atomically
+
+#### Scenario: Import an invalid Manual identity
+- **WHEN** a version-1 Manual JSON document supplies a malformed or non-UUIDv4 external identifier
+- **THEN** the entire import is rejected and no item or revision is created
+
+#### Scenario: Import an existing Manual identity
+- **WHEN** a version-1 Manual JSON document supplies an external UUID already paired with `provider_key=manual`
+- **THEN** the system opens the existing item, creates no duplicate, and applies no imported metadata until the user explicitly confirms a new revision
+
+#### Scenario: Import episodes into a Manual item
+- **WHEN** a valid atomic CSV episode import creates a new revision
+- **THEN** the item's Manual external identifier remains unchanged
+
 ### Requirement: Immutable metadata revisions
 The system SHALL store provider locale, provenance, provider payload, normalized metadata, user overrides, and the effective snapshot in an immutable revision envelope. Updating metadata or overrides SHALL create a new revision without modifying prior revisions.
 

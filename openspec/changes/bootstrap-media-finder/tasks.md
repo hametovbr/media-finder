@@ -4,7 +4,7 @@
 - [ ] 1.2 Add application configuration with environment-only secret resolution and safe redaction.
 - [ ] 1.3 Add SQLAlchemy models and Alembic migrations for collections, media items, immutable metadata revisions, acquisitions, download-client instances, and settings.
 - [ ] 1.4 Configure SQLite WAL, foreign keys, uniqueness, archive semantics, and migration-aware readiness.
-- [ ] 1.5 Add deterministic tests for provider identity, duplicate warnings, archive behavior, immutable revisions, and idempotency constraints.
+- [ ] 1.5 Add deterministic tests for provider identity, Manual UUIDv4 allocation/import preservation, duplicate warnings, archive behavior, immutable revisions, and idempotency constraints.
 
 ## 2. Module SDK and metadata providers
 
@@ -18,7 +18,7 @@
 ## 3. Torrent acquisition
 
 - [ ] 3.1 Implement the Prowlarr torrent-only adapter, filters, safe normalized results, and bounded in-memory opaque-token cache.
-- [ ] 3.2 Implement release URL sanitization and tests proving artifacts, credentials, queries, fragments, and passkeys never reach persistence or logs.
+- [ ] 3.2 Implement safe GUID/infohash validation plus source-page origin/path sanitization and tests proving uncertain identifiers, secret path segments, artifacts, credentials, queries, fragments, and passkeys never reach persistence or logs.
 - [ ] 3.3 Implement named download-client instances and live destination validation.
 - [ ] 3.4 Implement the qBittorrent module for magnet and in-memory torrent submission, category mapping, exact tags, and correlation lookup.
 - [ ] 3.5 Implement transactional pending Acquisition creation, pinned revisions, idempotent submission, submitted/failed outcomes, and timeout lookup.
@@ -41,7 +41,7 @@
 - [ ] 5.4 Add media Overview, Seasons/Episodes, and Acquisitions views with bounded status presentation.
 - [ ] 5.5 Add Prowlarr result selection, client/destination reload, idempotent submit, and manual reconciliation views.
 - [ ] 5.6 Add first-run readiness that permits Manual-only use and TMDB official attribution.
-- [ ] 5.7 Add signed sessions, CSRF enforcement, configurable secure cookies, semantic feedback, and keyboard-accessible RU/EN Playwright tests.
+- [ ] 5.7 Add signed sessions, CSRF enforcement, configurable secure cookies, invariant machine-code to localized-message mapping, pending-card semantics, semantic feedback, and keyboard-accessible RU/EN Playwright tests.
 
 ## 6. Container and automation
 

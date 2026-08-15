@@ -12,11 +12,11 @@ The UI SHALL provide a desktop-first responsive shell with a collection sidebar,
 - **THEN** the main view shows its active media cards in a responsive poster grid
 
 ### Requirement: Informative media cards
-Each media card SHALL show title, year, media type, metadata provider, and latest acquisition attempt as `submitted` or `failed`, and SHALL NOT display download progress.
+Each media card SHALL show title, year, media type, metadata provider, and the latest Acquisition state as `pending`, `submitted`, or `failed` when an attempt exists. A `pending` card SHALL indicate that manual reconciliation may be required and SHALL NOT imply client download progress. Cards SHALL NOT display download progress for any state.
 
 #### Scenario: Acquisition remains pending
 - **WHEN** an item's latest acquisition is pending manual reconciliation
-- **THEN** the item detail exposes the pending attempt without inventing a download-progress state on the card
+- **THEN** the card shows `pending` with a manual-reconciliation indication and the item detail exposes the attempt without inventing download progress
 
 ### Requirement: Media detail navigation
 A media-item page SHALL provide Overview, Seasons/Episodes for series, and Acquisitions views.
@@ -51,7 +51,7 @@ The UI SHALL show readiness for TMDB, Prowlarr, and download clients without pre
 - **THEN** the checklist reports them unavailable while Manual item creation remains usable
 
 ### Requirement: Localized and accessible interaction
-All user-facing UI text and stable API error codes SHALL be localizable in English and Russian. Critical flows SHALL support keyboard navigation, visible focus, associated labels, and semantic status feedback.
+All human-readable UI text SHALL be localizable in English and Russian. For an API or domain error, the UI SHALL select a localized human-readable message by its stable invariant machine error code. Machine error codes SHALL remain language-neutral, stable, and byte-for-byte unchanged across locales and SHALL never be translated. Critical flows SHALL support keyboard navigation, visible focus, associated labels, and semantic status feedback.
 
 #### Scenario: Switch interface language
 - **WHEN** a user selects Russian
@@ -60,6 +60,14 @@ All user-facing UI text and stable API error codes SHALL be localizable in Engli
 #### Scenario: Complete add flow by keyboard
 - **WHEN** a keyboard-only user adds and confirms an item
 - **THEN** every required control is reachable and the result is announced through semantic feedback
+
+#### Scenario: Localize an error message
+- **WHEN** the same stable machine error code is presented in English and Russian UI locales
+- **THEN** the human-readable message uses the selected locale while the machine error code is identical in both responses and diagnostic context
+
+#### Scenario: Unknown machine error code
+- **WHEN** the UI receives an unrecognized stable machine error code
+- **THEN** it displays a localized generic safe error message while retaining the unchanged code for diagnostics
 
 ### Requirement: External-auth trust and CSRF protection
 The UI SHALL maintain no user-account database and SHALL rely on external reverse-proxy authentication when exposed beyond localhost. Mutating UI requests SHALL require a valid signed session and CSRF token. Session cookies SHALL be `HttpOnly`, `SameSite=Lax`, and configurable as `Secure` for HTTPS.
