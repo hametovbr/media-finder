@@ -8,7 +8,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from ...sdk._retention import InternalRetentionResult
 from ...sdk.errors import ModuleError
 from ...sdk.types import (
     Attribution,
@@ -20,10 +19,7 @@ from ...sdk.types import (
     Provenance,
     RetentionAction,
     RetentionActionKind,
-    RetentionExecution,
-    RetentionExecutionStatus,
     RetentionPolicy,
-    RetentionSubject,
     Season,
 )
 
@@ -171,13 +167,6 @@ class ManualProvider:
 
     def plan_retention(self, policy: RetentionPolicy, now: Any) -> RetentionAction:
         return RetentionAction(kind=RetentionActionKind.NONE)
-
-    def execute_retention(
-        self, subject: RetentionSubject, action: RetentionAction, now: Any
-    ) -> InternalRetentionResult:
-        return InternalRetentionResult(
-            outcome=RetentionExecution(status=RetentionExecutionStatus.NOOP)
-        )
 
     @staticmethod
     def _normalize(document: ManualDocumentV1, external_id: str) -> NormalizedMetadata:

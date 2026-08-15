@@ -9,13 +9,13 @@ from sqlalchemy.orm import Session
 
 from .domain import CatalogService
 from .models import AppSetting, MetadataRevision
+from .sdk.errors import ModuleError
 from .sdk.protocols import MetadataProvider
 from .sdk.types import (
     MediaKind,
     RetentionActionKind,
     RetentionExecutionStatus,
     RetentionPolicy,
-    RetentionSubject,
 )
 
 
@@ -46,39 +46,40 @@ class MaintenanceCoordinator:
                 action = provider.plan_retention(policy, now)
                 if action.kind is RetentionActionKind.NONE:
                     continue
-                subject = RetentionSubject(
-                    provider_key=revision.provider_key,
-                    external_id=revision.external_id,
-                    media_kind=MediaKind(revision.media_item.kind),
-                    locale=revision.locale,
-                    policy=policy,
-                )
-                result = provider.execute_retention(subject, action, now)
-                revision.maintenance_status = result.outcome.status.value
-                revision.maintenance_error_code = result.outcome.error_code
                 revision.maintenance_attempted_at = now
-                if result.outcome.status is RetentionExecutionStatus.PURGED:
+                revision.maintenance_error_code = None
+                if action.kind is RetentionActionKind.PURGE:
+                    revision.maintenance_status = RetentionExecutionStatus.PURGED.value
                     revision.raw_payload = None
                     revision.normalized_payload = None
                     revision.effective_payload = None
                     revision.expired_at = now
-                elif result.outcome.status is RetentionExecutionStatus.REFRESHED:
-                    if (
-                        result.raw_payload is None
-                        or result.normalized is None
-                        or result.policy is None
-                    ):
-                        raise ValueError(
-                            "a refreshed outcome requires payload, metadata, and policy"
+                elif action.kind is RetentionActionKind.REFRESH:
+                    media_kind = MediaKind(revision.media_item.kind)
+                    try:
+                        raw_payload = provider.fetch(
+                            media_kind.value, revision.external_id, revision.locale
                         )
+                        normalized = provider.normalize(
+                            raw_payload,
+                            media_kind.value,
+                            revision.external_id,
+                            revision.locale,
+                        )
+                        retention = provider.retention_for(now)
+                    except ModuleError as error:
+                        revision.maintenance_status = RetentionExecutionStatus.FAILED.value
+                        revision.maintenance_error_code = error.code
+                        continue
                     CatalogService(session).add_provider_revision(
                         revision.media_item,
-                        result.raw_payload,
-                        result.normalized,
+                        raw_payload,
+                        normalized,
                         revision.overrides_payload,
-                        result.policy,
+                        retention,
                         now,
                     )
+                    revision.maintenance_status = RetentionExecutionStatus.REFRESHED.value
             session.commit()
         finally:
             session.info.pop("retention_purge", None)

@@ -6,7 +6,14 @@ from media_finder.domain import CatalogService
 from media_finder.maintenance import MaintenanceCoordinator, MaintenanceRunner
 from media_finder.modules.tmdb import TmdbConfig, TmdbProvider
 from media_finder.sdk.errors import ModuleError
-from media_finder.sdk.types import RetentionActionKind
+from media_finder.sdk.types import (
+    MediaKind,
+    NormalizedMetadata,
+    Provenance,
+    RetentionAction,
+    RetentionActionKind,
+    RetentionPolicy,
+)
 
 
 class FixtureTransport:
@@ -210,6 +217,54 @@ def test_generic_refresh_executes_provider_and_persists_new_revision(database) -
     assert item.revisions[-1].effective_payload["plot"] == "User plot"
     MaintenanceCoordinator({"tmdb": provider}).run(database, datetime(2024, 6, 2, tzinfo=UTC))
     assert len(item.revisions) == 2
+
+
+class PublicOnlyFailingRefreshProvider:
+    def plan_retention(self, policy: RetentionPolicy, now: datetime) -> RetentionAction:
+        return RetentionAction(kind=RetentionActionKind.REFRESH)
+
+    def fetch(self, kind: str, external_id: str, locale: str) -> dict:
+        raise ModuleError(
+            code="metadata_provider_unavailable",
+            message="The metadata provider is temporarily unavailable.",
+        )
+
+    def normalize(
+        self, payload: dict, kind: str, external_id: str, locale: str
+    ) -> NormalizedMetadata:
+        raise AssertionError("normalize must not run after a failed fetch")
+
+    def retention_for(self, created_at: datetime) -> RetentionPolicy:
+        return RetentionPolicy()
+
+
+def test_generic_refresh_persists_safe_module_failure_using_public_operations(database) -> None:
+    service = CatalogService(database)
+    item, _ = service.get_or_create_item("fixture", "failed", "movie")
+    created = datetime(2024, 1, 1, tzinfo=UTC)
+    normalized = NormalizedMetadata(
+        kind=MediaKind.MOVIE,
+        titles={"en-US": "Fixture"},
+        provenance=Provenance(provider_key="fixture", external_id="failed", locale="en-US"),
+    )
+    revision = service.add_provider_revision(
+        item,
+        {"id": "failed"},
+        normalized,
+        {},
+        RetentionPolicy(refresh_after=created),
+        created,
+    )
+    now = datetime(2024, 2, 1, tzinfo=UTC)
+
+    MaintenanceCoordinator({"fixture": PublicOnlyFailingRefreshProvider()}).run(database, now)
+
+    database.refresh(revision)
+    assert revision.maintenance_status == "failed"
+    assert revision.maintenance_error_code == "metadata_provider_unavailable"
+    assert revision.maintenance_attempted_at.replace(tzinfo=UTC) == now
+    assert revision.raw_payload == {"id": "failed"}
+    assert len(item.revisions) == 1
 
 
 def test_removed_configuration_still_executes_registered_expiry_purge(database) -> None:

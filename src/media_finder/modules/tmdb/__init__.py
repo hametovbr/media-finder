@@ -7,7 +7,6 @@ from dateutil.relativedelta import relativedelta
 from pydantic import BaseModel, Field, field_validator
 
 from ...config import EnvReference, safe_url_origin
-from ...sdk._retention import InternalRetentionResult
 from ...sdk.errors import ModuleError
 from ...sdk.protocols import JsonTransport
 from ...sdk.types import (
@@ -21,10 +20,7 @@ from ...sdk.types import (
     Rating,
     RetentionAction,
     RetentionActionKind,
-    RetentionExecution,
-    RetentionExecutionStatus,
     RetentionPolicy,
-    RetentionSubject,
     Season,
 )
 
@@ -183,43 +179,6 @@ class TmdbProvider:
         if refresh is not None and current >= refresh:
             return RetentionAction(kind=RetentionActionKind.REFRESH)
         return RetentionAction(kind=RetentionActionKind.NONE)
-
-    def execute_retention(
-        self, subject: RetentionSubject, action: RetentionAction, now: datetime
-    ) -> InternalRetentionResult:
-        if action.kind is RetentionActionKind.PURGE:
-            return InternalRetentionResult(
-                outcome=RetentionExecution(status=RetentionExecutionStatus.PURGED)
-            )
-        if action.kind is not RetentionActionKind.REFRESH:
-            return InternalRetentionResult(
-                outcome=RetentionExecution(status=RetentionExecutionStatus.NOOP)
-            )
-        if self.config is None or self.transport is None:
-            return InternalRetentionResult(
-                outcome=RetentionExecution(
-                    status=RetentionExecutionStatus.FAILED,
-                    error_code="metadata_provider_not_configured",
-                )
-            )
-        path_kind = "tv" if subject.media_kind is MediaKind.SERIES else "movie"
-        try:
-            raw = self._request(f"/{path_kind}/{subject.external_id}", {"language": subject.locale})
-            normalized = self.normalize(
-                raw, subject.media_kind.value, subject.external_id, subject.locale
-            )
-        except ModuleError as error:
-            return InternalRetentionResult(
-                outcome=RetentionExecution(
-                    status=RetentionExecutionStatus.FAILED, error_code=error.code
-                )
-            )
-        return InternalRetentionResult(
-            outcome=RetentionExecution(status=RetentionExecutionStatus.REFRESHED),
-            raw_payload=raw,
-            normalized=normalized,
-            policy=self.retention_for(now),
-        )
 
     def _request(self, path: str, params: dict[str, str]) -> dict[str, Any]:
         if self.transport is None:

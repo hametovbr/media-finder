@@ -1,8 +1,12 @@
+import ast
+from pathlib import Path
+
 from pydantic import BaseModel, Field, SecretStr
 
 from media_finder.modules.manual import ManualProvider
 from media_finder.modules.tmdb import TmdbConfig, TmdbProvider
 from media_finder.sdk.conformance import assert_client_conforms, assert_provider_conforms
+from media_finder.sdk.protocols import MetadataProvider
 from media_finder.sdk.settings import describe_settings
 from media_finder.sdk.types import ModuleManifest, PublicModel
 
@@ -62,3 +66,29 @@ def test_public_models_never_contain_raw_provider_payload_fields() -> None:
             if name in {"raw_payload", "provider_payload"} or name.startswith("raw_provider")
         }
         assert not forbidden, f"{model.__name__} exposes {sorted(forbidden)}"
+
+
+def test_provider_protocol_and_first_party_modules_use_only_public_sdk() -> None:
+    violations: list[str] = []
+    if "execute_retention" in MetadataProvider.__dict__:
+        violations.append("MetadataProvider.execute_retention")
+
+    protocol_source = Path("src/media_finder/sdk/protocols.py").read_text(encoding="utf-8")
+    for forbidden in ("InternalRetentionResult", "raw_payload"):
+        if forbidden in protocol_source:
+            violations.append(f"protocol exposes {forbidden}")
+
+    private_boundary = Path("src/media_finder/sdk/_retention.py")
+    if private_boundary.exists():
+        violations.append(str(private_boundary))
+
+    for module_path in (
+        Path("src/media_finder/modules/manual/__init__.py"),
+        Path("src/media_finder/modules/tmdb/__init__.py"),
+    ):
+        tree = ast.parse(module_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and "sdk._" in (node.module or ""):
+                violations.append(f"{module_path}:{node.module}")
+
+    assert not violations, f"private retention boundary leaks: {violations}"
