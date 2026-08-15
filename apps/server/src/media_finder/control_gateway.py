@@ -53,9 +53,11 @@ from media_finder_control.models import (
 from media_finder_control.models import (
     DownloadDestination as ControlDestination,
 )
+from media_finder_core.catalog import CatalogCommands, CatalogQueries
+from media_finder_core.catalog.persistence import SqlAlchemyCatalogRepository
 from media_finder_sdk import MetadataEditor, ReleaseSearchFilter
 from media_finder_sdk import ReleaseSearchQuery as ModuleReleaseSearchQuery
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -64,7 +66,7 @@ from .domain import CatalogService, RevisionInput
 from .ephemeral import EphemeralCache, EphemeralTokenExpired
 from .integration_runtime import RuntimeResolver
 from .manual import ManualCatalogService
-from .models import Acquisition, Collection, DownloadClientInstance, MediaItem, MetadataRevision
+from .models import Acquisition, DownloadClientInstance, MediaItem, MetadataRevision
 from .sdk.protocols import DownloadClient
 from .sdk.registration import IntegrationDescriptor, StaticModuleRegistry
 from .sdk.types import EnvironmentVariableSpec, NormalizedMetadata
@@ -203,32 +205,18 @@ class BackendControlGateway:
         )
 
         def operation(database: Session) -> Page[CollectionView]:
-            query = select(Collection).where(
-                Collection.archived_at.is_not(None)
-                if archived
-                else Collection.archived_at.is_(None)
+            queries = CatalogQueries(query_port=SqlAlchemyCatalogRepository(database))
+            result = queries.list_collections(
+                archived=archived,
+                limit=page.limit,
+                after=(position[0], position[1]) if position is not None else None,
             )
-            if position is not None:
-                name, identifier = position
-                query = query.where(
-                    or_(
-                        Collection.name > name,
-                        and_(Collection.name == name, Collection.id > identifier),
-                    )
-                )
-            rows = list(
-                database.scalars(
-                    query.order_by(Collection.name, Collection.id).limit(page.limit + 1)
-                )
-            )
-            visible = rows[: page.limit]
             next_cursor = None
-            if len(rows) > page.limit and visible:
-                last = visible[-1]
+            if result.next_after is not None:
                 next_cursor = self._cursors.encode(
                     resource="collections",
                     filters=filters,
-                    position=(last.name, last.id),
+                    position=result.next_after,
                 )
             return Page(
                 items=tuple(
@@ -237,7 +225,7 @@ class BackendControlGateway:
                         name=row.name,
                         archived=row.archived_at is not None,
                     )
-                    for row in visible
+                    for row in result.items
                 ),
                 next_cursor=next_cursor,
             )
@@ -250,9 +238,12 @@ class BackendControlGateway:
             raise ControlFailure(code="collection_name_required", status=422)
 
         def operation(database: Session) -> CollectionView:
-            collection = Collection(name=cleaned)
-            database.add(collection)
+            commands = CatalogCommands(
+                repository=SqlAlchemyCatalogRepository(database),
+                clock=lambda: datetime.now(UTC),
+            )
             try:
+                collection = commands.create_collection(cleaned)
                 database.commit()
             except IntegrityError:
                 database.rollback()
@@ -263,11 +254,20 @@ class BackendControlGateway:
 
     async def change_collection(self, *, collection_id: str, archived: bool) -> CollectionView:
         def operation(database: Session) -> CollectionView:
-            collection = database.get(Collection, collection_id)
-            if collection is None:
-                raise ControlFailure(code="collection_not_found", status=404)
-            collection.archived_at = datetime.now(UTC) if archived else None
-            database.commit()
+            commands = CatalogCommands(
+                repository=SqlAlchemyCatalogRepository(database),
+                clock=lambda: datetime.now(UTC),
+            )
+            try:
+                collection = (
+                    commands.archive_collection(collection_id)
+                    if archived
+                    else commands.restore_collection(collection_id)
+                )
+                database.commit()
+            except ValueError as error:
+                database.rollback()
+                raise self._failure_for(error, "collection_unavailable") from None
             return CollectionView(
                 id=collection.id,
                 name=collection.name,
@@ -299,34 +299,25 @@ class BackendControlGateway:
         )
 
         def operation(database: Session) -> Page[CatalogItemView]:
-            order_title = func.coalesce(MediaItem.normalized_title, "")
-            query = select(MediaItem).where(
-                MediaItem.archived_at.is_not(None) if archived else MediaItem.archived_at.is_(None)
+            result = CatalogQueries(query_port=SqlAlchemyCatalogRepository(database)).list_items(
+                archived=archived,
+                collection_id=collection_id,
+                uncategorized=uncategorized,
+                limit=page.limit,
+                after=(position[0], position[1]) if position is not None else None,
             )
-            if uncategorized:
-                query = query.where(MediaItem.collection_id.is_(None))
-            elif collection_id is not None:
-                query = query.where(MediaItem.collection_id == collection_id)
-            if position is not None:
-                title, identifier = position
-                query = query.where(
-                    or_(
-                        order_title > title,
-                        and_(order_title == title, MediaItem.id > identifier),
-                    )
-                )
-            rows = list(
-                database.scalars(query.order_by(order_title, MediaItem.id).limit(page.limit + 1))
+            records = tuple(
+                record
+                for snapshot in result.items
+                if (record := database.get(MediaItem, snapshot.id)) is not None
             )
-            visible = rows[: page.limit]
-            items = tuple(self._catalog_item(database, row, locale) for row in visible)
+            items = tuple(self._catalog_item(database, row, locale) for row in records)
             next_cursor = None
-            if len(rows) > page.limit and visible:
-                last = visible[-1]
+            if result.next_after is not None:
                 next_cursor = self._cursors.encode(
                     resource="media-items",
                     filters=filters,
-                    position=(last.normalized_title or "", last.id),
+                    position=result.next_after,
                 )
             return Page(items=items, next_cursor=next_cursor)
 
@@ -334,8 +325,11 @@ class BackendControlGateway:
 
     async def get_media_item(self, *, item_id: str, locale: Locale) -> MediaItemDetail:
         def operation(database: Session) -> MediaItemDetail:
-            item = database.get(MediaItem, item_id)
-            if item is None:
+            snapshot = CatalogQueries(query_port=SqlAlchemyCatalogRepository(database)).get_item(
+                item_id
+            )
+            item = database.get(MediaItem, snapshot.id) if snapshot is not None else None
+            if snapshot is None or item is None:
                 raise ControlFailure(code="media_item_not_found", status=404)
             return self._media_item_detail(database, item, locale)
 
@@ -350,17 +344,23 @@ class BackendControlGateway:
         locale: Locale,
     ) -> MediaItemDetail:
         def operation(database: Session) -> MediaItemDetail:
+            commands = CatalogCommands(
+                repository=SqlAlchemyCatalogRepository(database),
+                clock=lambda: datetime.now(UTC),
+            )
+            try:
+                commands.move_item(item_id, collection_id)
+                if archived is True:
+                    commands.archive_item(item_id)
+                elif archived is False:
+                    commands.restore_item(item_id)
+                database.commit()
+            except ValueError as error:
+                database.rollback()
+                raise self._failure_for(error, "media_item_unavailable") from None
             item = database.get(MediaItem, item_id)
-            if item is None:
+            if item is None:  # pragma: no cover - command verified the item
                 raise ControlFailure(code="media_item_not_found", status=404)
-            if collection_id is not None:
-                collection = database.get(Collection, collection_id)
-                if collection is None or collection.archived_at is not None:
-                    raise ControlFailure(code="collection_unavailable", status=422)
-            item.collection_id = collection_id
-            if archived is not None:
-                item.archived_at = datetime.now(UTC) if archived else None
-            database.commit()
             return self._media_item_detail(database, item, locale)
 
         return await self._run(operation)

@@ -141,6 +141,8 @@ def _cross_context_allowed(
 ) -> bool:
     if source_context == "control":
         return target_module in CONTROL_CONTEXT_IMPORTS.get(target_context, set())
+    if source_context in {"catalog", "acquisition"} and target_context == "platform":
+        return target_module in {"database", "transactions"}
     return target_module == "ports"
 
 
