@@ -104,6 +104,12 @@ function validateCompose(root, failures) {
       `compose.example.yaml: exact integration variable ${name} is required`,
     );
   }
+  requireValue(
+    failures,
+    Object.hasOwn(environment, "MEDIA_FINDER_UI_MODE") &&
+      String(environment.MEDIA_FINDER_UI_MODE).includes("builtin"),
+    "compose.example.yaml: MEDIA_FINDER_UI_MODE must default to builtin",
+  );
   for (const obsolete of ["TMDB_API_TOKEN", "QB_USERNAME", "QB_PASSWORD"]) {
     requireValue(
       failures,
@@ -164,7 +170,7 @@ function validateCompose(root, failures) {
   }
 }
 
-function validateImage(root, verify, failures) {
+function validateImage(root, verify, verifyText, failures) {
   const dockerfile = readText(root, "Dockerfile", failures);
   requireValue(
     failures,
@@ -181,6 +187,19 @@ function validateImage(root, verify, failures) {
     /ENTRYPOINT \["python", "-m", "media_finder\.runtime"\]/.test(dockerfile),
     "Dockerfile: runtime entrypoint must gate startup",
   );
+  requireValue(
+    failures,
+    dockerfile.includes("uv sync --frozen --no-dev --no-editable"),
+    "Dockerfile: workspace packages must be installed non-editably for the runtime stage",
+  );
+  for (const packageName of ["media_finder", "media_finder_builtin_ui", "media_finder_control"]) {
+    requireValue(
+      failures,
+      dockerfile.includes("uv sync --frozen --no-dev") &&
+        readText(root, "scripts/smoke-container.sh", failures).includes(packageName),
+      `Dockerfile: production image must install and smoke ${packageName}`,
+    );
+  }
 
   const imageJob = verify.jobs?.image;
   const smokeStep = (imageJob?.steps ?? []).find(
@@ -210,6 +229,14 @@ function validateImage(root, verify, failures) {
       "authorized /api/v1",
       /"Authorized processor API"[\s\S]+?"404"[\s\S]+?'"code":"media_item_not_found"'[\s\S]+?Authorization: Bearer ci-integration-token/,
     ],
+    [
+      "browser control API",
+      /"Browser control session"[\s\S]+?\/api\/control\/v1\/session[\s\S]+?"200"/,
+    ],
+    [
+      "disabled UI mode",
+      /MEDIA_FINDER_UI_MODE=disabled[\s\S]+?"Disabled UI root"[\s\S]+?"404"[\s\S]+?"Disabled control session"[\s\S]+?"200"/,
+    ],
   ];
   for (const [label, pattern] of expectations) {
     requireValue(
@@ -223,6 +250,25 @@ function validateImage(root, verify, failures) {
     /docker exec "\$container_name" id -u/.test(smoke) &&
       /docker exec "\$container_name" id -g/.test(smoke),
     "scripts/smoke-container.sh: image smoke test must validate UID and GID",
+  );
+  const pythonSteps = verify.jobs?.python?.steps ?? [];
+  const wheelStep = pythonSteps.find((step) => step.name === "Build independent workspace wheels");
+  const wheelCommand = String(wheelStep?.run ?? "");
+  for (const packageName of [
+    "media-finder-control-contracts",
+    "media-finder-builtin-ui",
+    "media-finder",
+  ]) {
+    requireValue(
+      failures,
+      wheelCommand.includes(`--package ${packageName}`),
+      `.github/workflows/verify.yaml: wheel build is missing ${packageName}`,
+    );
+  }
+  requireValue(
+    failures,
+    verifyText.includes("packages/builtin-ui/src/media_finder_builtin_ui/static"),
+    ".github/workflows/verify.yaml: built-in UI asset drift check is required",
   );
 }
 
@@ -396,7 +442,7 @@ export function validateDelivery(root = process.cwd()) {
     ],
     failures,
   );
-  validateImage(root, verify, failures);
+  validateImage(root, verify, verifyText, failures);
   return failures;
 }
 

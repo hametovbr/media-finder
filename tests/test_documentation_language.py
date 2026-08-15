@@ -27,7 +27,12 @@ def test_developer_facing_cyrillic_is_rejected(path: Path, content: str) -> None
 @pytest.mark.parametrize(
     ("path", "content"),
     [
-        (Path("src/media_finder/ui_i18n.py"), 'MESSAGE = "Разрешённый перевод"\n'),
+        (
+            Path(
+                "packages/builtin-ui/src/media_finder_builtin_ui/locales/ru/LC_MESSAGES/messages.po"
+            ),
+            'msgstr "Разрешённый перевод"\n',
+        ),
         (
             Path("src/media_finder/modules/manual/translations/ru.json"),
             '{"module.manual.name": "Вручную"}\n',

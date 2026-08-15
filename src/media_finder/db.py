@@ -31,7 +31,13 @@ def session_factory(engine: Engine) -> sessionmaker[Session]:
 
 
 def _alembic_config(url: str | None = None) -> Config:
-    root = Path(__file__).resolve().parents[2]
+    runtime_root = Path.cwd()
+    source_root = Path(__file__).resolve().parents[2]
+    root = (
+        runtime_root
+        if (runtime_root / "alembic.ini").is_file() and (runtime_root / "alembic").is_dir()
+        else source_root
+    )
     config = Config(str(root / "alembic.ini"))
     config.set_main_option("script_location", str(root / "alembic"))
     if url:

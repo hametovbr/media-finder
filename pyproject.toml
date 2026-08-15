@@ -11,6 +11,8 @@ dependencies = [
   "fastapi>=0.116,<1",
   "httpx>=0.28,<1",
   "jinja2>=3.1,<4",
+  "media-finder-builtin-ui",
+  "media-finder-control-contracts",
   "pydantic>=2.11,<3",
   "pydantic-settings>=2.10,<3",
   "python-dateutil>=2.9,<3",
@@ -35,6 +37,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/media_finder"]
 
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+media-finder-control-contracts = { workspace = true }
+media-finder-builtin-ui = { workspace = true }
+
 [tool.ruff]
 target-version = "py313"
 line-length = 100
@@ -45,11 +54,13 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.13"
 strict = true
-packages = ["media_finder"]
+packages = ["media_finder", "media_finder_control", "media_finder_builtin_ui"]
+mypy_path = ["src", "packages/control-contracts/src", "packages/builtin-ui/src"]
 
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers --cov=media_finder --cov-report=term-missing"
 testpaths = ["tests"]
+pythonpath = ["src", "packages/control-contracts/src", "packages/builtin-ui/src"]
 # Starlette 1.x still falls back to httpx while its test client migrates to the
 # separately distributed httpx2 package. Keep that single import-time boundary
 # tolerated while promoting every other warning to an error.

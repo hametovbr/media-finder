@@ -123,7 +123,7 @@ def test_environment_resolution_reports_only_missing_names() -> None:
 def test_prowlarr_publishes_the_same_public_descriptor_type() -> None:
     descriptor = getattr(sdk, "IntegrationDescriptor", None)
     assert descriptor is not None
-    from media_finder.ui_runtime import PROWLARR_INTEGRATION
+    from media_finder.integration_runtime import PROWLARR_INTEGRATION
 
     assert isinstance(PROWLARR_INTEGRATION, descriptor)
     assert [item.name for item in PROWLARR_INTEGRATION.environment] == [

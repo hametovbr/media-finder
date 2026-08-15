@@ -49,8 +49,13 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run mypy
+      - name: Build independent workspace wheels
+        run: |
+          uv build --wheel --package media-finder-control-contracts --out-dir dist/control-contracts
+          uv build --wheel --package media-finder-builtin-ui --out-dir dist/builtin-ui
+          uv build --wheel --package media-finder --out-dir dist/backend
       - run: pnpm assets:build
-      - run: git diff --exit-code -- src/media_finder/static
+      - run: git diff --exit-code -- packages/builtin-ui/src/media_finder_builtin_ui/static
 
   unit:
     runs-on: ubuntu-latest
@@ -71,6 +76,9 @@ jobs:
           tests/test_naming.py
           tests/test_nfo.py
           tests/test_prowlarr.py
+          tests/test_control_contracts.py
+          tests/test_builtin_ui_fake_host.py
+          tests/test_workspace_packages.py
 
   integration:
     runs-on: ubuntu-latest
@@ -91,7 +99,19 @@ jobs:
           tests/test_domain.py
           tests/test_metadata_api.py
           tests/test_runtime.py
+          tests/test_runtime_ui_mode.py
           tests/test_system_download_client.py
+          tests/test_builtin_ui_acquisition_gateway.py
+          tests/test_builtin_ui_catalog_gateway.py
+          tests/test_builtin_ui_compatibility.py
+          tests/test_builtin_ui_metadata_gateway.py
+          tests/test_control_gateway_acquisition.py
+          tests/test_control_gateway_catalog.py
+          tests/test_control_gateway_contract.py
+          tests/test_control_gateway_diagnostics.py
+          tests/test_control_gateway_manual.py
+          tests/test_control_gateway_metadata.py
+          tests/test_control_security.py
           tests/test_ui_catalog.py
           tests/test_ui_error_feedback.py
           tests/test_ui_foundation.py
@@ -121,6 +141,11 @@ jobs:
           tests/test_tmdb_retention.py
           tests/test_qbittorrent.py
           tests/test_transport_hardening.py
+          tests/test_control_api_acquisition.py
+          tests/test_control_api_catalog.py
+          tests/test_control_api_metadata.py
+          tests/test_control_api_security.py
+          tests/test_control_openapi.py
 
   browser:
     runs-on: ubuntu-latest

@@ -40,6 +40,7 @@ LOCALIZATION_TESTS = {
     "tests/test_naming.py",
     "tests/test_nfo.py",
     "tests/test_ui_browser.py",
+    "tests/test_builtin_ui_fake_host.py",
     "tests/test_ui_catalog.py",
     "tests/test_ui_error_feedback.py",
     "tests/test_ui_foundation.py",
@@ -48,7 +49,10 @@ LOCALIZATION_TESTS = {
     "tests/test_ui_release_live_clients.py",
     "tests/test_ui_release_acceptance.py",
 }
-MODULE_TRANSLATION = re.compile(r"^src/media_finder/modules/[^/]+/translations/ru\.json$")
+MODULE_TRANSLATION = re.compile(
+    r"^(src/media_finder/modules/[^/]+/translations|"
+    r"packages/builtin-ui/src/media_finder_builtin_ui/module_translations/[^/]+)/ru\.json$"
+)
 
 Position = tuple[int, int]
 Span = tuple[Position, Position]
@@ -93,8 +97,7 @@ def _python_string_spans(content: str) -> tuple[list[Span], list[Span]]:
 def _is_catalog_or_user_fixture(path: Path) -> bool:
     normalized = path.as_posix()
     return (
-        normalized == "src/media_finder/ui_i18n.py"
-        or normalized.startswith("src/media_finder/locales/")
+        normalized.startswith("packages/builtin-ui/src/media_finder_builtin_ui/locales/")
         or MODULE_TRANSLATION.fullmatch(normalized) is not None
         or normalized.startswith("tests/fixtures/user_metadata/")
     )
@@ -137,7 +140,8 @@ def tracked_text_files() -> list[Path]:
     return [
         Path(name)
         for name in result.stdout.splitlines()
-        if Path(name).suffix in TEXT_SUFFIXES or Path(name).name in TEXT_FILENAMES
+        if Path(name).exists()
+        and (Path(name).suffix in TEXT_SUFFIXES or Path(name).name in TEXT_FILENAMES)
     ]
 
 

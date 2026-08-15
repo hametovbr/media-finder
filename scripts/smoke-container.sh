@@ -57,6 +57,7 @@ for attempt in {1..30}; do
 done
 
 assert_response "UI root" "$base_url/" "200" "<!doctype html>"
+assert_response "Browser control session" "$base_url/api/control/v1/session" "200" '"csrf_token"'
 assert_response "Liveness" "$base_url/health/live" "200" '{"status":"live"}'
 assert_response "Readiness" "$base_url/health/ready" "200" '{"status":"ready"}'
 assert_response \
@@ -73,3 +74,35 @@ assert_response \
 
 test "$(docker exec "$container_name" id -u)" = "10001"
 test "$(docker exec "$container_name" id -g)" = "10001"
+docker exec "$container_name" python -c \
+  "import media_finder, media_finder_builtin_ui, media_finder_control"
+
+docker rm --force "$container_name"
+docker run --detach --name "$container_name" \
+  --publish 127.0.0.1:8000:8000 \
+  --volume "$volume_name:/data" \
+  --env MEDIA_FINDER_UI_SECRET=ci-session-secret-with-sufficient-length \
+  --env MEDIA_FINDER_INTEGRATION_TOKEN=ci-integration-token \
+  --env MEDIA_FINDER_SECURE_COOKIE=false \
+  --env MEDIA_FINDER_UI_MODE=disabled \
+  media-finder:ci
+
+for attempt in {1..30}; do
+  if curl --fail --silent --output /dev/null "$base_url/health/ready"; then
+    break
+  fi
+  if [[ "$attempt" == "30" ]]; then
+    echo "Production image in disabled UI mode did not become ready" >&2
+    exit 1
+  fi
+  sleep 1
+done
+
+assert_response "Disabled UI root" "$base_url/" "404" '"code":"route_not_found"'
+assert_response "Disabled control session" "$base_url/api/control/v1/session" "200" '"csrf_token"'
+assert_response "Disabled liveness" "$base_url/health/live" "200" '{"status":"live"}'
+assert_response \
+  "Disabled processor API" \
+  "$base_url/api/v1/media-items/missing/metadata" \
+  "401" \
+  '"code":"authentication_required"'

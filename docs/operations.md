@@ -42,6 +42,7 @@ When deploying from a Git-backed stack in an orchestrator such as Komodo, keep `
 | `MEDIA_FINDER_INTEGRATION_TOKEN` | Yes | None | Bearer token for processor-facing `/api/v1` endpoints |
 | `MEDIA_FINDER_DATABASE_URL` | No | `sqlite:////data/media-finder.db` | SQLite URL inside the persistent data directory |
 | `MEDIA_FINDER_SECURE_COOKIE` | No | `true` in the image; `false` in the localhost Compose example | Enables the cookie `Secure` attribute; set `true` behind HTTPS |
+| `MEDIA_FINDER_UI_MODE` | No | `builtin` | `builtin` serves the bundled HTML UI; `disabled` keeps both APIs and health without HTML/static routes |
 | `MEDIA_FINDER_PORT` | Compose only | `8080` | Local host port in the example |
 | `MEDIA_FINDER_IMAGE_TAG` | Compose only | `latest` | GHCR tag; pin `vX.Y.Z` for production |
 
@@ -83,6 +84,13 @@ Media Finder deliberately has no user database. Every UI route must be protected
 - require the Media Finder Bearer token in addition to any proxy policy for `/api/v1/*`.
 
 Set `MEDIA_FINDER_SECURE_COOKIE=true` after HTTPS is active. Do not rely on the Bearer token as UI authentication.
+
+The browser control API is documented in the [browser control guide](browser-control-api.md).
+An independently deployed UI must share the same external origin and authentication
+policy as `/api/control`; CORS and a separate browser token are intentionally not
+supported. Route `/api/control`, `/api/v1`, and `/health` to Media Finder while the
+frontend owns `/`. Keep the default `builtin` mode until that routing and frontend
+are verified, then set `MEDIA_FINDER_UI_MODE=disabled` and recreate the container.
 
 For a proxy running in Docker, an override may remove the published port and join a user-selected external network:
 
@@ -170,6 +178,11 @@ An older image expects persisted integration settings that the environment-only 
 6. Confirm `/health/ready` before reopening traffic.
 
 Retain the failed data separately until the rollback is verified. Never restore into a running container.
+
+Disabling the built-in UI makes no persistent change. If an external frontend
+fails, set `MEDIA_FINDER_UI_MODE=builtin` and recreate the current container to
+restore the bundled interface. An image rollback is not required for that UI-only
+recovery.
 
 ## Local image validation
 
