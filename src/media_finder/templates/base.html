@@ -41,6 +41,15 @@
             </select>
           </label>
         </form>
+        <form action="/ui/metadata-locale" method="post">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <label>{{ _('Metadata locale') }}
+            <select name="metadata_locale" data-testid="metadata-locale-switcher" onchange="this.form.submit()">
+              <option value="en"{% if metadata_locale == 'en' %} selected{% endif %}>{{ _('English') }}</option>
+              <option value="ru"{% if metadata_locale == 'ru' %} selected{% endif %}>{{ _('Russian') }}</option>
+            </select>
+          </label>
+        </form>
       </header>
       {% block content %}{% endblock %}
     </main>

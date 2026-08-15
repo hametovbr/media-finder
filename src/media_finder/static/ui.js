@@ -7,5 +7,17 @@ function focusFeedback(root) {
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => focusFeedback(document));
-document.addEventListener("htmx:afterSwap", (event) => focusFeedback(event.detail.target));
+function bindPosterFallbacks(root) {
+  root.querySelectorAll("img[data-poster]").forEach((image) => {
+    image.addEventListener("error", () => image.remove(), { once: true });
+  });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  focusFeedback(document);
+  bindPosterFallbacks(document);
+});
+document.addEventListener("htmx:afterSwap", (event) => {
+  focusFeedback(event.detail.target);
+  bindPosterFallbacks(event.detail.target);
+});

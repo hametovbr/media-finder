@@ -60,6 +60,11 @@ class UIContext:
     def locale_for(self, request: Request, session: dict[str, str]) -> str:
         return resolve_locale(session.get("locale"), request.headers.get("accept-language"))
 
+    def metadata_locale_for(self, request: Request, session: dict[str, str]) -> str:
+        """Resolve the independent metadata locale, initially inheriting the UI locale."""
+
+        return resolve_locale(session.get("metadata_locale"), self.locale_for(request, session))
+
     def render(
         self,
         name: str,
@@ -71,6 +76,7 @@ class UIContext:
     ) -> HTMLResponse:
         body = self.templates.get_template(name).render(
             locale=locale,
+            metadata_locale=self.metadata_locale_for_from_session(session, locale),
             csrf=session["csrf"],
             collections=self.repository.active_collections(),
             archived_collections=self.repository.archived_collections(),
@@ -81,6 +87,10 @@ class UIContext:
             **context,
         )
         return HTMLResponse(body, status_code=status_code)
+
+    @staticmethod
+    def metadata_locale_for_from_session(session: dict[str, str], ui_locale: str) -> str:
+        return resolve_locale(session.get("metadata_locale"), ui_locale)
 
     async def checked_form(self, request: Request) -> tuple[dict[str, str], dict[str, str]] | None:
         session, fresh = self.session_for(request)
@@ -106,6 +116,8 @@ class UIContext:
         return cast(HTMLResponse, RedirectResponse(location, status_code=303))
 
     def resolved_client(self, instance: DownloadClientInstance) -> DownloadClient:
+        if instance.archived_at is not None:
+            raise ValueError("download_client_archived")
         result = self.runtime.download_client(instance)
         if result.value is None:
             raise ValueError(result.error_code or "download_client_unavailable")

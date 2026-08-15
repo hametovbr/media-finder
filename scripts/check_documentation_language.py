@@ -46,6 +46,7 @@ LOCALIZATION_TESTS = {
     "tests/test_ui_i18n.py",
     "tests/test_ui_manual_structured.py",
     "tests/test_ui_release_live_clients.py",
+    "tests/test_ui_release_acceptance.py",
 }
 MODULE_TRANSLATION = re.compile(r"^src/media_finder/modules/[^/]+/translations/ru\.json$")
 

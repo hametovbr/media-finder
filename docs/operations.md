@@ -2,6 +2,8 @@
 
 Media Finder runs as one non-root application container with SQLite state under `/data`. It does not need access to download or media directories. Keep the service bound to localhost until an authenticating reverse proxy is in place.
 
+Processors do not share `/data`; they use the authenticated HTTP contracts documented in the [processor integration guide](processor-integration.md).
+
 ## Image tags
 
 Use an immutable `vX.Y.Z` tag for production deployments. Moving tags are provided for convenience but make rollback provenance less explicit.

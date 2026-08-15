@@ -59,6 +59,17 @@ def catalog_router(context: UIContext) -> APIRouter:
         context.set_session(response, session)
         return response
 
+    @router.post("/ui/metadata-locale")
+    async def set_metadata_locale(request: Request) -> HTMLResponse:
+        checked = await context.checked_form(request)
+        if checked is None:
+            return context.denied(request)
+        session, form = checked
+        session["metadata_locale"] = resolve_locale(form.get("metadata_locale"), None)
+        response = context.redirect(request.headers.get("referer", "/"))
+        context.set_session(response, session)
+        return response
+
     async def item_action(
         request: Request,
         item_id: str,

@@ -78,6 +78,8 @@ class AcquisitionService:
         instance = self._session.get(DownloadClientInstance, request.client_instance_id)
         if revision is None or item is None or instance is None:
             raise ValueError("acquisition_reference_not_found")
+        if instance.archived_at is not None:
+            raise ValueError("download_client_archived")
         if revision.media_item_id != item.id:
             raise ValueError("acquisition_revision_mismatch")
 

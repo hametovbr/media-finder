@@ -607,3 +607,50 @@ def test_browser_observes_default_runtime_after_persisted_app_reconstruction(
     _axe(page, default_runtime_browser_site)
     assert failures == []
     page.context.close()
+
+
+def test_metadata_locale_poster_placeholder_and_client_archive_browser(
+    browser: Browser, browser_site: BrowserSite
+) -> None:
+    page, failures = _strict_page(browser, locale="ru-RU")
+    page.goto(f"{browser_site.url}/add/manual")
+    assert page.get_by_test_id("locale-switcher").input_value() == "ru"
+    assert page.get_by_test_id("metadata-locale-switcher").input_value() == "ru"
+    assert page.get_by_label("Язык метаданных").last.input_value() == "ru"
+
+    page.get_by_test_id("metadata-locale-switcher").select_option("en")
+    page.wait_for_load_state("networkidle")
+    page.get_by_test_id("locale-switcher").select_option("en")
+    page.wait_for_load_state("networkidle")
+    assert page.get_by_test_id("metadata-locale-switcher").input_value() == "en"
+    assert page.get_by_label("Metadata locale").last.input_value() == "en"
+
+    page.goto(browser_site.url)
+    assert page.get_by_test_id("poster-placeholder").first.is_visible()
+    page.goto(f"{browser_site.url}/settings")
+    active = page.get_by_role("heading", name="Active download clients").locator("..")
+    first = active.get_by_text("First", exact=True).locator("..")
+    first.get_by_role("button", name="Archive download client").click()
+    page.wait_for_url("**/settings?client=archived")
+    assert (
+        page.get_by_role("status", name="")
+        .filter(has_text="Download client archived.")
+        .is_visible()
+    )
+    archived = page.get_by_role("heading", name="Archived download clients").locator("..")
+    archived.get_by_text("First", exact=True).locator("..").get_by_role(
+        "button", name="Restore download client"
+    ).click()
+    page.wait_for_url("**/settings?client=restored")
+    assert "Download client restored." in page.locator("main").inner_text()
+    page.get_by_test_id("locale-switcher").select_option("ru")
+    page.wait_for_load_state("networkidle")
+    active = page.get_by_role("heading", name="Активные клиенты загрузки").locator("..")
+    active.get_by_text("First", exact=True).locator("..").get_by_role(
+        "button", name="Архивировать клиент загрузки"
+    ).click()
+    page.wait_for_url("**/settings?client=archived")
+    assert "Клиент загрузки архивирован." in page.locator("main").inner_text()
+    _axe(page, browser_site)
+    assert failures == []
+    page.context.close()

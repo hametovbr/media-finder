@@ -16,6 +16,7 @@ from .models import (
     MediaItem,
     MetadataRevision,
 )
+from .sdk.types import NormalizedMetadata
 
 
 class UIRepository:
@@ -61,6 +62,21 @@ class UIRepository:
                 effective = revision.effective_payload if revision else None
                 titles = effective.get("titles", {}) if effective else {}
                 title = titles.get(locale) or next(iter(titles.values()), item.external_id)
+                poster_url: str | None = None
+                if effective is not None:
+                    try:
+                        metadata = NormalizedMetadata.model_validate(effective)
+                        poster = next(
+                            (
+                                artwork
+                                for artwork in metadata.artwork
+                                if artwork.kind.casefold() == "poster"
+                            ),
+                            None,
+                        )
+                        poster_url = str(poster.url) if poster is not None else None
+                    except Exception:
+                        poster_url = None
                 latest = database.scalar(
                     select(Acquisition)
                     .where(Acquisition.media_item_id == item.id)
@@ -75,6 +91,7 @@ class UIRepository:
                         "kind": item.kind,
                         "provider": item.provider_key,
                         "status": latest.status if latest else None,
+                        "poster_url": poster_url,
                     }
                 )
             return items
@@ -106,9 +123,28 @@ class UIRepository:
                 metadata,
             )
 
-    def clients(self) -> list[DownloadClientInstance]:
+    def clients(self, *, archived: bool = False) -> list[DownloadClientInstance]:
         with self._sessions() as database:
-            return list(database.scalars(select(DownloadClientInstance)))
+            return list(
+                database.scalars(
+                    select(DownloadClientInstance)
+                    .where(
+                        DownloadClientInstance.archived_at.is_not(None)
+                        if archived
+                        else DownloadClientInstance.archived_at.is_(None)
+                    )
+                    .order_by(DownloadClientInstance.name)
+                )
+            )
+
+    def change_client(self, client_id: str, *, restore: bool) -> bool:
+        with self._sessions() as database:
+            instance = database.get(DownloadClientInstance, client_id)
+            if instance is None:
+                return False
+            instance.archived_at = None if restore else datetime.now(UTC)
+            database.commit()
+            return True
 
     def has_setting(self, key: str) -> bool:
         with self._sessions() as database:

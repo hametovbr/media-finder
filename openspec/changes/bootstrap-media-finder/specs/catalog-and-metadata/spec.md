@@ -88,6 +88,14 @@ The Manual provider SHALL support creating and editing movies and series, season
 - **WHEN** a Manual revision remains unchanged for any duration
 - **THEN** its metadata remains exportable without a provider-expiry error
 
+#### Scenario: Edit a rich Manual revision
+- **WHEN** a user changes fields exposed by the structured editor after importing a rich version-1 Manual document
+- **THEN** the new immutable revision applies those visible changes, preserves every unedited normalized field, removes deliberately deleted season or episode rows, and leaves the previous revision unchanged
+
+#### Scenario: Reject a Manual media-kind change
+- **WHEN** a revision for an existing Manual identity declares a different movie or series kind
+- **THEN** the domain rejects the revision without changing the item or its prior revisions
+
 ### Requirement: TMDB metadata provider
 The TMDB provider SHALL search and fetch movies and series in a requested metadata locale, fetch every advertised TV season including Season 00, preserve provider provenance, normalize real TMDB episode payloads and artwork URLs, and expose required attribution for About/Credits. Its authenticated transport SHALL accept only the canonical HTTPS `api.themoviedb.org/3` base and validated TMDB endpoint shapes and SHALL reject every alternative origin, plaintext scheme, credential, query, fragment, or path that could redirect or disclose its bearer token.
 
@@ -113,3 +121,7 @@ The system SHALL offer English and Russian UI localization, choose the browser l
 #### Scenario: Metadata locale override
 - **WHEN** a Russian-UI user selects English metadata
 - **THEN** provider searches and revisions use English metadata while the interface remains Russian
+
+#### Scenario: Interface locale changes after a metadata-locale override
+- **WHEN** a user explicitly selects a metadata locale and later switches the interface locale
+- **THEN** the metadata locale remains selected independently until the user changes it

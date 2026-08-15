@@ -503,3 +503,33 @@ msgstr "Поиск торрентов вернул слишком много р�
 
 msgid "The torrent artifact is too large."
 msgstr "Торрент-файл слишком велик."
+
+msgid "%(title)s poster"
+msgstr "Постер: %(title)s"
+
+msgid "Active download clients"
+msgstr "Активные клиенты загрузки"
+
+msgid "Archived download clients"
+msgstr "Архивированные клиенты загрузки"
+
+msgid "Archive download client"
+msgstr "Архивировать клиент загрузки"
+
+msgid "Restore download client"
+msgstr "Восстановить клиент загрузки"
+
+msgid "No active download clients."
+msgstr "Активных клиентов загрузки нет."
+
+msgid "No archived download clients."
+msgstr "Архивированных клиентов загрузки нет."
+
+msgid "Download client archived."
+msgstr "Клиент загрузки архивирован."
+
+msgid "Download client restored."
+msgstr "Клиент загрузки восстановлен."
+
+msgid "The download client is archived."
+msgstr "Клиент загрузки находится в архиве."

@@ -40,6 +40,7 @@ _SOURCES = {
     "release_search_token_expired": "The release selection expired. Search again.",
     "download_client_unavailable": "The download client is unavailable.",
     "download_client_not_found": "Download client not found.",
+    "download_client_archived": "The download client is archived.",
     "download_client_configuration_invalid": "Download client configuration is invalid.",
     "download_client_module_unknown": "Unknown download client module.",
     "download_client_destinations_unavailable": "Download destinations are unavailable.",

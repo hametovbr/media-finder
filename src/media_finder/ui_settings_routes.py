@@ -30,6 +30,14 @@ def settings_router(context: UIContext) -> APIRouter:
             for key, registration in FIRST_PARTY_MODULES.download_clients.items()
         }
         clients = context.repository.clients()
+        archived_clients = context.repository.clients(archived=True)
+        feedback_key = None
+        if request.query_params.get("saved") == "1":
+            feedback_key = "Settings saved."
+        elif request.query_params.get("client") == "archived":
+            feedback_key = "Download client archived."
+        elif request.query_params.get("client") == "restored":
+            feedback_key = "Download client restored."
         response = context.render(
             "settings.html",
             locale=locale,
@@ -37,6 +45,7 @@ def settings_router(context: UIContext) -> APIRouter:
             provider_fields=provider_fields,
             client_fields=client_fields,
             clients=clients,
+            archived_clients=archived_clients,
             client_readiness={
                 client.id: context.runtime.client_ready(client) for client in clients
             },
@@ -47,11 +56,7 @@ def settings_router(context: UIContext) -> APIRouter:
                 for key in context.runtime.supported_providers
             },
             mt=lambda module_key, key: module_translation(module_key, key, locale),
-            feedback=(
-                translation(locale).gettext("Settings saved.")
-                if request.query_params.get("saved") == "1"
-                else None
-            ),
+            feedback=translation(locale).gettext(feedback_key) if feedback_key else None,
         )
         if fresh:
             context.set_session(response, session)
@@ -110,6 +115,25 @@ def settings_router(context: UIContext) -> APIRouter:
         except Exception:
             return context.ui_error(request, "download_client_configuration_invalid", 422)
         return context.redirect("/settings?saved=1")
+
+    async def change_client_archive(
+        request: Request, client_id: str, *, restore: bool
+    ) -> HTMLResponse:
+        checked = await context.checked_form(request)
+        if checked is None:
+            return context.denied(request)
+        if not context.repository.change_client(client_id, restore=restore):
+            return context.ui_error(request, "download_client_not_found", 404)
+        state = "restored" if restore else "archived"
+        return context.redirect(f"/settings?client={state}")
+
+    @router.post("/ui/settings/clients/{client_id}/archive")
+    async def archive_client(request: Request, client_id: str) -> HTMLResponse:
+        return await change_client_archive(request, client_id, restore=False)
+
+    @router.post("/ui/settings/clients/{client_id}/restore")
+    async def restore_client(request: Request, client_id: str) -> HTMLResponse:
+        return await change_client_archive(request, client_id, restore=True)
 
     @router.get("/about", response_class=HTMLResponse)
     async def about_page(request: Request) -> HTMLResponse:

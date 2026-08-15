@@ -19,7 +19,7 @@ from .sdk.types import NormalizedMetadata
 from .ui_context import UIContext
 from .ui_i18n import code_for_exception, media_kind_label
 from .ui_manual import manual_form_view, structured_manual_document
-from .ui_security import resolve_locale, translation
+from .ui_security import translation
 
 
 def metadata_router(context: UIContext) -> APIRouter:
@@ -40,7 +40,7 @@ def metadata_router(context: UIContext) -> APIRouter:
         if checked is None:
             return context.denied(request)
         session, form = checked
-        metadata_locale = resolve_locale(form.get("metadata_locale"), None)
+        metadata_locale = context.metadata_locale_for(request, session)
         grouped: dict[str, list[dict[str, Any]]] = {}
         for key, provider in context.runtime.metadata_providers().items():
             results: list[dict[str, Any]] = []
@@ -168,7 +168,9 @@ def metadata_router(context: UIContext) -> APIRouter:
             "manual_editor.html",
             locale=locale,
             session=session,
-            manual=manual_form_view(None),
+            manual=manual_form_view(
+                None, preferred_locale=context.metadata_locale_for(request, session)
+            ),
         )
         if fresh:
             context.set_session(response, session)
@@ -193,7 +195,11 @@ def metadata_router(context: UIContext) -> APIRouter:
             "manual_editor.html",
             locale=locale,
             session=session,
-            manual=manual_form_view(metadata, external_id),
+            manual=manual_form_view(
+                metadata,
+                external_id,
+                preferred_locale=context.metadata_locale_for(request, session),
+            ),
         )
         if fresh:
             context.set_session(response, session)
@@ -206,8 +212,8 @@ def metadata_router(context: UIContext) -> APIRouter:
             return context.denied(request)
         session, form = checked
         try:
-            document = structured_manual_document(form)
-            external_id = document.get("external_id")
+            external_id = form.get("external_id", "") or None
+            current: NormalizedMetadata | None = None
             if external_id:
                 with context.sessions() as database:
                     existing = database.scalar(
@@ -216,13 +222,22 @@ def metadata_router(context: UIContext) -> APIRouter:
                             MediaItem.external_id == external_id,
                         )
                     )
-                if existing is not None:
-                    return _manual_confirmation(
-                        context,
-                        session,
-                        context.manual_drafts.put(document),
-                        context.locale_for(request, session),
-                    )
+                    if (
+                        existing is not None
+                        and existing.current_revision is not None
+                        and existing.current_revision.effective_payload is not None
+                    ):
+                        current = NormalizedMetadata.model_validate(
+                            existing.current_revision.effective_payload
+                        )
+            document = structured_manual_document(form, current)
+            if external_id and existing is not None:
+                return _manual_confirmation(
+                    context,
+                    session,
+                    context.manual_drafts.put(document),
+                    context.locale_for(request, session),
+                )
             with context.sessions() as database:
                 item = ManualCatalogService(CatalogService(database), ManualProvider()).import_json(
                     document

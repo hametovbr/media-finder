@@ -5,6 +5,10 @@
   <div class="poster-grid">
     {% for item in items %}
     <article class="media-card" data-testid="catalog-card">
+      <div class="poster-frame">
+        <div class="poster-placeholder" data-testid="poster-placeholder" aria-hidden="true">MF</div>
+        {% if item.poster_url %}<img class="poster-image" data-poster src="{{ item.poster_url }}" alt="{{ _('%(title)s poster') % {'title': item.title} }}" loading="lazy" decoding="async">{% endif %}
+      </div>
       <a href="/items/{{ item.id }}"><h3>{{ item.title }}</h3></a>
       <p>{{ item.year or _('Year unknown') }} · {{ kind_label(item.kind) }} · {{ item.provider }}</p>
       {% if item.status %}

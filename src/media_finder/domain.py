@@ -63,6 +63,8 @@ class CatalogService:
             )
         )
         if existing is not None:
+            if existing.kind != str(kind):
+                raise ValueError("provider_identity_mismatch")
             return existing, False
         item = MediaItem(provider_key=provider_key, external_id=external_id, kind=str(kind))
         self.session.add(item)
@@ -94,6 +96,8 @@ class CatalogService:
         commit: bool = True,
     ) -> MetadataRevision:
         normalized = revision_input.normalized
+        if normalized.kind.value != item.kind:
+            raise ValueError("provider_identity_mismatch")
         payload = normalized.model_dump(mode="json")
         overrides = revision_input.overrides or {}
         unknown = set(overrides) - OVERRIDABLE_FIELDS

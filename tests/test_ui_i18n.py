@@ -80,6 +80,11 @@ import pytest
         ),
         ("download_client_not_found", "Download client not found.", "Клиент загрузки не найден."),
         (
+            "download_client_archived",
+            "The download client is archived.",
+            "Клиент загрузки находится в архиве.",
+        ),
+        (
             "download_client_configuration_invalid",
             "Download client configuration is invalid.",
             "Конфигурация клиента загрузки неверна.",

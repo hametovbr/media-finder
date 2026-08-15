@@ -96,6 +96,7 @@ jobs:
           tests/test_ui_i18n.py
           tests/test_ui_manual_structured.py
           tests/test_ui_release_live_clients.py
+          tests/test_ui_release_acceptance.py
           tests/test_ui_runtime_settings.py
           tests/test_ui_semantic_feedback.py
           tests/test_ui_settings.py
