@@ -156,12 +156,12 @@ Existing migrations are squashed into a new initial migration before the next st
 
 Alternative rejected: retaining legacy tables solely for rollback would make an unsupported pre-release database format a permanent core contract. If persistent production data exists before apply begins, the change must be updated rather than silently implementing this decision.
 
-### 4. Publish one narrow SDK with three specialized capability contracts
+### 4. Publish one narrow SDK for three module kinds and four specialized capabilities
 
 `media-finder-module-sdk` contains:
 
 - immutable Pydantic DTOs and stable error categories;
-- `MetadataProvider`, `ReleaseProvider`, and `DownloadClient` protocols;
+- `MetadataProvider`, optional `MetadataEditor`, `ReleaseProvider`, and `DownloadClient` protocols;
 - typed registrations and module lifecycle contracts;
 - manifest and environment-declaration models;
 - capability-specific conformance fixtures and runners;
@@ -174,6 +174,8 @@ The Python v1 operations remain synchronous because current provider/client impl
 Each module owns its concrete HTTP transport and returns an SDK-closeable capability instance. A registration factory receives only `ResolvedModuleEnvironment`, a deeply immutable value object containing values declared by that module. Secret entries use redacted representations. The factory does not receive `os.environ`, a global secret resolver, an `httpx.Client`, core services, or a DI container. The module creates an isolated transport and its `close()` releases it; root lifecycle owns when close is called.
 
 Metadata registration additionally exposes a configuration-free retention policy object so mandatory purge decisions remain available when provider credentials are absent. Core supplies the persisted `RetentionSubject`, clock value, and policy envelope; the module returns typed decisions and never receives persistence access.
+
+A metadata registration may also expose a narrowly typed `MetadataEditor` factory when its manifest declares the `metadata-edit` capability. The editor validates provider-owned import documents and can merge bounded episode-table input into normalized metadata. It receives immutable SDK DTOs and bytes only; it receives no database session, control DTO, UI form, or generic extension context. Manual uses this sub-capability for JSON identity validation and atomic CSV episode semantics. Core owns confirmation, transaction, persistence, and application orchestration, while the server injects the selected editor into that use case. Core therefore contains neither a concrete `manual` module identifier nor Manual-specific parsing. A generic hook map and moving Manual parsing into core are both rejected because they would respectively recreate an untyped plugin surface or make one module's dialect a core invariant.
 
 ### 5. Make `module.toml` the inspectable manifest and registration the executable factory
 

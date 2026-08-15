@@ -67,7 +67,7 @@ A release-provider module SHALL expose exact environment requirements, resolved-
 - **THEN** it passes the same release-provider conformance suite and registration validation required of any repository-contributed release provider
 
 ### Requirement: Public module SDK artifacts
-The module SDK SHALL publish only capability DTOs, specialized protocols, manifest schemas, registration contracts, stable error categories, and conformance fixtures required by module authors. It SHALL NOT expose core persistence, repositories, application services, framework routers, or a general dependency-injection container. Deterministic JSON Schemas and fixtures SHALL accompany the Python binding.
+The module SDK SHALL publish only capability DTOs, specialized protocols, manifest schemas, registration contracts, stable error categories, and conformance fixtures required by module authors. Specialized protocols SHALL include metadata retrieval, optional metadata editing within a metadata-provider registration, release discovery, and download-client behavior. It SHALL NOT expose core persistence, repositories, application services, framework routers, or a general dependency-injection container. Deterministic JSON Schemas and fixtures SHALL accompany the Python binding.
 
 #### Scenario: Build a module against the SDK
 - **WHEN** a contributor builds a metadata, release, or download module in isolation
@@ -78,7 +78,7 @@ The module SDK SHALL publish only capability DTOs, specialized protocols, manife
 - **THEN** required CI verification fails
 
 ### Requirement: Capability-specific registration
-The static registry SHALL maintain separate typed registrations for metadata providers, release providers, and download clients. Each registration SHALL match its manifest kind and SHALL expose only the factory and lifecycle operations needed for that capability. There SHALL NOT be a universal callback, priority-ordered hook chain, module-to-module lookup facility, or shared mutable context object.
+The static registry SHALL maintain separate typed registrations for metadata providers, release providers, and download clients. A metadata-provider registration MAY expose a typed metadata-editor factory only when its manifest declares the matching capability. Each registration SHALL match its manifest kind and SHALL expose only the factory and lifecycle operations needed for that capability. There SHALL NOT be a universal callback, priority-ordered hook chain, module-to-module lookup facility, or shared mutable context object.
 
 #### Scenario: Register mismatched capability
 - **WHEN** a metadata provider is registered as a release provider or a declared capability lacks the required specialized operation
@@ -87,3 +87,18 @@ The static registry SHALL maintain separate typed registrations for metadata pro
 #### Scenario: First-party and contributor parity
 - **WHEN** the host registers a first-party module
 - **THEN** it follows the same typed registration and conformance path as a repository-contributed module and receives no privileged core access
+
+### Requirement: Metadata editing sub-capability
+A metadata-provider module MAY expose a `MetadataEditor` sub-capability for provider-owned structured import and edit semantics. The editor SHALL accept only bounded SDK input values, SHALL return validated normalized metadata and identity values, and SHALL NOT receive persistence, control DTOs, HTTP requests, templates, or a general extension context. Core SHALL own confirmation, atomic persistence, immutable revision creation, and orchestration without branching on a concrete metadata-provider identifier.
+
+#### Scenario: Conform a metadata editor
+- **WHEN** a metadata module declares the `metadata-edit` capability
+- **THEN** its registration supplies a typed editor factory and conformance validates structured import, invalid identity, bounded episode-table merge, standardized errors, and lifecycle cleanup without installing core
+
+#### Scenario: Preserve Manual editing without core coupling
+- **WHEN** a user creates or edits Manual metadata or imports episode CSV
+- **THEN** core invokes the injected metadata editor, validates its SDK output, and persists the operation atomically without importing the Manual package or parsing the Manual dialect itself
+
+#### Scenario: Reject an editor mismatch
+- **WHEN** a manifest declares `metadata-edit` without a typed editor factory, or a registration supplies an editor without that capability
+- **THEN** registry validation fails before application startup
