@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import secrets
 from datetime import UTC, datetime
 from typing import Any
 
@@ -12,6 +11,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 
 from .domain import CatalogService, RevisionInput
+from .ephemeral import EphemeralTokenExpired
 from .manual import ManualCatalogService
 from .models import MediaItem
 from .modules.manual import ManualProvider
@@ -53,8 +53,7 @@ def metadata_router(context: UIContext) -> APIRouter:
                     422,
                 )
             for result in provider_results:
-                token = secrets.token_urlsafe(32)
-                context.metadata_selections[token] = result
+                token = context.metadata_selections.put(result)
                 results.append({"token": token, "result": result})
             if results:
                 grouped[key] = results
@@ -74,8 +73,9 @@ def metadata_router(context: UIContext) -> APIRouter:
             return context.denied(request)
         session, form = checked
         token = form.get("selection_token", "")
-        result = context.metadata_selections.get(token)
-        if result is None:
+        try:
+            result = context.metadata_selections.get(token)
+        except EphemeralTokenExpired:
             return context.ui_error(request, "metadata_selection_expired", 410)
         provider = context.runtime.metadata_provider(result.provider_key).value
         if provider is None:
@@ -86,7 +86,7 @@ def metadata_router(context: UIContext) -> APIRouter:
                 result.provider_key, result.external_id, result.kind
             )
             if not created:
-                context.metadata_selections.pop(token, None)
+                context.metadata_selections.pop(token)
                 return context.redirect(f"/items/{item.id}?duplicate=1")
             similar = catalog.find_similar(
                 result.title, result.year, excluding_provider=result.provider_key
@@ -123,7 +123,7 @@ def metadata_router(context: UIContext) -> APIRouter:
                     code_for_exception(error, "metadata_provider_unavailable"),
                     422,
                 )
-            context.metadata_selections.pop(token, None)
+            context.metadata_selections.pop(token)
             return context.redirect(f"/items/{item.id}?saved=1")
 
     @router.post("/ui/manual/import")
@@ -131,14 +131,30 @@ def metadata_router(context: UIContext) -> APIRouter:
         checked = await context.checked_form(request)
         if checked is None:
             return context.denied(request)
-        _, form = checked
+        session, form = checked
         try:
             payload = json.loads(form.get("document", ""))
             if not isinstance(payload, dict):
                 raise ValueError
+            external_id = payload.get("external_id")
+            if isinstance(external_id, str):
+                with context.sessions() as database:
+                    existing = database.scalar(
+                        select(MediaItem).where(
+                            MediaItem.provider_key == "manual",
+                            MediaItem.external_id == external_id,
+                        )
+                    )
+                if existing is not None:
+                    return _manual_confirmation(
+                        context,
+                        session,
+                        context.manual_drafts.put(payload),
+                        context.locale_for(request, session),
+                    )
             with context.sessions() as database:
                 item = ManualCatalogService(CatalogService(database), ManualProvider()).import_json(
-                    payload, confirm_existing=form.get("confirm_existing") == "yes"
+                    payload
                 )
             return context.redirect(f"/items/{item.id}?saved=1")
         except Exception:
@@ -201,16 +217,12 @@ def metadata_router(context: UIContext) -> APIRouter:
                         )
                     )
                 if existing is not None:
-                    token = secrets.token_urlsafe(32)
-                    context.manual_drafts[token] = document
-                    body = context.templates.get_template(
-                        "fragments/manual_confirmation.html"
-                    ).render(
-                        csrf=session["csrf"],
-                        draft_token=token,
-                        _=translation(context.locale_for(request, session)).gettext,
+                    return _manual_confirmation(
+                        context,
+                        session,
+                        context.manual_drafts.put(document),
+                        context.locale_for(request, session),
                     )
-                    return HTMLResponse(body, 200)
             with context.sessions() as database:
                 item = ManualCatalogService(CatalogService(database), ManualProvider()).import_json(
                     document
@@ -225,8 +237,9 @@ def metadata_router(context: UIContext) -> APIRouter:
         if checked is None:
             return context.denied(request)
         _, form = checked
-        document = context.manual_drafts.pop(form.get("draft_token", ""), None)
-        if document is None:
+        try:
+            document = context.manual_drafts.pop(form.get("draft_token", ""))
+        except EphemeralTokenExpired:
             return context.ui_error(request, "manual_draft_expired", 410)
         try:
             with context.sessions() as database:
@@ -253,3 +266,17 @@ def metadata_router(context: UIContext) -> APIRouter:
             return context.ui_error(request, "manual_import_invalid", 422)
 
     return router
+
+
+def _manual_confirmation(
+    context: UIContext,
+    session: dict[str, str],
+    draft_token: str,
+    locale: str,
+) -> HTMLResponse:
+    body = context.templates.get_template("fragments/manual_confirmation.html").render(
+        csrf=session["csrf"],
+        draft_token=draft_token,
+        _=translation(locale).gettext,
+    )
+    return HTMLResponse(body, 200)

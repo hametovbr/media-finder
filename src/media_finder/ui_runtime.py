@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol, cast
 
+import httpx
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 
 from .acquisition import ClientLoader
-from .config import EnvReference
+from .config import EnvReference, resolve_env_reference
 from .models import AppSetting, DownloadClientInstance
-from .prowlarr import ProwlarrAdapter
+from .modules.qbittorrent import (
+    HttpxQbittorrentTransport,
+    QbittorrentClient,
+    QbittorrentConfig,
+)
+from .modules.tmdb import HttpxTmdbTransport, TmdbConfig, TmdbProvider
+from .prowlarr import HttpxProwlarrTransport, ProwlarrAdapter, SearchResultCache
 from .sdk.protocols import DownloadClient, MetadataProvider
 
 
@@ -53,6 +60,84 @@ class ProwlarrSettings(BaseModel):
     @classmethod
     def environment_reference(cls, value: str) -> str:
         return EnvReference(value=value).value
+
+
+def _resolve_secret(reference: str) -> str:
+    return resolve_env_reference(EnvReference(value=reference)).get_secret_value()
+
+
+class DefaultRuntimeFactory:
+    """Construct first-party integrations from persisted safe configuration."""
+
+    def __init__(
+        self,
+        *,
+        http_client_factory: Callable[[], httpx.Client] = httpx.Client,
+        secret_resolver: Callable[[str], str] = _resolve_secret,
+    ) -> None:
+        self._client = http_client_factory()
+        self._secret_resolver = secret_resolver
+        self._prowlarr: dict[tuple[str, str], ProwlarrAdapter] = {}
+
+    def close(self) -> None:
+        self._client.close()
+
+    def metadata_provider(
+        self, key: str, config: Mapping[str, object]
+    ) -> RuntimeResult[MetadataProvider]:
+        if key != "tmdb":
+            return RuntimeResult(None, "metadata_provider_not_found")
+        try:
+            parsed = TmdbConfig.model_validate(config)
+            provider = TmdbProvider(
+                parsed,
+                HttpxTmdbTransport(
+                    parsed.base_url,
+                    parsed.api_token.value,
+                    self._secret_resolver,
+                    self._client,
+                ),
+            )
+            return RuntimeResult(cast(MetadataProvider, provider))
+        except Exception:
+            return RuntimeResult(None, "metadata_provider_configuration_invalid")
+
+    def prowlarr(self, config: Mapping[str, object]) -> RuntimeResult[ProwlarrAdapter]:
+        try:
+            parsed = ProwlarrSettings.model_validate(config)
+            key = (str(parsed.base_url), parsed.api_key_ref)
+            adapter = self._prowlarr.get(key)
+            if adapter is None:
+                transport = HttpxProwlarrTransport(
+                    str(parsed.base_url),
+                    parsed.api_key_ref,
+                    self._secret_resolver,
+                    self._client,
+                )
+                transport.validate()
+                adapter = ProwlarrAdapter(transport, SearchResultCache())
+                self._prowlarr[key] = adapter
+            return RuntimeResult(adapter)
+        except Exception:
+            return RuntimeResult(None, "prowlarr_configuration_invalid")
+
+    def download_client(self, instance: DownloadClientInstance) -> RuntimeResult[DownloadClient]:
+        if instance.module_key != "qbittorrent":
+            return RuntimeResult(None, "download_client_module_unknown")
+        try:
+            parsed = QbittorrentConfig.model_validate(instance.config_payload)
+            return RuntimeResult(
+                cast(
+                    DownloadClient,
+                    QbittorrentClient(
+                        parsed,
+                        HttpxQbittorrentTransport(str(parsed.base_url), self._client),
+                        self._secret_resolver,
+                    ),
+                )
+            )
+        except Exception:
+            return RuntimeResult(None, "download_client_configuration_invalid")
 
 
 class RuntimeResolver:

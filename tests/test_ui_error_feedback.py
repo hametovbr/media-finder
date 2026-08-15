@@ -102,5 +102,5 @@ def test_failed_acquisition_fragment_localizes_status_and_failure_code(feedback_
     assert fragment.status_code == 200
     assert "Не удалось отправить" in fragment.text
     assert "Клиент загрузки отклонил загрузку." in fragment.text
-    assert "download_client_rejected" not in fragment.text
+    assert "<code>download_client_rejected</code>" in fragment.text
     assert 'name="csrf" value=' in root.text

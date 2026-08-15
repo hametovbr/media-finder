@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from .acquisition import create_download_client_instance
+from .modules.manual import ManualProvider
 from .modules.registry import DOWNLOAD_CLIENT_CONFIG_MODELS
 from .sdk.settings import describe_settings
 from .ui_context import UIContext
@@ -115,9 +116,10 @@ def settings_router(context: UIContext) -> APIRouter:
     async def about_page(request: Request) -> HTMLResponse:
         session, fresh = context.session_for(request)
         locale = context.locale_for(request, session)
-        attributions = [
-            provider.attribution() for provider in context.runtime.supported_providers.values()
-        ]
+        attributions = [ManualProvider().attribution()]
+        attributions.extend(
+            provider.attribution() for provider in context.runtime.metadata_providers().values()
+        )
         response = context.render(
             "about.html",
             locale=locale,

@@ -8,8 +8,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+import httpx
 import pytest
 import uvicorn
+from fastapi.testclient import TestClient
 from playwright.sync_api import Browser, Page, Playwright, sync_playwright
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -203,6 +205,7 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         prowlarr=ProwlarrAdapter(BrowserProwlarrTransport(), SearchResultCache()),
         client_loader=load_client,
     )
+    app.state.browser_clients = clients
     sessions = session_factory(app.state.engine)
     with sessions() as session:
         first = DownloadClientInstance(name="First", module_key="fixture", config_payload={})
@@ -246,6 +249,90 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     thread.join(timeout=10)
 
 
+@pytest.fixture
+def default_runtime_browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    database_url = f"sqlite:///{tmp_path / 'default-browser.db'}"
+    migrate_to_head(database_url)
+    monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long browser test secret")
+    monkeypatch.setenv("TMDB_API_TOKEN", "tmdb")
+    monkeypatch.setenv("PROWLARR_API_KEY", "prowlarr")
+    monkeypatch.setenv("QB_USERNAME", "user")
+    monkeypatch.setenv("QB_PASSWORD", "password")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/configuration"):
+            return httpx.Response(200, json={})
+        if request.url.path == "/api/v1/system/status":
+            return httpx.Response(200, json={"version": "1"})
+        if request.url.path == "/api/v2/auth/login":
+            return httpx.Response(200, text="Ok.")
+        if request.url.path == "/api/v2/torrents/categories":
+            return httpx.Response(200, json={"movies": {"savePath": "/movies"}})
+        return httpx.Response(404)
+
+    def factory() -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler))
+
+    first = create_ui_app(
+        database_url,
+        session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
+        http_client_factory=factory,
+    )
+    with TestClient(first) as client:
+        csrf_match = re.search(r'name="csrf" value="([^"]+)"', client.get("/").text)
+        assert csrf_match
+        csrf = csrf_match.group(1)
+        settings = (
+            (
+                "/ui/settings/providers/tmdb",
+                {
+                    "csrf": csrf,
+                    "api_token": "env:TMDB_API_TOKEN",
+                    "base_url": "https://api.themoviedb.org/3",
+                },
+            ),
+            (
+                "/ui/settings/prowlarr",
+                {
+                    "csrf": csrf,
+                    "base_url": "https://prowlarr.example.test",
+                    "api_key_ref": "env:PROWLARR_API_KEY",
+                },
+            ),
+            (
+                "/ui/settings/clients",
+                {
+                    "csrf": csrf,
+                    "name": "Rebuilt qB",
+                    "module_key": "qbittorrent",
+                    "base_url": "https://qb.example.test",
+                    "username_ref": "env:QB_USERNAME",
+                    "password_ref": "env:QB_PASSWORD",
+                },
+            ),
+        )
+        for path, payload in settings:
+            assert client.post(path, data=payload, follow_redirects=False).status_code == 303
+
+    rebuilt = create_ui_app(
+        database_url,
+        session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
+        http_client_factory=factory,
+    )
+    port = _port()
+    server = uvicorn.Server(uvicorn.Config(rebuilt, host="127.0.0.1", port=port, log_level="error"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not server.started and time.monotonic() < deadline:
+        time.sleep(0.02)
+    if not server.started:
+        raise RuntimeError("default runtime browser server did not start")
+    yield BrowserSite(f"http://127.0.0.1:{port}", rebuilt, "")
+    server.should_exit = True
+    thread.join(timeout=10)
+
+
 def _strict_page(browser: Browser, *, locale: str = "en-US") -> tuple[Page, list[str]]:
     page = browser.new_context(locale=locale).new_page()
     failures: list[str] = []
@@ -266,12 +353,16 @@ def _strict_page(browser: Browser, *, locale: str = "en-US") -> tuple[Page, list
     return page, failures
 
 
-def _axe(page: Page, site: BrowserSite) -> None:
+def _axe(page: Page, site: BrowserSite, selector: str | None = None) -> None:
     page.add_script_tag(url=f"{site.url}/static/axe.min.js")
     serious = page.evaluate(
-        """async () => (await axe.run(document, {resultTypes: ['violations']})).violations
+        """async (selector) => (await axe.run(
+        selector ? document.querySelector(selector) : document,
+        {resultTypes: ['violations']}
+        )).violations
         .filter(v => ['serious', 'critical'].includes(v.impact))
-        .map(v => ({id: v.id, impact: v.impact, targets: v.nodes.map(n => n.target)}))"""
+        .map(v => ({id: v.id, impact: v.impact, targets: v.nodes.map(n => n.target)}))""",
+        selector,
     )
     assert serious == []
 
@@ -296,6 +387,24 @@ def test_keyboard_structured_manual_edit_specials_and_announced_completion(
     page.get_by_label("Season number").fill("0")
     page.get_by_label("Episode number").fill("1")
     page.get_by_label("Episode title").fill("Pilot Special")
+    page.get_by_role("button", name="Add episode").focus()
+    page.keyboard.press("Enter")
+    assert page.get_by_label("Episode number").count() == 2
+    page.get_by_role("button", name="Remove episode").last.focus()
+    page.keyboard.press("Enter")
+    assert page.get_by_label("Episode number").count() == 1
+    page.get_by_role("button", name="Add season").focus()
+    page.keyboard.press("Enter")
+    page.get_by_label("Season number").last.fill("2")
+    page.get_by_label("Episode number").last.fill("1")
+    page.get_by_label("Episode title").last.fill("Second season pilot")
+    page.get_by_role("button", name="Add season").focus()
+    page.keyboard.press("Enter")
+    assert page.get_by_label("Season number").count() == 3
+    page.get_by_role("button", name="Remove season").last.focus()
+    page.keyboard.press("Enter")
+    assert page.get_by_label("Season number").count() == 2
+    _axe(page, browser_site)
     page.get_by_role("button", name="Save Manual metadata").focus()
     page.keyboard.press("Enter")
     page.wait_for_url("**/items/**?saved=1")
@@ -303,14 +412,24 @@ def test_keyboard_structured_manual_edit_specials_and_announced_completion(
     assert page.evaluate("document.activeElement.id") == "ui-feedback"
     assert page.get_by_text("Season 00").is_visible()
     assert page.get_by_text(re.compile("Pilot Special")).is_visible()
+    assert page.get_by_text(re.compile("Second season pilot")).is_visible()
 
     page.get_by_role("link", name="Edit metadata").click()
     page.get_by_label("Title", exact=True).fill("Edited Keyboard Series")
     page.get_by_role("button", name="Save Manual metadata").click()
     assert page.get_by_test_id("manual-revision-confirmation").is_visible()
+    draft_token = page.locator('input[name="draft_token"]').input_value()
+    csrf = _csrf(page)
     page.get_by_role("button", name="Create revision").click()
     page.wait_for_url("**/items/**?saved=1")
     assert page.get_by_role("heading", name="Edited Keyboard Series").is_visible()
+    expired = page.request.post(
+        f"{browser_site.url}/ui/manual/confirm",
+        form={"csrf": csrf, "draft_token": draft_token},
+    )
+    assert expired.status == 410
+    assert 'data-error-code="manual_draft_expired"' in expired.text()
+    assert "The Manual metadata draft expired." in expired.text()
     _axe(page, browser_site)
     assert failures == []
     page.context.close()
@@ -327,6 +446,7 @@ def test_grouped_provider_duplicate_and_similarity_confirmation(
         page.get_by_role("button", name="Search", exact=True).click()
         page.get_by_test_id("provider-results-provider-a").wait_for()
         page.get_by_test_id("provider-results-provider-b").wait_for()
+        _axe(page, browser_site)
 
     search()
     page.get_by_test_id("provider-results-provider-a").get_by_role(
@@ -346,6 +466,7 @@ def test_grouped_provider_duplicate_and_similarity_confirmation(
         "button", name="Select and confirm"
     ).click()
     assert page.get_by_test_id("similarity-warning").is_visible()
+    _axe(page, browser_site, '[data-testid="similarity-warning"]')
     page.get_by_role("button", name="Add as a separate identity").click()
     page.wait_for_url("**/items/**?saved=1")
     _axe(page, browser_site)
@@ -373,7 +494,17 @@ def test_release_client_switch_idempotent_submit_and_pending_reconcile(
         "destination": "second",
         "idempotency_key": page.locator('input[name="idempotency_key"]').input_value(),
     }
+    browser_site.app.state.browser_clients["Second"].destination = "current"
     page.get_by_test_id("submit-acquisition").click()
+    page.get_by_role("alert").wait_for()
+    assert page.get_by_role("alert").locator("code").inner_text() == (
+        "download_destination_unavailable"
+    )
+    assert page.get_by_test_id("destination-select").input_value() == "current"
+    _axe(page, browser_site, "#acquisition-form")
+    assert len(failures) == 1 and "status of 409 (Conflict)" in failures[0]
+    failures.clear()  # Expected semantic conflict rendered as a retryable form.
+    page.get_by_role("button", name="Retry acquisition").click()
     page.wait_for_url("**?acquisition=submitted")
     assert page.get_by_role("status").inner_text() == "Submitted"
     repeated = page.request.post(
@@ -456,5 +587,23 @@ def test_settings_collection_controls_russian_csrf_and_accessibility(
     assert 'data-error-code="csrf_invalid"' in rejected.text()
     assert "Запрос отклонён." in rejected.text()
     _axe(page, browser_site)
+    assert failures == []
+    page.context.close()
+
+
+def test_browser_observes_default_runtime_after_persisted_app_reconstruction(
+    browser: Browser, default_runtime_browser_site: BrowserSite
+) -> None:
+    page, failures = _strict_page(browser)
+    page.goto(f"{default_runtime_browser_site.url}/settings")
+    checklist = page.get_by_test_id("readiness-checklist")
+    assert checklist.locator('[data-readiness="tmdb:ready"]').is_visible()
+    assert checklist.locator('[data-readiness="prowlarr:ready"]').is_visible()
+    assert checklist.locator('[data-readiness="client:ready"]').is_visible()
+    _axe(page, default_runtime_browser_site)
+    page.goto(f"{default_runtime_browser_site.url}/about")
+    assert "User-provided metadata" in page.locator("main").inner_text()
+    assert "This product uses the TMDB API" in page.locator("main").inner_text()
+    _axe(page, default_runtime_browser_site)
     assert failures == []
     page.context.close()

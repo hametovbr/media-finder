@@ -153,6 +153,12 @@ def test_destination_drift_returns_current_choices_and_keeps_release_token_reusa
         drifted = client.post(f"/ui/items/{item_id}/acquisitions", data=payload)
         assert drifted.status_code == 409
         assert 'data-error-code="download_destination_unavailable"' in drifted.text
+        assert '<form id="acquisition-form"' in drifted.text
+        assert f'action="/ui/items/{item_id}/acquisitions"' in drifted.text
+        assert f'value="{release_token}"' in drifted.text
+        assert f'value="{instance_id}"' in drifted.text
+        assert 'value="drift-key"' in drifted.text
+        assert f'value="{csrf}"' in drifted.text
         assert '<option value="current">CURRENT</option>' in drifted.text
 
         payload["destination"] = "current"
@@ -166,6 +172,24 @@ def test_destination_drift_returns_current_choices_and_keeps_release_token_reusa
         attempts = list(database.scalars(select(Acquisition)))
         assert len(attempts) == 1
         assert attempts[0].status == "submitted"
+
+
+def test_destination_fragment_localizes_the_supplied_stable_error_code(release_app) -> None:
+    with TestClient(release_app) as client:
+        csrf = _csrf(client.get("/").text)
+        switched = client.post(
+            "/ui/locale", data={"csrf": csrf, "locale": "ru"}, follow_redirects=False
+        )
+        assert switched.status_code == 303
+        unavailable = client.post(
+            "/ui/clients/destinations",
+            data={"csrf": csrf, "client_instance_id": "missing"},
+        )
+
+    assert unavailable.status_code == 404
+    assert 'data-error-code="download_client_not_found"' in unavailable.text
+    assert "Клиент загрузки не найден." in unavailable.text
+    assert "download_client_not_found" in unavailable.text
 
 
 def test_release_and_reconcile_domain_errors_keep_stable_codes_and_safe_messages(

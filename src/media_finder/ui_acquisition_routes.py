@@ -11,7 +11,7 @@ from sqlalchemy import select
 from .acquisition import AcquisitionRequest, AcquisitionService, DestinationUnavailable
 from .models import DownloadClientInstance, MediaItem
 from .ui_context import UIContext
-from .ui_i18n import code_for_exception
+from .ui_i18n import code_for_exception, message_for
 from .ui_security import translation
 
 
@@ -79,6 +79,7 @@ def acquisition_router(context: UIContext) -> APIRouter:
         body = context.templates.get_template("fragments/destinations.html").render(
             destinations=destinations,
             error_code=error_code,
+            error_label=lambda code: message_for(code, locale),
             _=translation(locale).gettext,
         )
         return HTMLResponse(body, status_code=status_code, headers={"Vary": "HX-Request"})
@@ -144,12 +145,20 @@ def acquisition_router(context: UIContext) -> APIRouter:
                     )
                 )
             except DestinationUnavailable as error:
-                return destinations_response(
-                    error.current_destinations,
-                    locale=context.locale_for(request, session),
-                    error_code="download_destination_unavailable",
-                    status_code=409,
+                locale = context.locale_for(request, session)
+                code = "download_destination_unavailable"
+                body = context.templates.get_template("fragments/acquisition_retry.html").render(
+                    item_id=item_id,
+                    destinations=error.current_destinations,
+                    error_code=code,
+                    error_label=lambda value: message_for(value, locale),
+                    csrf=session["csrf"],
+                    release_token=form.get("release_token", ""),
+                    client_instance_id=form.get("client_instance_id", ""),
+                    idempotency_key=form.get("idempotency_key", ""),
+                    _=translation(locale).gettext,
                 )
+                return HTMLResponse(body, status_code=409, headers={"Vary": "HX-Request"})
             except Exception as error:
                 return context.ui_error(
                     request,

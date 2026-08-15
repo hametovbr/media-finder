@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+import httpx
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -14,6 +15,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from .acquisition import ClientLoader
 from .config import EnvReference, resolve_env_reference
 from .db import create_database, session_factory
+from .modules.tmdb import TmdbProvider
 from .prowlarr import ProwlarrAdapter
 from .sdk.protocols import MetadataProvider
 from .ui_acquisition_routes import acquisition_router
@@ -21,7 +23,7 @@ from .ui_catalog_routes import catalog_router
 from .ui_context import UIContext
 from .ui_metadata_routes import metadata_router
 from .ui_repository import UIRepository
-from .ui_runtime import RuntimeFactory, RuntimeResolver
+from .ui_runtime import DefaultRuntimeFactory, RuntimeFactory, RuntimeResolver
 from .ui_security import SessionSigner, error_message, resolve_locale
 from .ui_settings_routes import settings_router
 
@@ -40,24 +42,41 @@ def create_ui_app(
     prowlarr: ProwlarrAdapter | None = None,
     client_loader: ClientLoader | None = None,
     runtime_factory: RuntimeFactory | None = None,
+    http_client_factory: Callable[[], httpx.Client] = httpx.Client,
     **_: Any,
 ) -> FastAPI:
     engine = create_database(database_url)
     secret_value = resolve_env_reference(EnvReference(value=session_secret_reference))
     signer = SessionSigner(secret_value.get_secret_value().encode())
 
+    selected_factory = runtime_factory
+    provider_registry: dict[str, MetadataProvider] = dict(
+        providers or {"tmdb": cast(MetadataProvider, TmdbProvider.retention_only())}
+    )
+    if (
+        selected_factory is None
+        and providers is None
+        and prowlarr is None
+        and client_loader is None
+    ):
+        selected_factory = DefaultRuntimeFactory(http_client_factory=http_client_factory)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        yield
-        engine.dispose()
+        try:
+            yield
+        finally:
+            close = getattr(selected_factory, "close", None)
+            if callable(close):
+                close()
+            engine.dispose()
 
     app = FastAPI(lifespan=lifespan)
     sessions = session_factory(engine)
     repository = UIRepository(sessions)
-    provider_registry = dict(providers or {})
     runtime = RuntimeResolver(
         sessions,
-        factory=runtime_factory,
+        factory=selected_factory,
         providers=provider_registry,
         prowlarr=prowlarr,
         client_loader=client_loader,

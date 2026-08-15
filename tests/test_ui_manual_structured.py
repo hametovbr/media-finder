@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 
@@ -133,6 +134,128 @@ def test_invalid_structured_manual_input_creates_no_partial_item(manual_app) -> 
     sessions = session_factory(manual_app.state.engine)
     with sessions() as session:
         assert session.scalar(select(func.count(MediaItem.id))) == 0
+
+
+def test_structured_parser_accepts_multiple_seasons_episodes_and_removed_index_gaps(
+    manual_app,
+) -> None:
+    with TestClient(manual_app) as client:
+        csrf = _csrf(client.get("/").text)
+        editor = client.get("/add/manual")
+        assert 'data-action="add-season"' in editor.text
+        assert 'data-action="add-episode"' in editor.text
+        assert 'data-action="remove-season"' in editor.text
+        assert 'data-action="remove-episode"' in editor.text
+
+        created = client.post(
+            "/ui/manual/save",
+            data={
+                "csrf": csrf,
+                "kind": "series",
+                "metadata_locale": "en",
+                "title": "Arbitrary hierarchy",
+                "season_2_number": "0",
+                "season_2_title": "Specials",
+                "season_2_episode_3_number": "1",
+                "season_2_episode_3_title": "Special one",
+                "season_9_number": "2",
+                "season_9_title": "Second season",
+                "season_9_episode_4_number": "1",
+                "season_9_episode_4_title": "Episode one",
+                "season_9_episode_8_number": "2",
+                "season_9_episode_8_title": "Episode two",
+            },
+            follow_redirects=False,
+        )
+        assert created.status_code == 303
+        item_id = created.headers["location"].split("/")[2].split("?")[0]
+
+    sessions = session_factory(manual_app.state.engine)
+    with sessions() as session:
+        item = session.get(MediaItem, item_id)
+        assert item is not None and item.current_revision is not None
+        effective = item.current_revision.effective_payload
+        assert effective is not None
+        assert [season["number"] for season in effective["seasons"]] == [0, 2]
+        assert [episode["title"] for episode in effective["seasons"][1]["episodes"]] == [
+            "Episode one",
+            "Episode two",
+        ]
+
+
+def test_existing_json_import_requires_explicit_bounded_confirmation(manual_app) -> None:
+    document = {
+        "schema_version": "1",
+        "kind": "movie",
+        "locale": "en",
+        "titles": {"en": "JSON title"},
+    }
+    with TestClient(manual_app) as client:
+        csrf = _csrf(client.get("/").text)
+        created = client.post(
+            "/ui/manual/import",
+            data={"csrf": csrf, "document": json.dumps(document)},
+            follow_redirects=False,
+        )
+        assert created.status_code == 303
+        item_id = created.headers["location"].split("/")[2].split("?")[0]
+        external_id = _external_id(client.get(f"/items/{item_id}/edit").text)
+        document["external_id"] = external_id
+        document["titles"] = {"en": "JSON revised"}
+
+        pending = client.post(
+            "/ui/manual/import", data={"csrf": csrf, "document": json.dumps(document)}
+        )
+        assert pending.status_code == 200
+        assert 'data-testid="manual-revision-confirmation"' in pending.text
+        token = _draft_token(pending.text)
+
+        sessions = session_factory(manual_app.state.engine)
+        with sessions() as session:
+            assert session.scalar(select(func.count(MetadataRevision.id))) == 1
+
+        confirmed = client.post(
+            "/ui/manual/confirm",
+            data={"csrf": csrf, "draft_token": token},
+            follow_redirects=False,
+        )
+        assert confirmed.status_code == 303
+        expired = client.post("/ui/manual/confirm", data={"csrf": csrf, "draft_token": token})
+        assert expired.status_code == 410
+        assert 'data-error-code="manual_draft_expired"' in expired.text
+
+    sessions = session_factory(manual_app.state.engine)
+    with sessions() as session:
+        assert session.scalar(select(func.count(MetadataRevision.id))) == 2
+
+
+def test_manual_confirmation_uses_resolved_request_locale(manual_app) -> None:
+    document = {
+        "schema_version": "1",
+        "external_id": "f71a7700-8e46-4f7d-8df0-5a394803cc43",
+        "kind": "movie",
+        "locale": "ru",
+        "titles": {"ru": "Локализованный тайтл"},
+    }
+    with TestClient(manual_app) as client:
+        csrf = _csrf(client.get("/", headers={"Accept-Language": "ru"}).text)
+        assert (
+            client.post(
+                "/ui/manual/import",
+                data={"csrf": csrf, "document": json.dumps(document)},
+                follow_redirects=False,
+            ).status_code
+            == 303
+        )
+        pending = client.post(
+            "/ui/manual/import",
+            data={"csrf": csrf, "document": json.dumps(document)},
+            headers={"Accept-Language": "ru"},
+        )
+
+    assert pending.status_code == 200
+    assert "Подтвердить ревизию метаданных" in pending.text
+    assert "Confirm metadata revision" not in pending.text
 
 
 def _external_id(text: str) -> str:

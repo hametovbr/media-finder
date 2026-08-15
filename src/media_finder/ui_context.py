@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment
 from sqlalchemy.orm import Session, sessionmaker
 
+from .ephemeral import EphemeralCache
 from .models import DownloadClientInstance
 from .sdk.protocols import DownloadClient
 from .ui_i18n import acquisition_status_label, media_kind_label, message_for
@@ -34,8 +35,8 @@ class UIContext:
     templates: Environment
     signer: SessionSigner
     secure_cookie: bool
-    metadata_selections: dict[str, Any] = field(default_factory=dict)
-    manual_drafts: dict[str, dict[str, object]] = field(default_factory=dict)
+    metadata_selections: EphemeralCache[Any] = field(default_factory=EphemeralCache)
+    manual_drafts: EphemeralCache[dict[str, object]] = field(default_factory=EphemeralCache)
 
     def session_for(self, request: Request) -> tuple[dict[str, str], bool]:
         token = request.cookies.get(SESSION_COOKIE)
@@ -92,7 +93,8 @@ class UIContext:
         session, _ = self.session_for(request)
         locale = self.locale_for(request, session)
         body = self.templates.from_string(
-            '<p role="alert" aria-live="assertive" data-error-code="{{ code }}">{{ message }}</p>'
+            '<p role="alert" aria-live="assertive" data-error-code="{{ code }}">'
+            "{{ message }} <code>{{ code }}</code></p>"
         ).render(code=code, message=message_for(code, locale))
         return HTMLResponse(body, status_code=status_code)
 

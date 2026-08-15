@@ -4,7 +4,7 @@
     <article><strong>{{ status_label(acquisition.status) }}</strong>
       {% if acquisition.status == 'pending' %}<p data-testid="pending-reconcile-notice">{{ _('Manual reconciliation may be required.') }}</p>
       <form action="/ui/acquisitions/{{ acquisition.id }}/reconcile" method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">{{ _('Reconcile now') }}</button></form>{% endif %}
-      {% if acquisition.failure_code %}<p role="alert">{{ error_label(acquisition.failure_code) }}</p>{% endif %}
+      {% if acquisition.failure_code %}<p role="alert" data-error-code="{{ acquisition.failure_code }}">{{ error_label(acquisition.failure_code) }} <code>{{ acquisition.failure_code }}</code></p>{% endif %}
       <p>{{ acquisition.release_title or _('Release details unavailable') }}</p>
     </article>
   {% else %}<p role="status">{{ _('No acquisition attempts.') }}</p>{% endfor %}

@@ -476,3 +476,18 @@ msgstr "Отправлено"
 
 msgid "Submission failed"
 msgstr "Не удалось отправить"
+
+msgid "Add season"
+msgstr "Добавить сезон"
+
+msgid "Remove season"
+msgstr "Удалить сезон"
+
+msgid "Add episode"
+msgstr "Добавить эпизод"
+
+msgid "Remove episode"
+msgstr "Удалить эпизод"
+
+msgid "Retry acquisition"
+msgstr "Повторить получение"

@@ -83,6 +83,19 @@ class HttpxProwlarrTransport:
             raise ProwlarrError("prowlarr_search_failed")
         return [dict(item) for item in payload if isinstance(item, dict)]
 
+    def validate(self) -> None:
+        try:
+            response = self._client.get(
+                f"{self._base_url}/api/v1/system/status",
+                headers=self._headers(),
+                follow_redirects=False,
+            )
+            if response.is_redirect:
+                raise ProwlarrError("prowlarr_configuration_invalid")
+            response.raise_for_status()
+        except Exception:
+            raise ProwlarrError("prowlarr_configuration_invalid") from None
+
     def fetch_torrent(self, url: str) -> bytes:
         if _authenticated_origin(url) != self._origin:
             raise ProwlarrError("prowlarr_download_origin_rejected") from None

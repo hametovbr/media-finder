@@ -1,9 +1,11 @@
 """TMDB metadata integration with package-owned retention policy."""
 
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from email.utils import format_datetime
 from typing import Any
 
+import httpx
 from dateutil.relativedelta import relativedelta
 from pydantic import BaseModel, Field, field_validator
 
@@ -44,6 +46,37 @@ class TmdbConfig(BaseModel):
         return EnvReference(value=value) if isinstance(value, str) else value
 
 
+class HttpxTmdbTransport:
+    """TMDB JSON transport resolving the bearer token for each request."""
+
+    def __init__(
+        self,
+        base_url: str,
+        api_token_ref: str,
+        secret_resolver: Callable[[str], str],
+        client: httpx.Client,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._api_token_ref = api_token_ref
+        self._secret_resolver = secret_resolver
+        self._client = client
+
+    def get_json(self, path: str, params: dict[str, str]) -> dict[str, Any]:
+        response = self._client.get(
+            f"{self._base_url}{path}",
+            params=params,
+            headers={"Authorization": f"Bearer {self._secret_resolver(self._api_token_ref)}"},
+            follow_redirects=False,
+        )
+        if response.is_redirect:
+            raise RuntimeError("TMDB redirect rejected")
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("TMDB response is invalid")
+        return payload
+
+
 class TmdbProvider:
     manifest = ModuleManifest(
         key="tmdb",
@@ -74,6 +107,8 @@ class TmdbProvider:
                 message="The metadata provider is not configured.",
             )
         TmdbConfig.model_validate(self.config.model_dump())
+        if self.transport is not None:
+            self.transport.get_json("/configuration", {})
 
     def search(self, query: str, locale: str) -> list[MetadataSearchResult]:
         results: list[MetadataSearchResult] = []
@@ -236,4 +271,4 @@ class TmdbProvider:
         return min(1.0, present / 4)
 
 
-__all__ = ["TmdbConfig", "TmdbProvider"]
+__all__ = ["HttpxTmdbTransport", "TmdbConfig", "TmdbProvider"]
