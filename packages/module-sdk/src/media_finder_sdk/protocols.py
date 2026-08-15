@@ -9,8 +9,11 @@ from .types import (
     CorrelationResult,
     DownloadArtifact,
     DownloadDestination,
+    EpisodeTableDocument,
     ExportWarning,
+    MetadataEditResult,
     MetadataIdentity,
+    MetadataImportDocument,
     MetadataSearchQuery,
     MetadataSearchResult,
     NormalizedMetadata,
@@ -33,6 +36,15 @@ class MetadataProvider(Protocol):
     def normalize(
         self, payload: ProviderPayload, identity: MetadataIdentity
     ) -> NormalizedMetadata: ...
+    def close(self) -> None: ...
+
+
+@runtime_checkable
+class MetadataEditor(Protocol):
+    def import_document(self, document: MetadataImportDocument) -> MetadataEditResult: ...
+    def merge_episode_table(
+        self, current: NormalizedMetadata, document: EpisodeTableDocument
+    ) -> MetadataEditResult: ...
     def close(self) -> None: ...
 
 
@@ -65,6 +77,7 @@ class DownloadClient(Protocol):
 
 __all__ = [
     "DownloadClient",
+    "MetadataEditor",
     "MetadataProvider",
     "MetadataRetentionPolicy",
     "ReleaseProvider",

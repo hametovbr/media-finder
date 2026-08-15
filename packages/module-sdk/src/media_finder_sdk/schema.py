@@ -14,9 +14,12 @@ from .manifest import ModuleManifest
 from .types import (
     CorrelationResult,
     DownloadDestination,
+    EpisodeTableDocument,
     ExportWarning,
     MagnetArtifact,
+    MetadataEditResult,
     MetadataIdentity,
+    MetadataImportDocument,
     MetadataSearchQuery,
     MetadataSearchResult,
     NormalizedMetadata,
@@ -38,6 +41,7 @@ class _MetadataContract(PublicModel):
     search_result: MetadataSearchResult
     provider_payload: ProviderPayload
     normalized_metadata: NormalizedMetadata
+    edit_result: MetadataEditResult
 
 
 class _RetentionContract(PublicModel):
@@ -89,12 +93,41 @@ def _private_release_definitions() -> dict[str, object]:
     }
 
 
+def _private_metadata_definitions() -> dict[str, object]:
+    return {
+        MetadataImportDocument.__name__: {
+            "contentEncoding": "base64",
+            "description": "Bounded provider-owned import document; never exposed to browsers.",
+            "maxLength": 1398104,
+            "minLength": 4,
+            "type": "string",
+            "writeOnly": True,
+        },
+        EpisodeTableDocument.__name__: {
+            "contentEncoding": "base64",
+            "description": "Bounded provider-owned episode table; never exposed to browsers.",
+            "maxLength": 1398104,
+            "minLength": 4,
+            "type": "string",
+            "writeOnly": True,
+        },
+    }
+
+
 def _add_private_release_definitions(schema: dict[str, object]) -> None:
     definitions = schema.get("$defs")
     if not isinstance(definitions, dict):
         definitions = {}
         schema["$defs"] = definitions
     definitions.update(_private_release_definitions())
+
+
+def _add_private_metadata_definitions(schema: dict[str, object]) -> None:
+    definitions = schema.get("$defs")
+    if not isinstance(definitions, dict):
+        definitions = {}
+        schema["$defs"] = definitions
+    definitions.update(_private_metadata_definitions())
 
 
 def _schemas() -> dict[str, dict[str, object]]:
@@ -122,6 +155,12 @@ def _schemas() -> dict[str, dict[str, object]]:
         "Media Finder Download Client Contract v1",
     )
     _add_private_release_definitions(download)
+    metadata = _root_schema(
+        _MetadataContract,
+        "metadata.schema.json",
+        "Media Finder Metadata Provider Contract v1",
+    )
+    _add_private_metadata_definitions(metadata)
 
     return {
         "download.schema.json": download,
@@ -130,11 +169,7 @@ def _schemas() -> dict[str, dict[str, object]]:
             "error.schema.json",
             "Media Finder Module Error Contract v1",
         ),
-        "metadata.schema.json": _root_schema(
-            _MetadataContract,
-            "metadata.schema.json",
-            "Media Finder Metadata Provider Contract v1",
-        ),
+        "metadata.schema.json": metadata,
         "module-manifest.schema.json": manifest,
         "release.schema.json": release,
         "retention.schema.json": _root_schema(

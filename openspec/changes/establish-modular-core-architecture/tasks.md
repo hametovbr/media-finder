@@ -15,7 +15,7 @@
 - [x] 2.6 Implement the three synchronous specialized protocols, registrations, closeable lifecycle, capability-aware conformance runners, and public fixture types; make all SDK contract tests GREEN in an environment where core is not installed.
 - [x] 2.7 Add deterministic module manifest/DTO JSON Schema generation and checked v1 artifacts under `schemas/module-sdk/v1`; add semantic drift and byte-stability tests and make them GREEN.
 - [x] 2.8 Add RED SDK tests for an optional typed `MetadataEditor` sub-capability covering structured import, identity validation, bounded episode-table merge, standardized errors, lifecycle cleanup, capability/factory mismatch, and absence of core/control dependencies.
-- [ ] 2.9 Implement `MetadataEditor`, immutable import/merge DTOs, typed optional metadata registration factory, conformance fixtures, and updated v1 schema artifacts; make focused tests GREEN without adding a universal extension map or concrete provider name to core.
+- [x] 2.9 Implement `MetadataEditor`, immutable import/merge DTOs, typed optional metadata registration factory, conformance fixtures, and updated v1 schema artifacts; make focused tests GREEN without adding a universal extension map or concrete provider name to core.
 
 ## 3. Extract First-Party Modules Through the SDK
 

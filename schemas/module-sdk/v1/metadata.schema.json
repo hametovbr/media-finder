@@ -111,6 +111,14 @@
       "title": "Episode",
       "type": "object"
     },
+    "EpisodeTableDocument": {
+      "contentEncoding": "base64",
+      "description": "Bounded provider-owned episode table; never exposed to browsers.",
+      "maxLength": 1398104,
+      "minLength": 4,
+      "type": "string",
+      "writeOnly": true
+    },
     "JsonScalar": {
       "anyOf": [
         {
@@ -157,6 +165,28 @@
       "title": "MediaKind",
       "type": "string"
     },
+    "MetadataEditResult": {
+      "additionalProperties": false,
+      "description": "Validated provider identity, raw envelope, and normalized edit result.",
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/MetadataIdentity"
+        },
+        "metadata": {
+          "$ref": "#/$defs/NormalizedMetadata"
+        },
+        "raw_payload": {
+          "$ref": "#/$defs/ProviderPayload"
+        }
+      },
+      "required": [
+        "identity",
+        "raw_payload",
+        "metadata"
+      ],
+      "title": "MetadataEditResult",
+      "type": "object"
+    },
     "MetadataIdentity": {
       "additionalProperties": false,
       "properties": {
@@ -188,6 +218,14 @@
       ],
       "title": "MetadataIdentity",
       "type": "object"
+    },
+    "MetadataImportDocument": {
+      "contentEncoding": "base64",
+      "description": "Bounded provider-owned import document; never exposed to browsers.",
+      "maxLength": 1398104,
+      "minLength": 4,
+      "type": "string",
+      "writeOnly": true
     },
     "MetadataSearchQuery": {
       "additionalProperties": false,
@@ -649,6 +687,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "edit_result": {
+      "$ref": "#/$defs/MetadataEditResult"
+    },
     "identity": {
       "$ref": "#/$defs/MetadataIdentity"
     },
@@ -670,7 +711,8 @@
     "search_query",
     "search_result",
     "provider_payload",
-    "normalized_metadata"
+    "normalized_metadata",
+    "edit_result"
   ],
   "title": "Media Finder Metadata Provider Contract v1",
   "type": "object"

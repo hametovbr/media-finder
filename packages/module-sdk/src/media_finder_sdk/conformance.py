@@ -19,9 +19,12 @@ from .types import (
     CorrelationResult,
     DownloadArtifact,
     DownloadDestination,
+    EpisodeTableDocument,
     ExportWarning,
     MagnetArtifact,
+    MetadataEditResult,
     MetadataIdentity,
+    MetadataImportDocument,
     MetadataSearchQuery,
     MetadataSearchResult,
     NormalizedMetadata,
@@ -52,6 +55,18 @@ class MetadataConformanceFixture:
     expected_policy: RetentionPolicy
     expected_action: RetentionAction
     expected_warning: ExportWarning | None
+
+
+@dataclass(frozen=True, slots=True)
+class MetadataEditorConformanceFixture:
+    environment: Mapping[str, str]
+    import_document: MetadataImportDocument
+    expected_import: MetadataEditResult
+    invalid_document: MetadataImportDocument
+    expected_error_code: str
+    current: NormalizedMetadata
+    episode_table: EpisodeTableDocument
+    expected_merge: MetadataEditResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +149,32 @@ def assert_metadata_registration_conforms(
         _close_twice(policy)
 
 
+def assert_metadata_editor_registration_conforms(
+    registration: MetadataProviderRegistration,
+    fixture: MetadataEditorConformanceFixture,
+) -> None:
+    StaticModuleRegistry.create(metadata=(registration,))
+    factory = registration.editor
+    if factory is None:
+        raise AssertionError("metadata_editor_factory_missing")
+    environment = resolve_module_environment(registration.manifest, fixture.environment)
+    editor = factory(environment)
+    try:
+        if editor.import_document(fixture.import_document) != fixture.expected_import:
+            raise AssertionError("metadata_editor_import_mismatch")
+        _assert_module_error(
+            lambda: editor.import_document(fixture.invalid_document),
+            fixture.expected_error_code,
+        )
+        if (
+            editor.merge_episode_table(fixture.current, fixture.episode_table)
+            != fixture.expected_merge
+        ):
+            raise AssertionError("metadata_editor_merge_mismatch")
+    finally:
+        _close_twice(editor)
+
+
 def assert_release_registration_conforms(
     registration: ReleaseProviderRegistration,
     fixture: ReleaseConformanceFixture,
@@ -208,8 +249,10 @@ def _assert_artifact_declared(capabilities: frozenset[str], artifact: DownloadAr
 __all__ = [
     "DownloadClientConformanceFixture",
     "MetadataConformanceFixture",
+    "MetadataEditorConformanceFixture",
     "ReleaseConformanceFixture",
     "assert_download_registration_conforms",
+    "assert_metadata_editor_registration_conforms",
     "assert_metadata_registration_conforms",
     "assert_release_registration_conforms",
 ]

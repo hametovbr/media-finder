@@ -4,8 +4,10 @@ from .common import PublicModel
 from .conformance import (
     DownloadClientConformanceFixture,
     MetadataConformanceFixture,
+    MetadataEditorConformanceFixture,
     ReleaseConformanceFixture,
     assert_download_registration_conforms,
+    assert_metadata_editor_registration_conforms,
     assert_metadata_registration_conforms,
     assert_release_registration_conforms,
 )
@@ -19,7 +21,13 @@ from .manifest import (
     load_manifest,
     parse_manifest,
 )
-from .protocols import DownloadClient, MetadataProvider, MetadataRetentionPolicy, ReleaseProvider
+from .protocols import (
+    DownloadClient,
+    MetadataEditor,
+    MetadataProvider,
+    MetadataRetentionPolicy,
+    ReleaseProvider,
+)
 from .registration import (
     SDK_VERSION,
     SUPPORTED_CONTRACT_VERSION,
@@ -35,11 +43,14 @@ from .types import (
     DownloadArtifact,
     DownloadDestination,
     Episode,
+    EpisodeTableDocument,
     ExportHeader,
     ExportWarning,
     MagnetArtifact,
     MediaKind,
+    MetadataEditResult,
     MetadataIdentity,
+    MetadataImportDocument,
     MetadataSearchQuery,
     MetadataSearchResult,
     NormalizedMetadata,
@@ -74,6 +85,7 @@ __all__ = [
     "DownloadDestination",
     "EnvironmentVariableSpec",
     "Episode",
+    "EpisodeTableDocument",
     "ExportHeader",
     "ExportWarning",
     "JsonScalar",
@@ -81,7 +93,11 @@ __all__ = [
     "MagnetArtifact",
     "MediaKind",
     "MetadataConformanceFixture",
+    "MetadataEditResult",
+    "MetadataEditor",
+    "MetadataEditorConformanceFixture",
     "MetadataIdentity",
+    "MetadataImportDocument",
     "MetadataProvider",
     "MetadataProviderRegistration",
     "MetadataRetentionPolicy",
@@ -116,6 +132,7 @@ __all__ = [
     "SubmissionResult",
     "TorrentArtifact",
     "assert_download_registration_conforms",
+    "assert_metadata_editor_registration_conforms",
     "assert_metadata_registration_conforms",
     "assert_release_registration_conforms",
     "generate_schema_artifacts",

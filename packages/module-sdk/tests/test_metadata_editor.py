@@ -11,9 +11,9 @@ import pytest
 from media_finder_sdk import (
     EpisodeTableDocument,
     MediaKind,
-    MetadataEditResult,
     MetadataEditor,
     MetadataEditorConformanceFixture,
+    MetadataEditResult,
     MetadataIdentity,
     MetadataImportDocument,
     MetadataProvider,
@@ -194,6 +194,7 @@ def test_sdk_editor_surface_has_no_core_or_control_dependency() -> None:
                     if alias.name.startswith(forbidden):
                         violations.append(f"{path.name}:{node.lineno}:{alias.name}")
             if imported is not None and imported.startswith(forbidden):
-                violations.append(f"{path.name}:{node.lineno}:{imported}")
+                line = node.lineno if isinstance(node, ast.ImportFrom) else 0
+                violations.append(f"{path.name}:{line}:{imported}")
 
     assert violations == []

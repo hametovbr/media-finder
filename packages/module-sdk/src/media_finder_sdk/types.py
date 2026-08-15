@@ -7,15 +7,17 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import Field, HttpUrl, field_validator
+from pydantic import Field, HttpUrl, field_validator, model_validator
 
 from .common import PublicModel
 from .errors import JsonValue
 
 MAX_PRIVATE_SELECTION_BYTES = 64 * 1024
 MAX_TORRENT_ARTIFACT_BYTES = 20 * 1024 * 1024
+MAX_METADATA_IMPORT_BYTES = 1024 * 1024
+MAX_EPISODE_TABLE_BYTES = 1024 * 1024
 
 
 def _freeze_json(value: object) -> JsonValue:
@@ -168,6 +170,66 @@ class NormalizedMetadata(PublicModel):
         return _freeze_string_mapping(value)
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class MetadataImportDocument:
+    """Bounded provider-owned structured metadata input."""
+
+    _content: bytes
+
+    @classmethod
+    def from_bytes(cls, content: bytes) -> MetadataImportDocument:
+        copied = bytes(content)
+        if not copied or len(copied) > MAX_METADATA_IMPORT_BYTES:
+            raise ValueError("metadata_import_document_too_large")
+        return cls(copied)
+
+    def content(self) -> bytes:
+        return self._content
+
+    def __repr__(self) -> str:
+        return f"MetadataImportDocument(<redacted>, bytes={len(self._content)})"
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class EpisodeTableDocument:
+    """Bounded provider-owned episode table input."""
+
+    _content: bytes
+
+    @classmethod
+    def from_bytes(cls, content: bytes) -> EpisodeTableDocument:
+        copied = bytes(content)
+        if not copied or len(copied) > MAX_EPISODE_TABLE_BYTES:
+            raise ValueError("episode_table_document_too_large")
+        return cls(copied)
+
+    def content(self) -> bytes:
+        return self._content
+
+    def __repr__(self) -> str:
+        return f"EpisodeTableDocument(<redacted>, bytes={len(self._content)})"
+
+
+class MetadataEditResult(PublicModel):
+    """Validated provider identity, raw envelope, and normalized edit result."""
+
+    identity: MetadataIdentity
+    raw_payload: ProviderPayload
+    metadata: NormalizedMetadata
+
+    @model_validator(mode="after")
+    def require_consistent_identity(self) -> Self:
+        provenance = self.metadata.provenance
+        if (
+            self.identity.media_kind is not self.metadata.kind
+            or self.identity.provider_id != provenance.provider_id
+            or self.identity.external_id != provenance.external_id
+            or self.identity.locale != provenance.locale
+        ):
+            raise ValueError("metadata_edit_identity_mismatch")
+        return self
+
+
 class RetentionPolicy(PublicModel):
     refresh_after: datetime | None = None
     expires_at: datetime | None = None
@@ -302,6 +364,8 @@ class CorrelationResult(PublicModel):
 
 
 __all__ = [
+    "MAX_EPISODE_TABLE_BYTES",
+    "MAX_METADATA_IMPORT_BYTES",
     "MAX_PRIVATE_SELECTION_BYTES",
     "MAX_TORRENT_ARTIFACT_BYTES",
     "Artwork",
@@ -309,11 +373,14 @@ __all__ = [
     "DownloadArtifact",
     "DownloadDestination",
     "Episode",
+    "EpisodeTableDocument",
     "ExportHeader",
     "ExportWarning",
     "MagnetArtifact",
     "MediaKind",
+    "MetadataEditResult",
     "MetadataIdentity",
+    "MetadataImportDocument",
     "MetadataSearchQuery",
     "MetadataSearchResult",
     "NormalizedMetadata",

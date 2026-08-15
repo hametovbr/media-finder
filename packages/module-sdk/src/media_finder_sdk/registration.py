@@ -10,13 +10,20 @@ from packaging.version import Version
 
 from .environment import ResolvedModuleEnvironment
 from .manifest import EnvironmentVariableSpec, ModuleKind, ModuleManifest
-from .protocols import DownloadClient, MetadataProvider, MetadataRetentionPolicy, ReleaseProvider
+from .protocols import (
+    DownloadClient,
+    MetadataEditor,
+    MetadataProvider,
+    MetadataRetentionPolicy,
+    ReleaseProvider,
+)
 
 SDK_VERSION = Version("1.0.0")
 SUPPORTED_CONTRACT_VERSION = "1"
 
 
 type MetadataFactory = Callable[[ResolvedModuleEnvironment], MetadataProvider]
+type MetadataEditorFactory = Callable[[ResolvedModuleEnvironment], MetadataEditor]
 type RetentionFactory = Callable[[], MetadataRetentionPolicy]
 type ReleaseFactory = Callable[[ResolvedModuleEnvironment], ReleaseProvider]
 type DownloadFactory = Callable[[ResolvedModuleEnvironment], DownloadClient]
@@ -27,6 +34,7 @@ class MetadataProviderRegistration:
     manifest: ModuleManifest
     build: MetadataFactory
     retention: RetentionFactory
+    editor: MetadataEditorFactory | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +95,8 @@ class StaticModuleRegistry:
                     raise ValueError("module_identity_duplicate")
                 declared_ids.add(manifest.module_id)
                 _validate_manifest(manifest, expected_kind)
+                if isinstance(registration, MetadataProviderRegistration):
+                    _validate_metadata_editor(registration)
                 _merge_environment(declared_environment, manifest.environment)
 
         return cls(
@@ -105,7 +115,16 @@ class StaticModuleRegistry:
 _CAPABILITIES = {
     ModuleKind.METADATA_PROVIDER: (
         frozenset({"search", "fetch", "normalize"}),
-        frozenset({"search", "fetch", "normalize", "retention", "export-warning"}),
+        frozenset(
+            {
+                "search",
+                "fetch",
+                "normalize",
+                "retention",
+                "export-warning",
+                "metadata-edit",
+            }
+        ),
     ),
     ModuleKind.RELEASE_PROVIDER: (
         frozenset({"search", "resolve"}),
@@ -133,6 +152,13 @@ def _validate_manifest(manifest: ModuleManifest, expected_kind: ModuleKind) -> N
         capabilities & {"magnet", "torrent"}
     ):
         raise ValueError("module_capability_invalid")
+
+
+def _validate_metadata_editor(registration: MetadataProviderRegistration) -> None:
+    declared = "metadata-edit" in registration.manifest.capabilities
+    supplied = registration.editor is not None
+    if declared is not supplied:
+        raise ValueError("metadata_editor_capability_mismatch")
 
 
 def _merge_environment(
