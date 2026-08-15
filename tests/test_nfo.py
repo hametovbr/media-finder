@@ -15,6 +15,8 @@ from media_finder.nfo import render_nfo
 from media_finder.sdk.types import (
     Artwork,
     Episode,
+    ExportHeader,
+    ExportWarning,
     MediaKind,
     NormalizedMetadata,
     Person,
@@ -258,3 +260,140 @@ def test_nfo_content_disposition_supports_safe_unicode_filename(
         "%D0%9C%D0%BE%D0%B9%20%D1%84%D0%B8%D0%BB%D1%8C%D0%BC"
         in response.headers["content-disposition"]
     )
+
+
+@pytest.mark.parametrize(
+    ("entity_type", "season_number", "episode_numbers"),
+    [
+        (EntityType.MOVIE, None, ()),
+        (EntityType.TVSHOW, None, ()),
+        (EntityType.SEASON, 0, ()),
+        (EntityType.EPISODE, 0, (1,)),
+    ],
+)
+def test_nfo_sanitizes_invalid_xml_10_codepoints_in_all_projection_boundaries(
+    entity_type: EntityType,
+    season_number: int | None,
+    episode_numbers: tuple[int, ...],
+) -> None:
+    invalid = "safe\x00\x01\ud800\ufffevalue"
+    if entity_type is EntityType.MOVIE:
+        metadata = _rich_movie().model_copy(
+            update={
+                "titles": {"en-US": invalid},
+                "original_title": invalid,
+                "plot": invalid,
+                "provider_ids": {invalid: invalid},
+                "ratings": (Rating(source=invalid, value=8.5),),
+                "genres": (invalid,),
+                "tags": (invalid,),
+                "countries": (invalid,),
+                "studios": (invalid,),
+                "people": (Person(name=invalid, role=invalid, character=invalid),),
+                "artwork": (
+                    Artwork(
+                        kind=invalid,
+                        url="https://images.example.test/poster.jpg",
+                        language=invalid,
+                    ),
+                ),
+            }
+        )
+    else:
+        episode = Episode(
+            number=1,
+            title=invalid,
+            plot=invalid,
+            provider_ids={invalid: invalid},
+        )
+        season = Season(
+            number=0,
+            title=invalid,
+            plot=invalid,
+            provider_ids={invalid: invalid},
+            episodes=(episode,),
+        )
+        metadata = NormalizedMetadata(
+            kind=MediaKind.SERIES,
+            titles={"en-US": invalid},
+            original_title=invalid,
+            plot=invalid,
+            provider_ids={invalid: invalid},
+            ratings=(Rating(source=invalid, value=7),),
+            genres=(invalid,),
+            tags=(invalid,),
+            countries=(invalid,),
+            studios=(invalid,),
+            people=(Person(name=invalid, role=invalid, character=invalid),),
+            artwork=(
+                Artwork(
+                    kind=invalid,
+                    url="https://images.example.test/poster.jpg",
+                    language=invalid,
+                ),
+            ),
+            seasons=(season,),
+            provenance=Provenance(provider_key="manual", external_id="invalid-xml", locale="en-US"),
+        )
+
+    result = render_nfo(
+        metadata,
+        entity_type=entity_type,
+        season_number=season_number,
+        episode_numbers=episode_numbers,
+    )
+
+    ElementTree.fromstring(result.xml)
+    assert all(
+        character in "\t\n\r"
+        or 0x20 <= ord(character) <= 0xD7FF
+        or 0xE000 <= ord(character) <= 0xFFFD
+        or 0x10000 <= ord(character) <= 0x10FFFF
+        for character in result.xml
+    )
+
+
+def test_nfo_api_defensively_revalidates_forged_provider_warning(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class ForgedWarningProvider:
+        def export_warning(self, policy, now) -> ExportWarning:
+            del policy, now
+            forged = ExportHeader.model_construct(name="Set-Cookie", value="session=unsafe")
+            return ExportWarning.model_construct(headers=(forged,))
+
+    monkeypatch.setenv("MEDIA_FINDER_INTEGRATION_TOKEN", "integration-secret")
+    url = f"sqlite:///{tmp_path / 'forged-warning.db'}"
+    migrate_to_head(url)
+    engine = create_database(url)
+    with session_factory(engine)() as session:
+        service = CatalogService(session)
+        item, _ = service.get_or_create_item("forged", "42", "movie")
+        service.add_provider_revision(
+            item,
+            {"private": True},
+            _rich_movie("forged"),
+            {},
+            RetentionPolicy(expires_at=datetime(2026, 1, 1, tzinfo=UTC)),
+            datetime(2025, 1, 1, tzinfo=UTC),
+        )
+        item_id = item.id
+    engine.dispose()
+    client = TestClient(
+        create_app(
+            url,
+            integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN",
+            clock=lambda: datetime(2025, 2, 1, tzinfo=UTC),
+            providers={"forged": ForgedWarningProvider()},  # type: ignore[dict-item]
+        )
+    )
+
+    response = client.get(
+        f"/api/v1/media-items/{item_id}/exports/nfo",
+        headers={"Authorization": "Bearer integration-secret"},
+        params={"entity_type": "movie"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "internal_error"
+    assert "set-cookie" not in response.headers

@@ -116,3 +116,34 @@ def test_not_found_conflict_and_internal_errors_share_safe_envelope(
     assert internal_response.json()["error"]["code"] == "internal_error"
     assert "SECRET" not in internal_response.text
     assert "example.test" not in internal_response.text
+
+
+def test_framework_404_and_405_use_stable_request_id_envelopes(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("MEDIA_FINDER_INTEGRATION_TOKEN", "token")
+    database_url = f"sqlite:///{tmp_path / 'framework-errors.db'}"
+    migrate_to_head(database_url)
+    client = TestClient(
+        create_app(database_url, integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN")
+    )
+    headers = {"Authorization": "Bearer token", "X-Request-ID": "framework-123"}
+
+    missing = client.get("/api/v1/not-a-route", headers=headers)
+    wrong_method = client.post("/api/v1/media-items/missing/metadata", headers=headers)
+
+    assert missing.status_code == 404
+    assert missing.json() == {
+        "error": {
+            "code": "route_not_found",
+            "request_id": "framework-123",
+            "details": {},
+        }
+    }
+    assert wrong_method.status_code == 405
+    assert wrong_method.json()["error"] == {
+        "code": "method_not_allowed",
+        "request_id": "framework-123",
+        "details": {},
+    }
+    assert wrong_method.headers["allow"] == "GET"
+    assert "detail" not in missing.json() and "detail" not in wrong_method.json()
+    assert client.get("/health/live").json() == {"status": "live"}

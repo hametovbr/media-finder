@@ -125,20 +125,35 @@ class RetentionPolicy(PublicModel):
     expires_at: datetime | None = None
 
 
-class ExportWarning(PublicModel):
-    """Provider-supplied, allowlisted warning headers for an export."""
+class ExportHeader(PublicModel):
+    name: Literal["Warning", "Sunset", "X-Media-Finder-Metadata-Expires"]
+    value: Annotated[str, Field(min_length=1, max_length=512)]
 
-    headers: dict[str, str]
+    @field_validator("value")
+    @classmethod
+    def safe_value(cls, value: str) -> str:
+        if "\r" in value or "\n" in value:
+            raise ValueError("export warning contains an unsafe header value")
+        return value
+
+
+class ExportWarning(PublicModel):
+    """Provider-supplied, deeply immutable allowlisted warning headers."""
+
+    headers: tuple[ExportHeader, ...]
 
     @field_validator("headers")
     @classmethod
-    def safe_headers(cls, value: dict[str, str]) -> dict[str, str]:
-        allowed = {"Warning", "Sunset", "X-Media-Finder-Metadata-Expires"}
-        if not value or set(value) - allowed:
-            raise ValueError("export warning contains an unsupported header")
-        if any("\r" in item or "\n" in item or len(item) > 512 for item in value.values()):
-            raise ValueError("export warning contains an unsafe header value")
+    def unique_headers(cls, value: tuple[ExportHeader, ...]) -> tuple[ExportHeader, ...]:
+        names = [header.name for header in value]
+        if not value or len(names) != len(set(names)):
+            raise ValueError("export warning headers must be non-empty and unique")
         return value
+
+    def as_headers(self) -> dict[str, str]:
+        """Return a fresh mutable copy for an HTTP response."""
+
+        return {header.name: header.value for header in self.headers}
 
 
 class RetentionActionKind(StrEnum):

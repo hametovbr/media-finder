@@ -48,6 +48,13 @@ packages = ["media_finder"]
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers --cov=media_finder --cov-report=term-missing"
 testpaths = ["tests"]
+# Starlette 1.x still falls back to httpx while its test client migrates to the
+# separately distributed httpx2 package. Keep that single import-time boundary
+# tolerated while promoting every other warning to an error.
+filterwarnings = [
+  "error",
+  "ignore:Using `httpx` with `starlette\\.testclient` is deprecated; install `httpx2` instead\\.:starlette.exceptions.StarletteDeprecationWarning:fastapi\\.testclient",
+]
 
 [tool.coverage.run]
 branch = true

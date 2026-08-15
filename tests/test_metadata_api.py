@@ -145,3 +145,69 @@ def test_expiry_is_enforced_at_boundary_before_and_after_purge(tmp_path: Path, m
     purged = client.get(f"/api/v1/acquisitions/{acquisition_id}/metadata", headers=_headers())
     assert purged.status_code == 410
     assert purged.json()["error"]["code"] == "metadata_source_expired"
+
+
+def test_naming_and_nfo_expiry_at_boundary_and_after_purge_for_current_and_pinned(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("MEDIA_FINDER_INTEGRATION_TOKEN", "integration-secret")
+    url = f"sqlite:///{tmp_path / 'export-expiry.db'}"
+    migrate_to_head(url)
+    engine = create_database(url)
+    expiry = datetime(2025, 6, 1, 12, tzinfo=UTC)
+    with session_factory(engine)() as session:
+        service = CatalogService(session)
+        item, _ = service.get_or_create_item("fixture-provider", "export-42", "movie")
+        revision = service.add_provider_revision(
+            item,
+            {"private": "provider-only"},
+            _metadata("Expiring exports", "fixture-provider", "export-42"),
+            {},
+            RetentionPolicy(expires_at=expiry),
+            datetime(2025, 1, 1, tzinfo=UTC),
+        )
+        acquisition = Acquisition(
+            media_item_id=item.id,
+            metadata_revision_id=revision.id,
+            idempotency_key="export-expiry",
+            naming_profile="jellyfin-v1",
+            status="submitted",
+        )
+        session.add(acquisition)
+        session.commit()
+        item_id, acquisition_id, revision_id = item.id, str(acquisition.id), revision.id
+    engine.dispose()
+    client = TestClient(
+        create_app(
+            url,
+            integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN",
+            clock=lambda: expiry,
+        )
+    )
+    resources = (
+        (f"/api/v1/media-items/{item_id}/exports/naming", {"entity_type": "movie"}),
+        (f"/api/v1/acquisitions/{acquisition_id}/exports/naming", {"entity_type": "movie"}),
+        (f"/api/v1/media-items/{item_id}/exports/nfo", {"entity_type": "movie"}),
+        (f"/api/v1/acquisitions/{acquisition_id}/exports/nfo", {"entity_type": "movie"}),
+    )
+
+    for resource, params in resources:
+        response = client.get(resource, headers=_headers(), params=params)
+        assert response.status_code == 410
+        assert response.json()["error"]["code"] == "metadata_source_expired"
+
+    engine = create_database(url)
+    with session_factory(engine)() as session:
+        revision = session.get(MetadataRevision, revision_id)
+        assert revision is not None
+        session.info["retention_purge"] = True
+        revision.raw_payload = None
+        revision.normalized_payload = None
+        revision.effective_payload = None
+        session.commit()
+    engine.dispose()
+
+    for resource, params in resources:
+        response = client.get(resource, headers=_headers(), params=params)
+        assert response.status_code == 410
+        assert response.json()["error"]["code"] == "metadata_source_expired"

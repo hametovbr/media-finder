@@ -83,7 +83,7 @@ def _media_fields(root: ET.Element, metadata: NormalizedMetadata) -> None:
     if metadata.ratings:
         ratings = ET.SubElement(root, "ratings")
         for rating in metadata.ratings:
-            node = ET.SubElement(ratings, "rating", name=rating.source)
+            node = ET.SubElement(ratings, "rating", name=_xml(rating.source))
             _text(node, "value", rating.value)
             _text(node, "votes", rating.votes)
     for name, values in (
@@ -105,11 +105,11 @@ def _media_fields(root: ET.Element, metadata: NormalizedMetadata) -> None:
             _text(actor, "name", person.name)
             _text(actor, "role", person.character or person.role)
     for artwork in metadata.artwork:
-        attributes = {"aspect": artwork.kind}
+        attributes = {"aspect": _xml(artwork.kind)}
         if artwork.language is not None:
-            attributes["lang"] = artwork.language
+            attributes["lang"] = _xml(artwork.language)
         node = ET.SubElement(root, "thumb", attributes)
-        node.text = str(artwork.url)
+        node.text = _xml(artwork.url)
 
 
 def _provider_ids(root: ET.Element, values: dict[str, str], default_provider: str) -> None:
@@ -117,16 +117,30 @@ def _provider_ids(root: ET.Element, values: dict[str, str], default_provider: st
         node = ET.SubElement(
             root,
             "uniqueid",
-            type=provider,
+            type=_xml(provider),
             default="true" if provider == default_provider else "false",
         )
-        node.text = value
+        node.text = _xml(value)
 
 
 def _text(root: ET.Element, name: str, value: object | None) -> None:
     if value is None:
         return
-    ET.SubElement(root, name).text = str(value)
+    ET.SubElement(root, name).text = _xml(value)
+
+
+def _xml(value: object) -> str:
+    return "".join(character if _is_xml_10(character) else "\ufffd" for character in str(value))
+
+
+def _is_xml_10(character: str) -> bool:
+    codepoint = ord(character)
+    return (
+        character in "\t\n\r"
+        or 0x20 <= codepoint <= 0xD7FF
+        or 0xE000 <= codepoint <= 0xFFFD
+        or 0x10000 <= codepoint <= 0x10FFFF
+    )
 
 
 def _title(metadata: NormalizedMetadata) -> str:

@@ -19,7 +19,7 @@ Every module SHALL provide a manifest, typed configuration schema, translations,
 - **THEN** core renders generic localized controls without loading module templates or scripts
 
 ### Requirement: Metadata-provider contract
-A metadata-provider module SHALL expose configuration validation, search, fetch, normalization, attribution, standardized errors, provider-owned retention hooks, and a typed export-warning hook without direct database or UI-template access. The export-warning hook SHALL return only allowlisted, validated response headers or no warning.
+A metadata-provider module SHALL expose configuration validation, search, fetch, normalization, attribution, standardized errors, provider-owned retention hooks, and a typed export-warning hook without direct database or UI-template access. The export-warning hook SHALL return only deeply immutable, allowlisted, validated response-header values or no warning. Core SHALL defensively revalidate a returned warning before consuming it.
 
 #### Scenario: Conform an external provider
 - **WHEN** a test provider implements the public metadata contract using only its fixtures and public types

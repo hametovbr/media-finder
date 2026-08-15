@@ -2,10 +2,11 @@
 
 from .errors import ModuleError
 from .protocols import DownloadClient, MetadataProvider
-from .types import ExportWarning, ModuleManifest, NormalizedMetadata
+from .types import ExportHeader, ExportWarning, ModuleManifest, NormalizedMetadata
 
 __all__ = [
     "DownloadClient",
+    "ExportHeader",
     "ExportWarning",
     "MetadataProvider",
     "ModuleError",

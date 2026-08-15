@@ -15,6 +15,10 @@ Every `/api/v1/*` endpoint SHALL require one Bearer integration token sourced fr
 - **WHEN** an authenticated request contains invalid parameters
 - **THEN** the response includes a stable error code and request ID suitable for safe support diagnostics
 
+#### Scenario: Framework routing fails
+- **WHEN** routing produces a not-found or method-not-allowed response
+- **THEN** the response uses the same stable request-ID error envelope and does not expose the framework's default detail body
+
 ### Requirement: Pinned and current metadata APIs
 The system SHALL expose the pinned effective normalized snapshot at `GET /api/v1/acquisitions/{id}/metadata` and the current effective normalized snapshot at `GET /api/v1/media-items/{id}/metadata`. Responses SHALL include schema version, provenance, locale, completeness, and structural quality and SHALL NOT expose raw provider payloads.
 
@@ -63,6 +67,10 @@ The fixed `jellyfin-v1` profile SHALL return the versioned naming-endpoint respo
 - **WHEN** a selection covers season 1 episodes 1 and 2
 - **THEN** the basename contains the deterministic range `S01E01-E02`
 
+#### Scenario: Reject a non-contiguous episode selection
+- **WHEN** a selection contains episodes 1 and 3 but not episode 2
+- **THEN** the system returns a stable validation error rather than widening it to the inclusive range `S01E01-E03`
+
 ### Requirement: Safe portable paths
 Naming SHALL preserve Unicode while removing control characters, traversal components, Jellyfin-reserved characters, trailing unsafe characters, and platform-reserved names.
 
@@ -82,7 +90,7 @@ The system SHALL expose current NFO at `GET /api/v1/media-items/{id}/exports/nfo
 - **THEN** the API returns a stable validation error envelope instead of XML
 
 ### Requirement: Jellyfin and Kodi compatible NFO
-The NFO endpoints SHALL emit well-formed Jellyfin/Kodi-compatible XML for a movie, TV show, season, or one episode. They SHALL include available provider IDs, titles, plot, dates, runtime, ratings, genres, tags, countries, studios, people, artwork URLs, and special ordering while omitting playback and user-state fields.
+The NFO endpoints SHALL emit well-formed XML 1.0 that is Jellyfin/Kodi-compatible for a movie, TV show, season, or one episode. They SHALL sanitize or reject XML 1.0-forbidden code points in every projected text and attribute. They SHALL include available provider IDs, titles, plot, dates, runtime, ratings, genres, tags, countries, studios, people, artwork URLs, and special ordering while omitting playback and user-state fields.
 
 #### Scenario: Export a movie NFO
 - **WHEN** rich effective movie metadata is requested

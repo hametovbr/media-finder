@@ -10,6 +10,7 @@ from media_finder.sdk.types import (
     Attribution,
     CorrelationResult,
     DownloadDestination,
+    ExportHeader,
     ExportWarning,
     MediaKind,
     MetadataSearchResult,
@@ -84,7 +85,9 @@ class FakeProvider:
         return RetentionAction(kind=RetentionActionKind.NONE)
 
     def export_warning(self, policy, now) -> ExportWarning | None:
-        return None
+        return ExportWarning(
+            headers=(ExportHeader(name="Warning", value="299 Media Finder fixture"),)
+        )
 
 
 class FakeClient:

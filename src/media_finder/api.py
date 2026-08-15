@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import EnvReference, resolve_env_reference
 from .db import create_database, migration_state, session_factory
@@ -22,7 +23,7 @@ from .models import Acquisition, MediaItem, MetadataRevision
 from .naming import EntityType, render_naming
 from .nfo import render_nfo
 from .sdk.protocols import MetadataProvider
-from .sdk.types import NormalizedMetadata, RetentionPolicy
+from .sdk.types import ExportWarning, NormalizedMetadata, RetentionPolicy
 
 REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 bearer = HTTPBearer(auto_error=False)
@@ -117,6 +118,31 @@ def create_app(
         return _error_response(
             request,
             APIError(422, "request_validation_failed", details={"issues": issues}),
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def framework_http_error_handler(
+        request: Request, error: StarletteHTTPException
+    ) -> JSONResponse:
+        codes = {
+            400: "bad_request",
+            401: "authentication_required",
+            403: "forbidden",
+            404: "route_not_found",
+            405: "method_not_allowed",
+            413: "request_too_large",
+            415: "unsupported_media_type",
+            429: "rate_limit_exceeded",
+        }
+        code = codes.get(
+            error.status_code, "http_error" if error.status_code < 500 else "internal_error"
+        )
+        response_headers: dict[str, str] = {}
+        if error.status_code == 405 and error.headers and "Allow" in error.headers:
+            response_headers["Allow"] = error.headers["Allow"]
+        return _error_response(
+            request,
+            APIError(error.status_code, code, headers=response_headers),
         )
 
     @app.get("/health/live")
@@ -296,7 +322,8 @@ def create_app(
                 app.state.clock(),
             )
             if warning is not None:
-                headers.update(warning.headers)
+                validated_warning = ExportWarning.model_validate(warning.model_dump())
+                headers.update(validated_warning.as_headers())
         return Response(content=result.xml, media_type="application/xml", headers=headers)
 
     def content_disposition(filename: str) -> str:

@@ -13,6 +13,7 @@ from ...sdk.protocols import JsonTransport
 from ...sdk.types import (
     Attribution,
     Episode,
+    ExportHeader,
     ExportWarning,
     MediaKind,
     MetadataSearchResult,
@@ -188,13 +189,14 @@ class TmdbProvider:
         if expires is None:
             return None
         return ExportWarning(
-            headers={
-                "Warning": (
-                    '299 Media Finder "Provider-derived metadata has a retention deadline"'
+            headers=(
+                ExportHeader(
+                    name="Warning",
+                    value=('299 Media Finder "Provider-derived metadata has a retention deadline"'),
                 ),
-                "Sunset": format_datetime(expires, usegmt=True),
-                "X-Media-Finder-Metadata-Expires": expires.isoformat(),
-            }
+                ExportHeader(name="Sunset", value=format_datetime(expires, usegmt=True)),
+                ExportHeader(name="X-Media-Finder-Metadata-Expires", value=expires.isoformat()),
+            )
         )
 
     def _request(self, path: str, params: dict[str, str]) -> dict[str, Any]:

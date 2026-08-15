@@ -74,6 +74,8 @@ def render_naming(
             numbers = tuple(sorted(set(episode_numbers)))
             if any(number < 1 for number in numbers):
                 raise ValueError("naming_selector_invalid")
+            if numbers != tuple(range(numbers[0], numbers[-1] + 1)):
+                raise ValueError("naming_selector_invalid")
             episodes = {episode.number: episode for episode in season.episodes}
             if any(number not in episodes for number in numbers):
                 raise ValueError("naming_selector_invalid")
@@ -125,7 +127,8 @@ def _component(value: str) -> str:
     cleaned = " ".join(cleaned.split()).strip(" .")
     if not cleaned:
         return "_"
-    if cleaned.casefold() in WINDOWS_RESERVED:
+    device_stem = cleaned.partition(".")[0].rstrip(" ").casefold()
+    if device_stem in WINDOWS_RESERVED:
         return f"_{cleaned}"
     return cleaned
 

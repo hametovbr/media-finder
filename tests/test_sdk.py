@@ -1,14 +1,15 @@
 import ast
 from pathlib import Path
 
-from pydantic import BaseModel, Field, SecretStr
+import pytest
+from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 from media_finder.modules.manual import ManualProvider
 from media_finder.modules.tmdb import TmdbConfig, TmdbProvider
 from media_finder.sdk.conformance import assert_client_conforms, assert_provider_conforms
 from media_finder.sdk.protocols import MetadataProvider
 from media_finder.sdk.settings import describe_settings
-from media_finder.sdk.types import ModuleManifest, PublicModel
+from media_finder.sdk.types import ExportHeader, ExportWarning, ModuleManifest, PublicModel
 
 
 class Config(BaseModel):
@@ -66,6 +67,18 @@ def test_public_models_never_contain_raw_provider_payload_fields() -> None:
             if name in {"raw_payload", "provider_payload"} or name.startswith("raw_provider")
         }
         assert not forbidden, f"{model.__name__} exposes {sorted(forbidden)}"
+
+
+def test_export_warning_headers_cannot_be_mutated_after_validation() -> None:
+    warning = ExportWarning(headers=(ExportHeader(name="Warning", value="299 Media Finder safe"),))
+
+    with pytest.raises(TypeError):
+        warning.headers[0] = ExportHeader(name="Warning", value="changed")
+    with pytest.raises(ValidationError):
+        ExportHeader(name="Set-Cookie", value="session=unsafe")  # type: ignore[arg-type]
+    with pytest.raises(ValidationError):
+        ExportHeader(name="Warning", value="safe\r\nSet-Cookie: unsafe")
+    assert warning.as_headers() == {"Warning": "299 Media Finder safe"}
 
 
 def test_provider_protocol_and_first_party_modules_use_only_public_sdk() -> None:

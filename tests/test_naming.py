@@ -28,6 +28,7 @@ def _series(title: str = "Мой: сериал / ../ CON") -> NormalizedMetadata
                 episodes=(
                     Episode(number=1, title="Первая / серия"),
                     Episode(number=2, title="Вторая серия"),
+                    Episode(number=3, title="Третья серия"),
                 ),
             ),
         ),
@@ -106,6 +107,42 @@ def test_selector_and_media_kind_mismatch_are_rejected() -> None:
         render_naming(_series(), entity_type=EntityType.MOVIE)
 
 
+def test_non_contiguous_episode_selection_is_rejected_instead_of_widened() -> None:
+    with pytest.raises(ValueError, match="naming_selector_invalid"):
+        render_naming(
+            _series(),
+            entity_type=EntityType.EPISODE,
+            season_number=1,
+            episode_numbers=(1, 3),
+        )
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("CON.txt", "_CON.txt"),
+        ("con.TxT", "_con.TxT"),
+        ("LPT1.nfo", "_LPT1.nfo"),
+        ("aUx.poster", "_aUx.poster"),
+        ("COM9.video", "_COM9.video"),
+        ("lpt9", "_lpt9"),
+        ("CONSOLE.txt", "CONSOLE.txt"),
+        ("COM10.video", "COM10.video"),
+    ],
+)
+def test_windows_device_names_remain_reserved_with_suffixes(title: str, expected: str) -> None:
+    movie = NormalizedMetadata(
+        kind=MediaKind.MOVIE,
+        titles={"en-US": title},
+        provenance=Provenance(provider_key="manual", external_id=title, locale="en-US"),
+    )
+
+    result = render_naming(movie, entity_type=EntityType.MOVIE)
+
+    assert result.relative_directory == expected
+    assert result.basename == expected
+
+
 def test_current_and_pinned_naming_endpoints_use_the_fixed_profile(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -165,3 +202,10 @@ def test_current_and_pinned_naming_endpoints_use_the_fixed_profile(
     )
     assert incomplete.status_code == 422
     assert incomplete.json()["error"]["code"] == "request_validation_failed"
+    non_contiguous = client.get(
+        f"/api/v1/media-items/{item_id}/exports/naming",
+        headers=headers,
+        params={"entity_type": "episode", "season_number": 1, "episode_numbers": [1, 3]},
+    )
+    assert non_contiguous.status_code == 422
+    assert non_contiguous.json()["error"]["code"] == "request_validation_failed"

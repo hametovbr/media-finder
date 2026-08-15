@@ -138,7 +138,7 @@ def test_tmdb_export_warning_headers_are_owned_and_validated_by_the_module() -> 
     warning = provider.export_warning(policy, datetime(2025, 1, 1, tzinfo=UTC))
 
     assert warning is not None
-    assert warning.headers == {
+    assert warning.as_headers() == {
         "Warning": '299 Media Finder "Provider-derived metadata has a retention deadline"',
         "Sunset": "Fri, 28 Feb 2025 12:00:00 GMT",
         "X-Media-Finder-Metadata-Expires": "2025-02-28T12:00:00+00:00",
