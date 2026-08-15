@@ -3,10 +3,17 @@ import io
 from uuid import UUID, uuid4
 
 import pytest
+from media_finder_sdk import MetadataEditor, ModuleError
 
 from media_finder.domain import CatalogService
 from media_finder.manual import ManualCatalogService
-from media_finder.modules.manual import ManualImportError, ManualProvider
+from media_finder.modules.registry import FIRST_PARTY_MODULES
+
+
+def manual_editor() -> MetadataEditor:
+    provider = FIRST_PARTY_MODULES.retention_providers()["manual"]
+    assert isinstance(provider, MetadataEditor)
+    return provider
 
 
 def movie_document(external_id: str | None = None) -> dict:
@@ -24,8 +31,7 @@ def movie_document(external_id: str | None = None) -> dict:
 
 
 def test_complete_json_import_preserves_or_allocates_uuid4_atomically(database) -> None:
-    manual_module = ManualProvider()
-    assert manual_module.search("The Snow Queen", "en") == []
+    manual_module = manual_editor()
     provider = ManualCatalogService(CatalogService(database), manual_module)
     supplied = uuid4()
     item = provider.import_json(movie_document(str(supplied)))
@@ -33,13 +39,13 @@ def test_complete_json_import_preserves_or_allocates_uuid4_atomically(database) 
     allocated = provider.import_json(movie_document())
     assert UUID(allocated.external_id).version == 4
     before = database.query(type(item)).count()
-    with pytest.raises(ManualImportError):
+    with pytest.raises(ModuleError):
         provider.import_json(movie_document("not-a-v4"))
     assert database.query(type(item)).count() == before
 
 
 def test_existing_identity_requires_explicit_confirmation(database) -> None:
-    provider = ManualCatalogService(CatalogService(database), ManualProvider())
+    provider = ManualCatalogService(CatalogService(database), manual_editor())
     identity = str(uuid4())
     original = provider.import_json(movie_document(identity))
     result = provider.import_json(movie_document(identity))
@@ -52,7 +58,7 @@ def test_existing_identity_requires_explicit_confirmation(database) -> None:
 
 
 def test_episode_csv_import_is_atomic_and_preserves_identity(database) -> None:
-    provider = ManualCatalogService(CatalogService(database), ManualProvider())
+    provider = ManualCatalogService(CatalogService(database), manual_editor())
     series = provider.import_json(
         {
             "schema_version": "1",
@@ -71,6 +77,6 @@ def test_episode_csv_import_is_atomic_and_preserves_identity(database) -> None:
     assert series.revisions[-1].effective_payload["seasons"][0]["number"] == 0
     count = len(series.revisions)
     bad = io.StringIO("season,episode,title\n1,2,Valid\ninvalid,3,Broken\n")
-    with pytest.raises((ManualImportError, csv.Error)):
+    with pytest.raises((ModuleError, csv.Error)):
         provider.import_episode_csv(series.id, bad.read())
     assert len(series.revisions) == count

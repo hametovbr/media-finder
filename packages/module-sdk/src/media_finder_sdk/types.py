@@ -9,7 +9,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, HttpUrl, field_validator, model_validator
+from pydantic import Field, HttpUrl, field_serializer, field_validator, model_validator
 
 from .common import PublicModel
 from .errors import JsonValue
@@ -28,6 +28,14 @@ def _freeze_json(value: object) -> JsonValue:
     if isinstance(value, list | tuple):
         return tuple(_freeze_json(item) for item in value)
     raise ValueError("provider_payload_not_json")
+
+
+def _thaw_json(value: JsonValue) -> JsonValue:
+    if isinstance(value, Mapping):
+        return {key: _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return tuple(_thaw_json(item) for item in value)
+    return value
 
 
 def _freeze_string_mapping(value: Mapping[str, str]) -> Mapping[str, str]:
@@ -80,6 +88,10 @@ class ProviderPayload(PublicModel):
     def freeze_payload(cls, value: Mapping[str, JsonValue]) -> Mapping[str, JsonValue]:
         return MappingProxyType(dict(value))
 
+    @field_serializer("data")
+    def serialize_data(self, value: Mapping[str, JsonValue]) -> JsonValue:
+        return _thaw_json(value)
+
 
 class Provenance(PublicModel):
     provider_id: str
@@ -121,6 +133,10 @@ class Episode(PublicModel):
     def freeze_provider_ids(cls, value: Mapping[str, str]) -> Mapping[str, str]:
         return _freeze_string_mapping(value)
 
+    @field_serializer("provider_ids")
+    def serialize_provider_ids(self, value: Mapping[str, str]) -> dict[str, str]:
+        return dict(value)
+
 
 class Season(PublicModel):
     number: Annotated[int, Field(ge=0)]
@@ -133,6 +149,10 @@ class Season(PublicModel):
     @classmethod
     def freeze_provider_ids(cls, value: Mapping[str, str]) -> Mapping[str, str]:
         return _freeze_string_mapping(value)
+
+    @field_serializer("provider_ids")
+    def serialize_provider_ids(self, value: Mapping[str, str]) -> dict[str, str]:
+        return dict(value)
 
 
 class NormalizedMetadata(PublicModel):
@@ -168,6 +188,10 @@ class NormalizedMetadata(PublicModel):
     @classmethod
     def freeze_provider_ids(cls, value: Mapping[str, str]) -> Mapping[str, str]:
         return _freeze_string_mapping(value)
+
+    @field_serializer("titles", "provider_ids")
+    def serialize_string_mapping(self, value: Mapping[str, str]) -> dict[str, str]:
+        return dict(value)
 
 
 @dataclass(frozen=True, slots=True, repr=False)

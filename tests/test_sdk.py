@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 from media_finder import sdk
 from media_finder.modules import registry as module_registry
-from media_finder.modules.manual import ManualProvider
 from media_finder.modules.tmdb import TmdbConfig, TmdbProvider
 from media_finder.sdk import conformance
 from media_finder.sdk.conformance import (
@@ -95,31 +94,8 @@ class RealProviderTransport:
         return {"id": 1, "title": "Fixture", "release_date": "2024-01-01"}
 
 
-def test_real_metadata_providers_conform_without_application_dependencies() -> None:
+def test_real_tmdb_provider_conforms_without_application_dependencies() -> None:
     created = datetime(2026, 1, 1, tzinfo=UTC)
-    manual_payload = {
-        "schema_version": "1",
-        "kind": "movie",
-        "locale": "en-US",
-        "titles": {"en-US": "Fixture"},
-    }
-    assert_provider_conforms(
-        ManualProvider(
-            fixtures={("movie", "47e26ca2-f393-4a00-b33a-902d41d49714", "en-US"): manual_payload}
-        ),
-        ProviderConformanceFixture(
-            query="Fixture",
-            locale="en-US",
-            kind=MediaKind.MOVIE,
-            external_id="47e26ca2-f393-4a00-b33a-902d41d49714",
-            raw_payload=manual_payload,
-            expected_title="Fixture",
-            created_at=created,
-            retention_check_at=created,
-            expected_retention_action=RetentionActionKind.NONE,
-            expected_error_code="manual_import_invalid",
-        ),
-    )
     assert_provider_conforms(
         TmdbProvider(TmdbConfig(api_token="env:TMDB_TOKEN"), RealProviderTransport()),
         ProviderConformanceFixture(
@@ -181,7 +157,7 @@ def test_provider_protocol_and_first_party_modules_use_only_public_sdk() -> None
         violations.append(str(private_boundary))
 
     for module_path in (
-        Path("src/media_finder/modules/manual/__init__.py"),
+        Path("packages/modules/metadata-manual/src/media_finder_metadata_manual/registration.py"),
         Path("src/media_finder/modules/tmdb/__init__.py"),
         Path("src/media_finder/modules/qbittorrent/__init__.py"),
     ):

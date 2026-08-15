@@ -9,6 +9,7 @@ dependencies = [
   "media-finder-builtin-ui",
   "media-finder-control-contracts",
   "media-finder-core",
+  "media-finder-metadata-manual",
   "pydantic-settings>=2.10,<3",
   "uvicorn>=0.35,<1",
 ]

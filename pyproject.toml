@@ -14,6 +14,7 @@ dev = [
 
 [tool.uv.workspace]
 members = ["apps/*", "packages/*", "packages/modules/*"]
+exclude = ["packages/modules"]
 
 [tool.uv.sources]
 media-finder = { workspace = true }
@@ -21,6 +22,7 @@ media-finder-core = { workspace = true }
 media-finder-module-sdk = { workspace = true }
 media-finder-control-contracts = { workspace = true }
 media-finder-builtin-ui = { workspace = true }
+media-finder-metadata-manual = { workspace = true }
 
 [tool.ruff]
 target-version = "py313"
@@ -39,6 +41,7 @@ packages = [
   "media_finder_sdk",
   "media_finder_control",
   "media_finder_builtin_ui",
+  "media_finder_metadata_manual",
 ]
 mypy_path = [
   "src",
@@ -47,6 +50,7 @@ mypy_path = [
   "packages/module-sdk/src",
   "packages/control-contracts/src",
   "packages/builtin-ui/src",
+  "packages/modules/metadata-manual/src",
 ]
 
 [tool.pytest.ini_options]
@@ -59,6 +63,7 @@ pythonpath = [
   "packages/module-sdk/src",
   "packages/control-contracts/src",
   "packages/builtin-ui/src",
+  "packages/modules/metadata-manual/src",
 ]
 # Starlette 1.x still falls back to httpx while its test client migrates to the
 # separately distributed httpx2 package. Keep that single import-time boundary

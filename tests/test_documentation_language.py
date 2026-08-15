@@ -34,7 +34,10 @@ def test_developer_facing_cyrillic_is_rejected(path: Path, content: str) -> None
             'msgstr "Разрешённый перевод"\n',
         ),
         (
-            Path("src/media_finder/modules/manual/translations/ru.json"),
+            Path(
+                "packages/modules/metadata-manual/src/"
+                "media_finder_metadata_manual/translations/ru.json"
+            ),
             '{"module.manual.name": "Вручную"}\n',
         ),
         (Path("tests/test_ui_i18n.py"), 'expected = "Разрешённый перевод"\n'),

@@ -53,6 +53,7 @@ from media_finder_control.models import (
 from media_finder_control.models import (
     DownloadDestination as ControlDestination,
 )
+from media_finder_sdk import MetadataEditor
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -61,7 +62,7 @@ from .acquisition import AcquisitionRequest, AcquisitionService, DestinationUnav
 from .domain import CatalogService, RevisionInput
 from .ephemeral import EphemeralCache, EphemeralTokenExpired
 from .integration_runtime import PROWLARR_INTEGRATION, RuntimeResolver
-from .manual import ManualCatalogService, ManualMetadataModule
+from .manual import ManualCatalogService
 from .models import Acquisition, Collection, DownloadClientInstance, MediaItem, MetadataRevision
 from .modules.registry import FIRST_PARTY_MODULES
 from .sdk.protocols import DownloadClient
@@ -845,14 +846,16 @@ class BackendControlGateway:
             raise ControlFailure(code="integration_runtime_unavailable", status=503)
         return self._runtime
 
-    def _manual_provider(self) -> ManualMetadataModule:
+    def _manual_provider(self) -> MetadataEditor:
         resolved = self._require_runtime().metadata_provider("manual")
         if resolved.value is None:
             raise ControlFailure(
                 code=resolved.error_code or "metadata_provider_unavailable",
                 status=503,
             )
-        return resolved.value  # type: ignore[return-value]
+        if not isinstance(resolved.value, MetadataEditor):
+            raise ControlFailure(code="metadata_editor_unavailable", status=503)
+        return resolved.value
 
     def _load_client(self, instance: DownloadClientInstance) -> DownloadClient:
         if instance.archived_at is not None:

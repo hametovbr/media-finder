@@ -67,6 +67,9 @@ def test_schemas_preserve_semantic_module_boundaries() -> None:
     } <= set(metadata_definitions)
     assert metadata_definitions["MetadataImportDocument"]["writeOnly"] is True
     assert metadata_definitions["EpisodeTableDocument"]["writeOnly"] is True
+    provider_data = metadata_definitions["ProviderPayload"]["properties"]["data"]
+    assert provider_data["type"] == "object"
+    assert provider_data["additionalProperties"] == {"$ref": "#/$defs/JsonValue"}
     release_definitions = schemas["release.schema.json"]["$defs"]
     assert release_definitions["PrivateReleaseSelection"]["writeOnly"] is True
     assert release_definitions["TorrentArtifact"]["maxLength"] > 0

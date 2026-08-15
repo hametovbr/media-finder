@@ -130,6 +130,23 @@ def _add_private_metadata_definitions(schema: dict[str, object]) -> None:
     definitions.update(_private_metadata_definitions())
 
 
+def _restore_provider_payload_input_shape(schema: dict[str, object]) -> None:
+    definitions = schema.get("$defs")
+    if not isinstance(definitions, dict):
+        raise ValueError("metadata_schema_definitions_missing")
+    provider_payload = definitions.get("ProviderPayload")
+    if not isinstance(provider_payload, dict):
+        raise ValueError("provider_payload_schema_missing")
+    properties = provider_payload.get("properties")
+    if not isinstance(properties, dict):
+        raise ValueError("provider_payload_properties_missing")
+    properties["data"] = {
+        "additionalProperties": {"$ref": "#/$defs/JsonValue"},
+        "title": "Data",
+        "type": "object",
+    }
+
+
 def _schemas() -> dict[str, dict[str, object]]:
     manifest = _root_schema(
         ModuleManifest,
@@ -161,6 +178,7 @@ def _schemas() -> dict[str, dict[str, object]]:
         "Media Finder Metadata Provider Contract v1",
     )
     _add_private_metadata_definitions(metadata)
+    _restore_provider_payload_input_shape(metadata)
 
     return {
         "download.schema.json": download,

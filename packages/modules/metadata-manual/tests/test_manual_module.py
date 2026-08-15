@@ -19,8 +19,8 @@ from media_finder_sdk import (
     EpisodeTableDocument,
     MediaKind,
     MetadataConformanceFixture,
-    MetadataEditResult,
     MetadataEditorConformanceFixture,
+    MetadataEditResult,
     MetadataIdentity,
     MetadataImportDocument,
     MetadataSearchQuery,
@@ -150,6 +150,8 @@ def test_manual_wheel_is_independent_and_contains_declared_resources(tmp_path: P
     requirements = tuple(metadata.get_all("Requires-Dist", []))
     assert any(value.lower().startswith("media-finder-module-sdk") for value in requirements)
     assert not any("media-finder-core" in value.lower() for value in requirements)
+    manifest = load_manifest(PACKAGE_ROOT / "src/media_finder_metadata_manual/module.toml")
+    assert metadata["Version"] == manifest.module_version
 
     target = tmp_path / "installed"
     subprocess.run(

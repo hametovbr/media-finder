@@ -51,6 +51,7 @@ LOCALIZATION_TESTS = {
 }
 MODULE_TRANSLATION = re.compile(
     r"^(src/media_finder/modules/[^/]+/translations|"
+    r"packages/modules/[^/]+/src/[^/]+/translations|"
     r"packages/builtin-ui/src/media_finder_builtin_ui/module_translations/[^/]+)/ru\.json$"
 )
 

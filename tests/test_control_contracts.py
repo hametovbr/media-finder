@@ -1,4 +1,5 @@
 import inspect
+import json
 
 import pytest
 from media_finder_control import (
@@ -14,18 +15,9 @@ from media_finder_control import (
     Page,
     PageRequest,
 )
-from media_finder_control.manual import EpisodeDocument, SeasonDocument
+from media_finder_metadata_manual import registration
+from media_finder_sdk import MetadataImportDocument, resolve_module_environment
 from pydantic import ValidationError
-
-from media_finder.modules.manual import (
-    EpisodeDocument as ProviderEpisodeDocument,
-)
-from media_finder.modules.manual import (
-    ManualDocumentV1 as ProviderManualDocumentV1,
-)
-from media_finder.modules.manual import (
-    SeasonDocument as ProviderSeasonDocument,
-)
 
 
 def test_public_models_are_immutable_and_errors_are_language_neutral() -> None:
@@ -56,17 +48,7 @@ def test_public_enums_and_bounded_page_contract() -> None:
         PageRequest(limit=101)
 
 
-def test_manual_browser_document_has_provider_schema_v1_parity() -> None:
-    contract = ManualDocumentV1.model_json_schema()
-    provider = ProviderManualDocumentV1.model_json_schema()
-
-    assert set(contract["properties"]) == set(provider["properties"])
-    assert set(SeasonDocument.model_json_schema()["properties"]) == set(
-        ProviderSeasonDocument.model_json_schema()["properties"]
-    )
-    assert set(EpisodeDocument.model_json_schema()["properties"]) == set(
-        ProviderEpisodeDocument.model_json_schema()["properties"]
-    )
+def test_manual_browser_document_is_accepted_by_the_public_module_editor() -> None:
     document = ManualDocumentV1.model_validate(
         {
             "schema_version": "1",
@@ -96,6 +78,16 @@ def test_manual_browser_document_has_provider_schema_v1_parity() -> None:
     )
     assert document.external_id == "e0a465bb-34eb-4565-bde2-b80d6e789b7c"
     assert document.seasons[0].episodes[0].title == "Special"
+    module = registration()
+    assert module.editor is not None
+    editor = module.editor(resolve_module_environment(module.manifest, {}))
+    result = editor.import_document(
+        MetadataImportDocument.from_bytes(
+            json.dumps(document.model_dump(mode="json")).encode("utf-8")
+        )
+    )
+    assert result.identity.external_id == document.external_id
+    assert result.metadata.seasons[0].episodes[0].title == "Special"
 
 
 def test_control_ports_are_async_and_framework_independent() -> None:

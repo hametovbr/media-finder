@@ -8,6 +8,7 @@ members = [
     "media-finder-builtin-ui",
     "media-finder-control-contracts",
     "media-finder-core",
+    "media-finder-metadata-manual",
     "media-finder-module-sdk",
 ]
 
@@ -324,6 +325,7 @@ dependencies = [
     { name = "media-finder-builtin-ui" },
     { name = "media-finder-control-contracts" },
     { name = "media-finder-core" },
+    { name = "media-finder-metadata-manual" },
     { name = "pydantic-settings" },
     { name = "uvicorn" },
 ]
@@ -334,6 +336,7 @@ requires-dist = [
     { name = "media-finder-builtin-ui", editable = "packages/builtin-ui" },
     { name = "media-finder-control-contracts", editable = "packages/control-contracts" },
     { name = "media-finder-core", editable = "packages/core" },
+    { name = "media-finder-metadata-manual", editable = "packages/modules/metadata-manual" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "uvicorn", specifier = ">=0.35,<1" },
 ]
@@ -393,6 +396,21 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "python-dateutil", specifier = ">=2.9,<3" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
+]
+
+[[package]]
+name = "media-finder-metadata-manual"
+version = "0.1.0"
+source = { editable = "packages/modules/metadata-manual" }
+dependencies = [
+    { name = "media-finder-module-sdk" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "media-finder-module-sdk", editable = "packages/module-sdk" },
+    { name = "pydantic", specifier = ">=2.11,<3" },
 ]
 
 [[package]]

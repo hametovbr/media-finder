@@ -1,0 +1,20 @@
+{
+  "schema_version": "1",
+  "external_id": "47e26ca2-f393-4a00-b33a-902d41d49714",
+  "kind": "series",
+  "locale": "en",
+  "titles": {
+    "en": "Local Animation"
+  },
+  "seasons": [
+    {
+      "number": 0,
+      "episodes": [
+        {
+          "number": 1,
+          "title": "Special"
+        }
+      ]
+    }
+  ]
+}

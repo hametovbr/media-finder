@@ -18,12 +18,12 @@ from media_finder.control_gateway import BackendControlGateway
 from media_finder.ephemeral import EphemeralCache
 from media_finder.integration_runtime import RuntimeResolver
 from media_finder.models import MetadataRevision
-from media_finder.modules.manual import ManualProvider
+from media_finder.modules.registry import FIRST_PARTY_MODULES
 
 
 def _gateway(database: Session) -> BackendControlGateway:
     sessions = sessionmaker(bind=database.get_bind(), expire_on_commit=False)
-    provider = ManualProvider()
+    provider = FIRST_PARTY_MODULES.retention_providers()["manual"]
     runtime = RuntimeResolver(
         factory=None,
         providers={"manual": provider},

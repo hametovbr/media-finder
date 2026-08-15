@@ -120,6 +120,9 @@ def test_editor_result_requires_consistent_identity_and_normalized_metadata() ->
     expected = _result()
 
     assert expected.identity.external_id == expected.metadata.provenance.external_id
+    serialized = expected.model_dump(mode="json")
+    assert serialized["raw_payload"]["data"] == {"title": "Fixture"}
+    assert serialized["metadata"]["titles"] == {"en": "Fixture"}
     with pytest.raises(ValueError, match="metadata_edit_identity_mismatch"):
         MetadataEditResult(
             identity=expected.identity,

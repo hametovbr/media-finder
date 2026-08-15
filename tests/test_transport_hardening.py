@@ -7,8 +7,8 @@ from pydantic import BaseModel, ValidationError
 
 from media_finder.integration_runtime import DefaultRuntimeFactory
 from media_finder.models import DownloadClientInstance
-from media_finder.modules.manual import ManualProvider
 from media_finder.modules.qbittorrent import HttpxQbittorrentTransport, QbittorrentConfig
+from media_finder.modules.registry import FIRST_PARTY_MODULES
 from media_finder.prowlarr import (
     ExpiredSearchToken,
     HttpxProwlarrTransport,
@@ -143,7 +143,7 @@ def test_failed_runtime_construction_closes_and_forgets_every_created_http_clien
             "broken": MetadataProviderRegistration(
                 key="broken",
                 config_model=EmptyIntegrationConfig,
-                retention_factory=ManualProvider,
+                retention_factory=lambda: FIRST_PARTY_MODULES.retention_providers()["manual"],
                 build=fail_builder,
             )
         },

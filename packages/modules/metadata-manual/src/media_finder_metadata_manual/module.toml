@@ -1,0 +1,11 @@
+module_id = "manual"
+module_kind = "metadata-provider"
+module_version = "0.1.0"
+sdk_compatibility = ">=1,<2"
+contract_version = "1"
+name_key = "module.manual.name"
+capabilities = ["search", "fetch", "normalize", "retention", "metadata-edit"]
+translation_keys = ["module.manual.name", "module.manual.notice"]
+
+[attribution]
+notice_key = "module.manual.notice"
