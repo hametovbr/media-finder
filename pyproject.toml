@@ -25,6 +25,7 @@ media-finder-builtin-ui = { workspace = true }
 media-finder-metadata-manual = { workspace = true }
 media-finder-metadata-tmdb = { workspace = true }
 media-finder-release-prowlarr = { workspace = true }
+media-finder-download-qbittorrent = { workspace = true }
 
 [tool.ruff]
 target-version = "py313"
@@ -46,6 +47,7 @@ packages = [
   "media_finder_metadata_manual",
   "media_finder_metadata_tmdb",
   "media_finder_release_prowlarr",
+  "media_finder_download_qbittorrent",
 ]
 mypy_path = [
   "src",
@@ -57,6 +59,7 @@ mypy_path = [
   "packages/modules/metadata-manual/src",
   "packages/modules/metadata-tmdb/src",
   "packages/modules/release-prowlarr/src",
+  "packages/modules/download-qbittorrent/src",
 ]
 
 [tool.pytest.ini_options]
@@ -72,6 +75,7 @@ pythonpath = [
   "packages/modules/metadata-manual/src",
   "packages/modules/metadata-tmdb/src",
   "packages/modules/release-prowlarr/src",
+  "packages/modules/download-qbittorrent/src",
 ]
 # Starlette 1.x still falls back to httpx while its test client migrates to the
 # separately distributed httpx2 package. Keep that single import-time boundary

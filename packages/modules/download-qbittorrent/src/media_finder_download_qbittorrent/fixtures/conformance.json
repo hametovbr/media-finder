@@ -1,0 +1,5 @@
+{
+  "client_id": "qbittorrent",
+  "artifact_capabilities": ["magnet", "torrent"],
+  "correlation": "mf-acq-47e26ca2-f393-4a00-b33a-902d41d49714"
+}

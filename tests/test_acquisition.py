@@ -2,7 +2,6 @@ from dataclasses import replace
 from typing import cast
 from uuid import UUID
 
-import httpx
 import pytest
 from media_finder_sdk import (
     MagnetArtifact as SDKMagnetArtifact,
@@ -27,7 +26,6 @@ from media_finder.acquisition import (
 )
 from media_finder.domain import CatalogService
 from media_finder.models import Acquisition, DownloadClientInstance, MetadataRevision
-from media_finder.modules.qbittorrent import QbittorrentClient, QbittorrentConfig
 from media_finder.release_selection import (
     ReleaseSelectionCache,
     ReleaseSelectionExpired,
@@ -347,59 +345,3 @@ def test_failed_retry_requires_a_fresh_selection_and_creates_a_new_uuid(
     assert second.id != first.id
     assert second_token != first_token
     assert client.submit_calls == 2
-
-
-class HttpxTimeoutQbittorrentTransport:
-    def __init__(self) -> None:
-        self.submit_calls = 0
-        self.lookup_calls = 0
-
-    def authenticate(self, username: str, password: str) -> None:
-        pass
-
-    def list_categories(self) -> dict[str, str]:
-        return {"anime": "/downloads/anime"}
-
-    def add_magnet(self, uri: str, category: str, tag: str) -> str:
-        self.submit_calls += 1
-        raise httpx.ReadTimeout("passkey=raw-secret")
-
-    def add_torrent(self, content: bytes, category: str, tag: str) -> str:
-        return self.add_magnet("", category, tag)
-
-    def find_by_tag(self, tag: str) -> list[dict[str, str]]:
-        self.lookup_calls += 1
-        return [{"hash": "a" * 40, "tags": tag}]
-
-
-def test_real_httpx_timeout_performs_one_exact_lookup_and_never_resubmits(
-    database: Session,
-) -> None:
-    item_id, revision_id, instance = seed(database)
-    prowlarr, token = search_token()
-    native = HttpxTimeoutQbittorrentTransport()
-    client = QbittorrentClient(
-        QbittorrentConfig(
-            base_url="https://qb.example.test",
-            username_ref="env:QB_USER",
-            password_ref="env:QB_PASSWORD",
-        ),
-        native,
-        lambda reference: "resolved-in-memory",
-    )
-
-    acquisition = AcquisitionService(database, prowlarr, lambda stored: client).submit(
-        AcquisitionRequest(
-            media_item_id=item_id,
-            metadata_revision_id=revision_id,
-            client_instance_id=instance.id,
-            destination="anime",
-            release_token=token,
-            idempotency_key="real-httpx-timeout",
-        )
-    )
-
-    assert acquisition.status == "submitted"
-    assert acquisition.external_task_id == "a" * 40
-    assert native.submit_calls == 1
-    assert native.lookup_calls == 1

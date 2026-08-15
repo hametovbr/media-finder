@@ -8,6 +8,7 @@ members = [
     "media-finder-builtin-ui",
     "media-finder-control-contracts",
     "media-finder-core",
+    "media-finder-download-qbittorrent",
     "media-finder-metadata-manual",
     "media-finder-metadata-tmdb",
     "media-finder-module-sdk",
@@ -327,6 +328,7 @@ dependencies = [
     { name = "media-finder-builtin-ui" },
     { name = "media-finder-control-contracts" },
     { name = "media-finder-core" },
+    { name = "media-finder-download-qbittorrent" },
     { name = "media-finder-metadata-manual" },
     { name = "media-finder-metadata-tmdb" },
     { name = "media-finder-release-prowlarr" },
@@ -340,6 +342,7 @@ requires-dist = [
     { name = "media-finder-builtin-ui", editable = "packages/builtin-ui" },
     { name = "media-finder-control-contracts", editable = "packages/control-contracts" },
     { name = "media-finder-core", editable = "packages/core" },
+    { name = "media-finder-download-qbittorrent", editable = "packages/modules/download-qbittorrent" },
     { name = "media-finder-metadata-manual", editable = "packages/modules/metadata-manual" },
     { name = "media-finder-metadata-tmdb", editable = "packages/modules/metadata-tmdb" },
     { name = "media-finder-release-prowlarr", editable = "packages/modules/release-prowlarr" },
@@ -402,6 +405,21 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "python-dateutil", specifier = ">=2.9,<3" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
+]
+
+[[package]]
+name = "media-finder-download-qbittorrent"
+version = "0.1.0"
+source = { editable = "packages/modules/download-qbittorrent" }
+dependencies = [
+    { name = "httpx" },
+    { name = "media-finder-module-sdk" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28,<1" },
+    { name = "media-finder-module-sdk", editable = "packages/module-sdk" },
 ]
 
 [[package]]

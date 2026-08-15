@@ -28,6 +28,7 @@ def test_workspace_declares_independently_buildable_packages() -> None:
         "media-finder-metadata-manual": {"workspace": True},
         "media-finder-metadata-tmdb": {"workspace": True},
         "media-finder-release-prowlarr": {"workspace": True},
+        "media-finder-download-qbittorrent": {"workspace": True},
     }
 
     contracts = _project(CONTRACTS_ROOT / "pyproject.toml")

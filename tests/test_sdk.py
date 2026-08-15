@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from media_finder_download_qbittorrent import registration as qbittorrent_registration
 from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 from media_finder import sdk
@@ -130,7 +131,10 @@ def test_provider_protocol_and_first_party_modules_use_only_public_sdk() -> None
     for module_path in (
         Path("packages/modules/metadata-manual/src/media_finder_metadata_manual/registration.py"),
         Path("packages/modules/metadata-tmdb/src/media_finder_metadata_tmdb/registration.py"),
-        Path("src/media_finder/modules/qbittorrent/__init__.py"),
+        Path(
+            "packages/modules/download-qbittorrent/"
+            "src/media_finder_download_qbittorrent/registration.py"
+        ),
     ):
         tree = ast.parse(module_path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -149,7 +153,7 @@ def test_one_public_static_registry_composes_runtime_and_settings_without_switch
     assert set(registry.download_clients) == {"qbittorrent"}
     assert registry.metadata_providers["tmdb"].retention_factory().manifest.key == "tmdb"
     assert registry.metadata_providers["manual"].retention_factory().manifest.key == "manual"
-    assert registry.download_clients["qbittorrent"].config_model.__name__ == "QbittorrentConfig"
+    assert qbittorrent_registration().manifest.module_id == "qbittorrent"
     with pytest.raises(TypeError):
         registry.metadata_providers["mutated"] = registry.metadata_providers["tmdb"]
 
@@ -160,8 +164,6 @@ def test_one_public_static_registry_composes_runtime_and_settings_without_switch
     ):
         source = path.read_text(encoding="utf-8")
         assert "TmdbProvider" not in source
-        assert "QbittorrentClient" not in source
-        assert "QbittorrentConfig" not in source
         assert "ManualProvider" not in source
 
 

@@ -12,6 +12,7 @@ dependencies = [
   "media-finder-metadata-manual",
   "media-finder-metadata-tmdb",
   "media-finder-release-prowlarr",
+  "media-finder-download-qbittorrent",
   "pydantic-settings>=2.10,<3",
   "uvicorn>=0.35,<1",
 ]

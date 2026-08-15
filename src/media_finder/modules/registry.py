@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import cast
 
+from media_finder_download_qbittorrent import registration as qbittorrent_registration
 from media_finder_metadata_manual import registration as manual_registration
 from media_finder_metadata_tmdb import registration as tmdb_registration
+from media_finder_sdk import (
+    CorrelationResult as SDKCorrelationResult,
+)
+from media_finder_sdk import (
+    DownloadClient as SDKDownloadClient,
+)
+from media_finder_sdk import (
+    DownloadDestination as SDKDownloadDestination,
+)
 from media_finder_sdk import (
     EpisodeTableDocument,
     MetadataEditResult,
@@ -18,10 +28,14 @@ from media_finder_sdk import (
     resolve_module_environment,
 )
 from media_finder_sdk import (
+    MagnetArtifact as SDKMagnetArtifact,
+)
+from media_finder_sdk import (
     MediaKind as SDKMediaKind,
 )
 from media_finder_sdk import MetadataProvider as SDKMetadataProvider
 from media_finder_sdk import MetadataRetentionPolicy as SDKMetadataRetentionPolicy
+from media_finder_sdk import ModuleError as SDKModuleError
 from media_finder_sdk import (
     NormalizedMetadata as SDKNormalizedMetadata,
 )
@@ -30,6 +44,12 @@ from media_finder_sdk import (
 )
 from media_finder_sdk import (
     RetentionSubject as SDKRetentionSubject,
+)
+from media_finder_sdk import (
+    SubmissionResult as SDKSubmissionResult,
+)
+from media_finder_sdk import (
+    TorrentArtifact as SDKTorrentArtifact,
 )
 from pydantic import BaseModel, ConfigDict, HttpUrl
 
@@ -44,8 +64,12 @@ from ..sdk.registration import (
 )
 from ..sdk.types import (
     Attribution,
+    CorrelationResult,
+    DownloadArtifact,
+    DownloadDestination,
     EnvironmentVariableSpec,
     ExportWarning,
+    MagnetArtifact,
     MediaKind,
     MetadataSearchResult,
     ModuleManifest,
@@ -53,11 +77,8 @@ from ..sdk.types import (
     RetentionAction,
     RetentionActionKind,
     RetentionPolicy,
-)
-from .qbittorrent import (
-    HttpxQbittorrentTransport,
-    QbittorrentClient,
-    QbittorrentConfig,
+    SubmissionResult,
+    TorrentArtifact,
 )
 
 
@@ -332,23 +353,85 @@ def _build_tmdb(
     )
 
 
+class QbittorrentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class _LegacyQbittorrentAdapter:
+    manifest = ModuleManifest(
+        key="qbittorrent",
+        version="0.1.0",
+        contract_version="1",
+        name_key="module.qbittorrent.name",
+        capabilities=frozenset({"magnet", "torrent", "live_destinations", "correlation"}),
+        translation_keys={"module.qbittorrent.name": "qBittorrent"},
+    )
+    config_model = QbittorrentConfig
+
+    def __init__(self, client: SDKDownloadClient) -> None:
+        self._client = client
+
+    def validate_config(self) -> None:
+        self._translate(self._client.validate)
+
+    def list_destinations(self) -> list[DownloadDestination]:
+        destinations = self._translate(self._client.list_destinations)
+        return [
+            DownloadDestination.model_validate(item.model_dump(mode="json"))
+            for item in cast(tuple[SDKDownloadDestination, ...], destinations)
+        ]
+
+    def submit(
+        self,
+        artifact: DownloadArtifact,
+        destination: str,
+        correlation: str,
+    ) -> SubmissionResult:
+        sdk_artifact: SDKMagnetArtifact | SDKTorrentArtifact
+        if isinstance(artifact, MagnetArtifact):
+            sdk_artifact = SDKMagnetArtifact(uri=artifact.uri)
+        elif isinstance(artifact, TorrentArtifact):
+            sdk_artifact = SDKTorrentArtifact.from_bytes(artifact.content)
+        else:  # pragma: no cover - legacy union is closed
+            raise ModuleError("download_artifact_unsupported", "download_artifact_unsupported")
+        result = cast(
+            SDKSubmissionResult,
+            self._translate(lambda: self._client.submit(sdk_artifact, destination, correlation)),
+        )
+        return SubmissionResult.model_validate(result.model_dump(mode="json"))
+
+    def find_by_correlation(self, correlation: str) -> CorrelationResult:
+        result = cast(
+            SDKCorrelationResult,
+            self._translate(lambda: self._client.find_by_correlation(correlation)),
+        )
+        return CorrelationResult.model_validate(result.model_dump(mode="json"))
+
+    def close(self) -> None:
+        self._client.close()
+
+    @staticmethod
+    def _translate(operation: Callable[[], object]) -> object:
+        try:
+            return operation()
+        except SDKModuleError as error:
+            raise ModuleError(error.code, error.code) from None
+
+
 def _build_qbittorrent(
     payload: Mapping[str, object],
     http_client: HttpClientFactory,
     secret_resolver: SecretResolver,
 ) -> DownloadClient:
-    config = QbittorrentConfig(
-        base_url=HttpUrl(str(payload["QBITTORRENT_URL"])),
-        username_ref="env:QBITTORRENT_USERNAME",
-        password_ref="env:QBITTORRENT_PASSWORD",
+    del secret_resolver
+    registered = qbittorrent_registration(client_factory=http_client)
+    environment = resolve_module_environment(
+        registered.manifest,
+        {name: str(value) for name, value in payload.items()},
     )
     return cast(
         DownloadClient,
-        QbittorrentClient(
-            config,
-            HttpxQbittorrentTransport(str(config.base_url), http_client()),
-            secret_resolver,
-        ),
+        _LegacyQbittorrentAdapter(registered.build(environment)),
     )
 
 

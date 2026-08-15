@@ -1,12 +1,10 @@
 import threading
 
 import httpx
-import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from media_finder.integration_runtime import DefaultRuntimeFactory
 from media_finder.models import DownloadClientInstance
-from media_finder.modules.qbittorrent import HttpxQbittorrentTransport, QbittorrentConfig
 from media_finder.modules.registry import FIRST_PARTY_MODULES
 from media_finder.sdk.registration import (
     DownloadClientRegistration,
@@ -33,29 +31,6 @@ def system_client(module_key: str = "qbittorrent") -> DownloadClientInstance:
         config_payload={},
         system_owned=True,
     )
-
-
-def test_qbittorrent_base_urls_reject_secret_components_but_allow_safe_subpaths() -> None:
-    client = httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={})))
-    unsafe = (
-        "https://user:password@services.example.test/app",
-        "https://services.example.test/app?token=secret",
-        "https://services.example.test/app#fragment",
-        "https://services.example.test/passkey/value",
-        "https://services.example.test/service/%73ecret",
-    )
-    for value in unsafe:
-        with pytest.raises(ValidationError):
-            QbittorrentConfig(
-                base_url=value,
-                username_ref="env:QB_USER",
-                password_ref="env:QB_PASS",
-            )
-        with pytest.raises(ValueError, match="qbittorrent_base_url_invalid"):
-            HttpxQbittorrentTransport(value, client)
-
-    qb = HttpxQbittorrentTransport("https://services.example.test/apps/qb", client)
-    assert qb is not None
 
 
 def test_runtime_http_sessions_are_isolated_per_service_and_qb_instance() -> None:
@@ -226,7 +201,7 @@ def test_first_party_validation_owns_only_successful_cached_http_clients() -> No
     assert len(retained) == 3
     assert not retained[0].is_closed and not retained[1].is_closed
     assert retained[2].is_closed
-    assert success_factory._http_clients == retained[:2]
+    assert success_factory._http_clients == retained[:1]
     success_factory.close()
     assert all(client.is_closed for client in retained)
 
@@ -272,7 +247,7 @@ def test_failed_interleaved_attempt_cannot_close_a_later_successful_client() -> 
     assert created[0].is_closed
     assert not created[1].is_closed
     assert factory.download_client(instance).value is successful
-    assert factory._http_clients == [created[1]]
+    assert factory._http_clients == []
     factory.close()
     assert created[1].is_closed
 

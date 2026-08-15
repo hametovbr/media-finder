@@ -84,6 +84,7 @@ class DefaultRuntimeFactory:
         with self._lock:
             self._closed = True
             release_services = list(self._prowlarr.values())
+            download_clients = list(self._download_clients.values())
             clients = self._http_clients
             self._http_clients = []
             self._prowlarr.clear()
@@ -91,6 +92,8 @@ class DefaultRuntimeFactory:
             self._download_clients.clear()
         for service in reversed(release_services):
             service.close()
+        for client in reversed(download_clients):
+            self._close_module(client)
         self._close_clients(clients)
 
     def metadata_provider(self, key: str) -> RuntimeResult[MetadataProvider]:
@@ -193,6 +196,7 @@ class DefaultRuntimeFactory:
         if registration is None:
             return RuntimeResult(None, "download_client_module_unknown")
         owned_clients: list[httpx.Client] = []
+        client = None
         try:
             environment = resolve_environment(registration.environment, self._environment)
             cache_key = (registration.key, "environment")
@@ -215,18 +219,22 @@ class DefaultRuntimeFactory:
                     existing = self._download_clients.get(cache_key)
                 if not runtime_closed and existing is None:
                     self._download_clients[cache_key] = client
-                    self._http_clients.extend(owned_clients)
+                    if not callable(getattr(client, "close", None)):
+                        self._http_clients.extend(owned_clients)
                     return RuntimeResult(client)
             if runtime_closed:
-                self._close_clients(owned_clients)
+                self._close_module_or_clients(client, owned_clients)
                 return RuntimeResult(None, "integration_runtime_closed")
-            self._close_clients(owned_clients)
+            self._close_module_or_clients(client, owned_clients)
             return RuntimeResult(existing)
         except EnvironmentConfigurationError as error:
             self._close_clients(owned_clients)
             return RuntimeResult(None, error.code, error.missing)
         except Exception:
-            self._close_clients(owned_clients)
+            if client is None:
+                self._close_clients(owned_clients)
+            else:
+                self._close_module_or_clients(client, owned_clients)
             return RuntimeResult(None, "download_client_configuration_invalid")
 
     def _attempt_client_factory(
@@ -243,6 +251,23 @@ class DefaultRuntimeFactory:
     def _close_clients(clients: list[httpx.Client]) -> None:
         for client in clients:
             client.close()
+
+    @staticmethod
+    def _close_module(instance: object) -> bool:
+        close = getattr(instance, "close", None)
+        if not callable(close):
+            return False
+        close()
+        return True
+
+    @classmethod
+    def _close_module_or_clients(
+        cls,
+        instance: object,
+        clients: list[httpx.Client],
+    ) -> None:
+        if not cls._close_module(instance):
+            cls._close_clients(clients)
 
     def _resolve_environment_secret(self, reference: str) -> str:
         variable_name = EnvReference(value=reference).variable_name
