@@ -18,7 +18,7 @@ from .control_security import BackendBrowserSecurity
 from .db import create_database, session_factory
 from .integration_runtime import DefaultRuntimeFactory, RuntimeFactory, RuntimeResolver
 from .modules.registry import FIRST_PARTY_MODULES
-from .prowlarr import ProwlarrAdapter
+from .release_selection import ReleaseSelectionService
 from .sdk.protocols import MetadataProvider
 from .system_clients import ensure_system_qbittorrent
 
@@ -45,7 +45,7 @@ def create_ui_app(
     session_secret_reference: str,
     secure_cookie: bool = False,
     providers: dict[str, MetadataProvider] | None = None,
-    prowlarr: ProwlarrAdapter | None = None,
+    prowlarr: ReleaseSelectionService | None = None,
     client_loader: ClientLoader | None = None,
     runtime_factory: RuntimeFactory | None = None,
     http_client_factory: Callable[[], httpx.Client] = httpx.Client,

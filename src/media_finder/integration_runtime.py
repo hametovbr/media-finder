@@ -9,12 +9,13 @@ from threading import RLock
 from typing import Protocol
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+from media_finder_release_prowlarr import registration as prowlarr_registration
+from media_finder_sdk import resolve_module_environment
 
 from .acquisition import ClientLoader
 from .models import DownloadClientInstance
 from .modules.registry import FIRST_PARTY_MODULES
-from .prowlarr import HttpxProwlarrTransport, ProwlarrAdapter, SearchResultCache
+from .release_selection import ReleaseSelectionCache, ReleaseSelectionService
 from .sdk.protocols import DownloadClient, MetadataProvider
 from .sdk.registration import (
     EnvironmentConfigurationError,
@@ -22,25 +23,21 @@ from .sdk.registration import (
     StaticModuleRegistry,
     resolve_environment,
 )
-from .sdk.settings import EnvReference, validate_service_base_url
+from .sdk.settings import EnvReference
 from .sdk.types import Attribution, EnvironmentVariableSpec
 from .system_clients import SYSTEM_QBITTORRENT_ID
 
+_PROWLARR_MANIFEST = prowlarr_registration().manifest
 PROWLARR_INTEGRATION = IntegrationDescriptor(
-    key="prowlarr",
-    environment=(
+    key=_PROWLARR_MANIFEST.module_id,
+    environment=tuple(
         EnvironmentVariableSpec(
-            name="PROWLARR_URL",
-            required=True,
-            secret=False,
-            description_key="integration.prowlarr.environment.url",
-        ),
-        EnvironmentVariableSpec(
-            name="PROWLARR_API_KEY",
-            required=True,
-            secret=True,
-            description_key="integration.prowlarr.environment.api_key",
-        ),
+            name=value.name,
+            required=value.required,
+            secret=value.secret,
+            description_key=value.description_key,
+        )
+        for value in _PROWLARR_MANIFEST.environment
     ),
 )
 
@@ -55,34 +52,11 @@ class RuntimeResult[T]:
 class RuntimeFactory(Protocol):
     def metadata_provider(self, key: str) -> RuntimeResult[MetadataProvider]: ...
 
-    def prowlarr(self) -> RuntimeResult[ProwlarrAdapter]: ...
+    def prowlarr(self) -> RuntimeResult[ReleaseSelectionService]: ...
 
     def download_client(
         self, instance: DownloadClientInstance
     ) -> RuntimeResult[DownloadClient]: ...
-
-
-class ProwlarrSettings(BaseModel):
-    """Typed core integration schema; secret values remain environment references."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    base_url: HttpUrl = Field(title="Base URL")
-    api_key_ref: str = Field(title="API key environment reference")
-
-    @field_validator("base_url")
-    @classmethod
-    def safe_origin(cls, value: HttpUrl) -> HttpUrl:
-        try:
-            validate_service_base_url(str(value), error_code="prowlarr_base_url_invalid")
-        except ValueError:
-            raise ValueError("prowlarr_base_url_invalid") from None
-        return value
-
-    @field_validator("api_key_ref")
-    @classmethod
-    def environment_reference(cls, value: str) -> str:
-        return EnvReference(value=value).value
 
 
 class DefaultRuntimeFactory:
@@ -98,7 +72,7 @@ class DefaultRuntimeFactory:
         self._http_client_factory = http_client_factory
         self._environment = dict(os.environ if environment is None else environment)
         self._secret_resolver = self._resolve_environment_secret
-        self._prowlarr: dict[tuple[str, str], ProwlarrAdapter] = {}
+        self._prowlarr: dict[tuple[str, str], ReleaseSelectionService] = {}
         self._metadata: dict[tuple[str, str], MetadataProvider] = {}
         self._download_clients: dict[tuple[str, str], DownloadClient] = {}
         self._http_clients: list[httpx.Client] = []
@@ -109,11 +83,14 @@ class DefaultRuntimeFactory:
     def close(self) -> None:
         with self._lock:
             self._closed = True
+            release_services = list(self._prowlarr.values())
             clients = self._http_clients
             self._http_clients = []
             self._prowlarr.clear()
             self._metadata.clear()
             self._download_clients.clear()
+        for service in reversed(release_services):
+            service.close()
         self._close_clients(clients)
 
     def metadata_provider(self, key: str) -> RuntimeResult[MetadataProvider]:
@@ -160,31 +137,27 @@ class DefaultRuntimeFactory:
             self._close_clients(owned_clients)
             return RuntimeResult(None, "metadata_provider_configuration_invalid")
 
-    def prowlarr(self) -> RuntimeResult[ProwlarrAdapter]:
+    def prowlarr(self) -> RuntimeResult[ReleaseSelectionService]:
         with self._lock:
             if self._closed:
                 return RuntimeResult(None, "integration_runtime_closed")
         owned_clients: list[httpx.Client] = []
+        provider = None
         try:
             environment = resolve_environment(PROWLARR_INTEGRATION.environment, self._environment)
-            parsed = ProwlarrSettings(
-                base_url=HttpUrl(environment["PROWLARR_URL"]),
-                api_key_ref="env:PROWLARR_API_KEY",
-            )
             key = ("environment", "prowlarr")
             with self._lock:
                 existing = self._prowlarr.get(key)
             if existing is not None:
                 return RuntimeResult(existing)
-            client = self._attempt_client_factory(owned_clients)()
-            transport = HttpxProwlarrTransport(
-                str(parsed.base_url),
-                parsed.api_key_ref,
-                self._secret_resolver,
-                client,
+            registered = prowlarr_registration(
+                client_factory=self._attempt_client_factory(owned_clients)
             )
-            transport.validate()
-            adapter = ProwlarrAdapter(transport, SearchResultCache())
+            provider = registered.build(
+                resolve_module_environment(registered.manifest, environment)
+            )
+            provider.validate()
+            adapter = ReleaseSelectionService(provider, ReleaseSelectionCache())
             with self._lock:
                 if self._closed:
                     existing = None
@@ -194,18 +167,20 @@ class DefaultRuntimeFactory:
                     existing = self._prowlarr.get(key)
                 if not runtime_closed and existing is None:
                     self._prowlarr[key] = adapter
-                    self._http_clients.extend(owned_clients)
                     return RuntimeResult(adapter)
             if runtime_closed:
-                self._close_clients(owned_clients)
+                adapter.close()
                 return RuntimeResult(None, "integration_runtime_closed")
-            self._close_clients(owned_clients)
+            adapter.close()
             return RuntimeResult(existing)
         except EnvironmentConfigurationError as error:
             self._close_clients(owned_clients)
             return RuntimeResult(None, error.code, error.missing)
         except Exception:
-            self._close_clients(owned_clients)
+            if provider is not None:
+                provider.close()
+            else:
+                self._close_clients(owned_clients)
             return RuntimeResult(None, "prowlarr_configuration_invalid")
 
     def download_client(self, instance: DownloadClientInstance) -> RuntimeResult[DownloadClient]:
@@ -298,7 +273,7 @@ class RuntimeResolver:
         *,
         factory: RuntimeFactory | None,
         providers: Mapping[str, MetadataProvider],
-        prowlarr: ProwlarrAdapter | None,
+        prowlarr: ReleaseSelectionService | None,
         client_loader: ClientLoader | None,
     ) -> None:
         self._factory = factory
@@ -342,7 +317,7 @@ class RuntimeResolver:
                 attributions.append(provider.attribution())
         return attributions
 
-    def prowlarr(self) -> RuntimeResult[ProwlarrAdapter]:
+    def prowlarr(self) -> RuntimeResult[ReleaseSelectionService]:
         if self._factory is None:
             return RuntimeResult(
                 self._prowlarr,

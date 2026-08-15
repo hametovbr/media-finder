@@ -4,12 +4,19 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from media_finder_sdk import (
+    MagnetArtifact,
+    PrivateReleaseSelection,
+    ReleaseCandidate,
+    ReleaseSearchQuery,
+    SafeReleaseSnapshot,
+)
 from sqlalchemy import func, select
 
 from media_finder.db import migrate_to_head, session_factory
 from media_finder.models import Acquisition, DownloadClientInstance, MediaItem, MetadataRevision
 from media_finder.modules.registry import FIRST_PARTY_MODULES
-from media_finder.prowlarr import ProwlarrAdapter, SearchResultCache
+from media_finder.release_selection import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 from media_finder.ui import create_ui_app
 
@@ -26,20 +33,28 @@ def _token(text: str, test_id: str) -> str:
     return match.group(1)
 
 
-class FakeProwlarrTransport:
-    def search(self, query: str, filters: dict[str, str]) -> list[dict[str, object]]:
-        return [
-            {
-                "protocol": "torrent",
-                "title": f"{query}.S01",
-                "indexer": "Fixture Indexer",
-                "magnetUrl": "magnet:?xt=urn:btih:0123456789012345678901234567890123456789",
-                "guid": "fixture-release-1",
-            }
-        ]
+class FakeReleaseProvider:
+    def validate(self) -> None:
+        return None
 
-    def fetch_torrent(self, url: str) -> bytes:
-        raise AssertionError("magnet result must not fetch torrent bytes")
+    def search(self, query: ReleaseSearchQuery) -> tuple[ReleaseCandidate, ...]:
+        return (
+            ReleaseCandidate(
+                snapshot=SafeReleaseSnapshot(
+                    title=f"{query.query}.S01",
+                    indexer="Fixture Indexer",
+                    guid="fixture-release-1",
+                ),
+                selection=PrivateReleaseSelection.from_bytes(b"fixture-release"),
+            ),
+        )
+
+    def resolve(self, selection: PrivateReleaseSelection) -> MagnetArtifact:
+        assert selection.payload() == b"fixture-release"
+        return MagnetArtifact(uri="magnet:?xt=urn:btih:0123456789012345678901234567890123456789")
+
+    def close(self) -> None:
+        return None
 
 
 @pytest.fixture
@@ -52,7 +67,7 @@ def workflow_app(
     database_url = f"sqlite:///{tmp_path / 'workflow.db'}"
     migrate_to_head(database_url)
     monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long test session secret")
-    prowlarr = ProwlarrAdapter(FakeProwlarrTransport(), SearchResultCache())
+    prowlarr = ReleaseSelectionService(FakeReleaseProvider(), ReleaseSelectionCache())
     app = create_ui_app(
         database_url,
         session_secret_reference="env:MEDIA_FINDER_UI_SECRET",

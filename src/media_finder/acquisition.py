@@ -8,15 +8,18 @@ from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
 
+from media_finder_sdk import MagnetArtifact as SDKMagnetArtifact
+from media_finder_sdk import ModuleError as SDKModuleError
+from media_finder_sdk import TorrentArtifact as SDKTorrentArtifact
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import Acquisition, DownloadClientInstance, MediaItem, MetadataRevision
-from .prowlarr import ExpiredSearchToken, ProwlarrAdapter
+from .release_selection import ReleaseSelectionExpired, ReleaseSelectionService
 from .sdk.errors import ModuleError
 from .sdk.protocols import DownloadClient
-from .sdk.types import DownloadDestination
+from .sdk.types import DownloadArtifact, DownloadDestination, MagnetArtifact, TorrentArtifact
 from .system_clients import SYSTEM_QBITTORRENT_ID
 
 
@@ -43,11 +46,11 @@ class AcquisitionService:
     def __init__(
         self,
         session: Session,
-        prowlarr: ProwlarrAdapter | None,
+        releases: ReleaseSelectionService | None,
         client_loader: ClientLoader,
     ) -> None:
         self._session = session
-        self._prowlarr = prowlarr
+        self._releases = releases
         self._client_loader = client_loader
 
     def submit(self, request: AcquisitionRequest) -> Acquisition:
@@ -56,7 +59,7 @@ class AcquisitionService:
             return existing
         if request.client_instance_id != SYSTEM_QBITTORRENT_ID:
             raise ValueError("download_client_system_required")
-        if self._prowlarr is None:
+        if self._releases is None:
             raise ValueError("acquisition_unavailable")
 
         revision = self._session.get(MetadataRevision, request.metadata_revision_id)
@@ -76,7 +79,7 @@ class AcquisitionService:
         if request.destination not in {destination.key for destination in destinations}:
             raise DestinationUnavailable(destinations)
 
-        snapshot = self._prowlarr.inspect(request.release_token)
+        snapshot = self._releases.inspect(request.release_token)
         acquisition = Acquisition(
             media_item_id=item.id,
             metadata_revision_id=revision.id,
@@ -89,7 +92,9 @@ class AcquisitionService:
             indexer=snapshot.indexer,
             guid=snapshot.guid,
             infohash=snapshot.infohash,
-            source_page_url=snapshot.source_page_url,
+            source_page_url=(
+                str(snapshot.source_page_url) if snapshot.source_page_url is not None else None
+            ),
         )
         self._session.add(acquisition)
         try:
@@ -103,11 +108,13 @@ class AcquisitionService:
 
         correlation = f"mf-acq-{acquisition.id}"
         try:
-            resolved = self._prowlarr.resolve(request.release_token)
-            result = client.submit(resolved.artifact, request.destination, correlation)
-        except ExpiredSearchToken:
+            resolved = self._releases.resolve(request.release_token)
+            result = client.submit(
+                _legacy_artifact(resolved.artifact), request.destination, correlation
+            )
+        except ReleaseSelectionExpired:
             return self._transition(acquisition, "failed", "release_search_token_expired")
-        except ModuleError as error:
+        except (ModuleError, SDKModuleError) as error:
             if error.code == "submission_timeout":
                 return self._resolve_timeout(acquisition, client, correlation)
             return self._transition(acquisition, "failed", _safe_code(error.code))
@@ -196,3 +203,9 @@ def _safe_code(code: str) -> str:
     if not code or len(code) > 200 or any(character not in allowed for character in code):
         return "download_client_submission_failed"
     return code
+
+
+def _legacy_artifact(artifact: SDKMagnetArtifact | SDKTorrentArtifact) -> DownloadArtifact:
+    if isinstance(artifact, SDKMagnetArtifact):
+        return MagnetArtifact(uri=artifact.uri)
+    return TorrentArtifact(content=artifact.content())

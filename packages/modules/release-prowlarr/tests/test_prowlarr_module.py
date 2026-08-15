@@ -265,13 +265,13 @@ def test_prowlarr_registration_passes_public_conformance_and_closes_resources() 
         indexer="Fixture Torrent Indexer",
         guid="fixture-magnet-guid",
         infohash=INFOHASH,
-        source_page_url="https://indexer.example.test/releases/magnet",
+        source_page_url="https://indexer.example.test/",
     )
     assert expected[1].snapshot == SafeReleaseSnapshot(
         title="Fixture.Release.2026.Remux",
         indexer="Fixture Torrent Indexer",
         guid="fixture-torrent-guid",
-        source_page_url="https://indexer.example.test/releases/torrent",
+        source_page_url="https://indexer.example.test/",
     )
 
     assert_release_registration_conforms(
@@ -492,3 +492,49 @@ def test_prowlarr_failures_and_logs_are_secret_safe(caplog: pytest.LogCaptureFix
         assert secret not in rendered
         assert secret not in logs
     assert all(client.is_closed for client in clients.clients)
+
+
+def test_torrent_download_url_is_redacted_from_httpx_info_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="httpx")
+    clients = RecordingClientFactory()
+    provider = _module(clients).build(
+        resolve_module_environment(_module().manifest, _environment())
+    )
+
+    try:
+        torrent = provider.search(ReleaseSearchQuery(query="Fixture", limit=10))[1]
+        provider.resolve(torrent.selection)
+    finally:
+        provider.close()
+
+    assert DOWNLOAD_SECRET not in caplog.text
+    assert "passkey=" not in caplog.text
+    assert f"{BASE_URL}/download/fixture.torrent" not in caplog.text
+
+
+def test_source_page_snapshot_never_persists_untrusted_paths_or_queries() -> None:
+    opaque_path = "opaque-release-secret-1234567890"
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/api/v1/search"):
+            payload = _search_payload()
+            payload[0]["infoUrl"] = (
+                f"https://indexer.example.test/torrent/{opaque_path}?passkey={DOWNLOAD_SECRET}"
+            )
+            return httpx.Response(200, json=payload[:1])
+        return httpx.Response(200, json={})
+
+    provider = _module(RecordingClientFactory(respond)).build(
+        resolve_module_environment(_module().manifest, _environment())
+    )
+    try:
+        candidate = provider.search(ReleaseSearchQuery(query="Fixture", limit=10))[0]
+    finally:
+        provider.close()
+
+    assert str(candidate.snapshot.source_page_url) == "https://indexer.example.test/"
+    rendered = candidate.snapshot.model_dump_json()
+    assert opaque_path not in rendered
+    assert DOWNLOAD_SECRET not in rendered

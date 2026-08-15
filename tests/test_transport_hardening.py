@@ -1,4 +1,3 @@
-import logging
 import threading
 
 import httpx
@@ -9,29 +8,12 @@ from media_finder.integration_runtime import DefaultRuntimeFactory
 from media_finder.models import DownloadClientInstance
 from media_finder.modules.qbittorrent import HttpxQbittorrentTransport, QbittorrentConfig
 from media_finder.modules.registry import FIRST_PARTY_MODULES
-from media_finder.prowlarr import (
-    ExpiredSearchToken,
-    HttpxProwlarrTransport,
-    ProwlarrAdapter,
-    ProwlarrError,
-    SearchResultCache,
-)
 from media_finder.sdk.registration import (
     DownloadClientRegistration,
     MetadataProviderRegistration,
     StaticModuleRegistry,
 )
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
-
-
-def _secrets(reference: str) -> str:
-    return {
-        "env:TMDB_TOKEN": "tmdb-secret",
-        "env:PROWLARR_KEY": "prowlarr-secret",
-        "env:QB_USER": "operator",
-        "env:QB_PASS": "qb-secret",
-    }[reference]
-
 
 ENVIRONMENT = {
     "TMDB_TOKEN": "tmdb-secret",
@@ -53,7 +35,7 @@ def system_client(module_key: str = "qbittorrent") -> DownloadClientInstance:
     )
 
 
-def test_integration_base_urls_reject_secret_components_but_allow_safe_subpaths() -> None:
+def test_qbittorrent_base_urls_reject_secret_components_but_allow_safe_subpaths() -> None:
     client = httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={})))
     unsafe = (
         "https://user:password@services.example.test/app",
@@ -63,8 +45,6 @@ def test_integration_base_urls_reject_secret_components_but_allow_safe_subpaths(
         "https://services.example.test/service/%73ecret",
     )
     for value in unsafe:
-        with pytest.raises(ValueError, match="prowlarr_base_url_invalid"):
-            HttpxProwlarrTransport(value, "env:PROWLARR_KEY", _secrets, client)
         with pytest.raises(ValidationError):
             QbittorrentConfig(
                 base_url=value,
@@ -74,14 +54,8 @@ def test_integration_base_urls_reject_secret_components_but_allow_safe_subpaths(
         with pytest.raises(ValueError, match="qbittorrent_base_url_invalid"):
             HttpxQbittorrentTransport(value, client)
 
-    prowlarr = HttpxProwlarrTransport(
-        "https://services.example.test/apps/prowlarr",
-        "env:PROWLARR_KEY",
-        _secrets,
-        client,
-    )
     qb = HttpxQbittorrentTransport("https://services.example.test/apps/qb", client)
-    assert prowlarr is not None and qb is not None
+    assert qb is not None
 
 
 def test_runtime_http_sessions_are_isolated_per_service_and_qb_instance() -> None:
@@ -119,6 +93,26 @@ def test_runtime_http_sessions_are_isolated_per_service_and_qb_instance() -> Non
     assert len({id(client) for client in created}) == 3
     assert all(cookie is None for _, _, _, cookie in authentication_requests)
     factory.close()
+
+
+def test_runtime_closes_release_provider_through_its_owned_lifecycle() -> None:
+    created: list[httpx.Client] = []
+
+    def clients() -> httpx.Client:
+        client = httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={})))
+        created.append(client)
+        return client
+
+    factory = DefaultRuntimeFactory(environment=ENVIRONMENT, http_client_factory=clients)
+    service = factory.prowlarr().value
+    assert service is not None
+    provider = service._provider
+    assert provider._closed is False
+
+    factory.close()
+
+    assert provider._closed is True
+    assert len(created) == 1 and created[0].is_closed
 
 
 class EmptyIntegrationConfig(BaseModel):
@@ -316,65 +310,3 @@ def test_factory_close_during_build_cannot_repopulate_caches_or_leak_client() ->
     assert len(created) == 1 and created[0].is_closed
     assert factory._http_clients == []
     assert factory._metadata == {}
-
-
-def test_prowlarr_bounds_json_result_count_and_torrent_bytes_with_one_use_token() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/api/v1/search"):
-            mode = request.url.params.get("query")
-            if mode == "large-json":
-                return httpx.Response(200, content=b"[" + b" " * 300 + b"]")
-            if mode == "many-results":
-                return httpx.Response(200, json=[{"protocol": "torrent"}] * 3)
-            return httpx.Response(
-                200,
-                json=[
-                    {
-                        "protocol": "torrent",
-                        "title": "Oversized artifact",
-                        "indexer": "Fixture",
-                        "downloadUrl": "https://services.example.test/prowlarr/download/passkey-value",
-                    }
-                ],
-            )
-        return httpx.Response(200, content=b"x" * 17)
-
-    transport = HttpxProwlarrTransport(
-        "https://services.example.test/prowlarr",
-        "env:PROWLARR_KEY",
-        _secrets,
-        httpx.Client(transport=httpx.MockTransport(handler)),
-        max_json_bytes=256,
-        max_search_results=2,
-        max_torrent_bytes=16,
-    )
-    with pytest.raises(ProwlarrError, match="prowlarr_response_too_large"):
-        transport.search("large-json", {})
-    with pytest.raises(ProwlarrError, match="prowlarr_result_limit_exceeded"):
-        transport.search("many-results", {})
-
-    adapter = ProwlarrAdapter(transport, SearchResultCache())
-    token = adapter.search("torrent", {})[0].token
-    with pytest.raises(ProwlarrError, match="prowlarr_torrent_too_large"):
-        adapter.resolve(token)
-    with pytest.raises(ExpiredSearchToken):
-        adapter.resolve(token)
-
-
-def test_httpx_logging_never_contains_complete_prowlarr_download_url_or_passkey(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    secret_url = "https://services.example.test/prowlarr/download/passkey-value?auth=never-log"
-    client = httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(500)))
-    transport = HttpxProwlarrTransport(
-        "https://services.example.test/prowlarr", "env:PROWLARR_KEY", _secrets, client
-    )
-    caplog.set_level(logging.DEBUG, logger="httpx")
-
-    with pytest.raises(ProwlarrError):
-        transport.fetch_torrent(secret_url)
-
-    rendered = "\n".join(record.getMessage() for record in caplog.records)
-    assert secret_url not in rendered
-    assert "passkey-value" not in rendered
-    assert "never-log" not in rendered

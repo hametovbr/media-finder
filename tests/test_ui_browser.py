@@ -15,6 +15,13 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, Response
 from media_finder_builtin_ui import create_builtin_ui
 from media_finder_builtin_ui.fake import FakeBrowserSecurity, FakeControlGateway
+from media_finder_sdk import (
+    MagnetArtifact,
+    PrivateReleaseSelection,
+    ReleaseCandidate,
+    ReleaseSearchQuery,
+    SafeReleaseSnapshot,
+)
 from playwright.sync_api import Browser, Page, Playwright, sync_playwright
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -25,7 +32,7 @@ from media_finder.db import migrate_to_head, session_factory
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.models import Acquisition, DownloadClientInstance, MediaItem
 from media_finder.modules.registry import FIRST_PARTY_MODULES
-from media_finder.prowlarr import ProwlarrAdapter, SearchResultCache
+from media_finder.release_selection import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder.sdk.types import (
     Attribution,
     CorrelationResult,
@@ -111,20 +118,28 @@ class BrowserProvider:
         return None
 
 
-class BrowserProwlarrTransport:
-    def search(self, query: str, filters: dict[str, str]) -> list[dict[str, object]]:
-        return [
-            {
-                "protocol": "torrent",
-                "title": f"{query}.Release",
-                "indexer": "Browser Indexer",
-                "magnetUrl": "magnet:?xt=urn:btih:0123456789012345678901234567890123456789",
-                "guid": "browser-release",
-            }
-        ]
+class BrowserReleaseProvider:
+    def validate(self) -> None:
+        return None
 
-    def fetch_torrent(self, url: str) -> bytes:
-        raise AssertionError("the browser fixture uses a magnet")
+    def search(self, query: ReleaseSearchQuery) -> tuple[ReleaseCandidate, ...]:
+        return (
+            ReleaseCandidate(
+                snapshot=SafeReleaseSnapshot(
+                    title=f"{query.query}.Release",
+                    indexer="Browser Indexer",
+                    guid="browser-release",
+                ),
+                selection=PrivateReleaseSelection.from_bytes(b"browser-release"),
+            ),
+        )
+
+    def resolve(self, selection: PrivateReleaseSelection) -> MagnetArtifact:
+        assert selection.payload() == b"browser-release"
+        return MagnetArtifact(uri="magnet:?xt=urn:btih:0123456789012345678901234567890123456789")
+
+    def close(self) -> None:
+        return None
 
 
 class BrowserClient:
@@ -210,7 +225,7 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             "provider-b": BrowserProvider("provider-b"),
             "manual": FIRST_PARTY_MODULES.retention_providers()["manual"],
         },
-        prowlarr=ProwlarrAdapter(BrowserProwlarrTransport(), SearchResultCache()),
+        prowlarr=ReleaseSelectionService(BrowserReleaseProvider(), ReleaseSelectionCache()),
         client_loader=load_client,
     )
     app.state.browser_clients = clients

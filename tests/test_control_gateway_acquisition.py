@@ -3,37 +3,54 @@ import asyncio
 import pytest
 from media_finder_control import ControlFailure
 from media_finder_control.models import AcquisitionSubmissionRequest, ReleaseSearchRequest
+from media_finder_sdk import (
+    MagnetArtifact,
+    PrivateReleaseSelection,
+    ReleaseCandidate,
+    ReleaseSearchFilter,
+    ReleaseSearchQuery,
+    SafeReleaseSnapshot,
+)
 from sqlalchemy.orm import Session, sessionmaker
 
 from media_finder.control_gateway import BackendControlGateway
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.integration_runtime import RuntimeResolver
 from media_finder.models import Acquisition, DownloadClientInstance
-from media_finder.prowlarr import ProwlarrAdapter, SearchResultCache
+from media_finder.release_selection import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID, ensure_system_qbittorrent
 
 
-class TorrentSearchTransport:
-    def search(self, query: str, filters: dict[str, str]) -> list[dict[str, object]]:
-        assert query == "Example"
-        assert filters == {"indexerIds": "1,2"}
-        return [
-            {
-                "protocol": "torrent",
-                "title": "Example.Release.1080p",
-                "indexer": "Fixture",
-                "magnetUrl": "magnet:?xt=urn:btih:abc",
-            },
-            {
-                "protocol": "usenet",
-                "title": "Ignored",
-                "downloadUrl": "https://example.test/ignored",
-            },
-        ]
+class FixtureReleaseProvider:
+    def validate(self) -> None:
+        return None
 
-    def fetch_torrent(self, url: str) -> bytes:
-        raise AssertionError(url)
+    def search(self, query: ReleaseSearchQuery) -> tuple[ReleaseCandidate, ...]:
+        assert query == ReleaseSearchQuery(
+            query="Example",
+            filters=(ReleaseSearchFilter(key="indexer-ids", values=("1", "2")),),
+        )
+        return (
+            ReleaseCandidate(
+                snapshot=SafeReleaseSnapshot(
+                    title="Example.Release.1080p",
+                    indexer="Fixture",
+                ),
+                selection=PrivateReleaseSelection.from_bytes(b"fixture-release"),
+            ),
+        )
+
+    def resolve(self, selection: PrivateReleaseSelection) -> MagnetArtifact:
+        assert selection.payload() == b"fixture-release"
+        return MagnetArtifact(uri="magnet:?xt=urn:btih:abc")
+
+    def close(self) -> None:
+        return None
+
+
+def _release_selection() -> ReleaseSelectionService:
+    return ReleaseSelectionService(FixtureReleaseProvider(), ReleaseSelectionCache())
 
 
 def _item(database: Session):
@@ -55,7 +72,7 @@ def _item(database: Session):
 def _gateway(
     database: Session,
     *,
-    prowlarr: ProwlarrAdapter | None,
+    prowlarr: ReleaseSelectionService | None,
     client,
 ) -> BackendControlGateway:
     sessions = sessionmaker(bind=database.get_bind(), expire_on_commit=False)
@@ -77,7 +94,7 @@ def test_release_search_destinations_and_idempotent_submission(
 ) -> None:
     item = _item(database)
     ensure_system_qbittorrent(database)
-    prowlarr = ProwlarrAdapter(TorrentSearchTransport(), SearchResultCache())
+    prowlarr = _release_selection()
     gateway = _gateway(database, prowlarr=prowlarr, client=fake_client)
 
     async def scenario() -> None:
@@ -108,7 +125,7 @@ def test_stale_destination_returns_current_values_without_consuming_release(
 ) -> None:
     item = _item(database)
     ensure_system_qbittorrent(database)
-    prowlarr = ProwlarrAdapter(TorrentSearchTransport(), SearchResultCache())
+    prowlarr = _release_selection()
     gateway = _gateway(database, prowlarr=prowlarr, client=fake_client)
 
     async def scenario() -> None:

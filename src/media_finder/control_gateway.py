@@ -53,7 +53,8 @@ from media_finder_control.models import (
 from media_finder_control.models import (
     DownloadDestination as ControlDestination,
 )
-from media_finder_sdk import MetadataEditor
+from media_finder_sdk import MetadataEditor, ReleaseSearchFilter
+from media_finder_sdk import ReleaseSearchQuery as ModuleReleaseSearchQuery
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -640,12 +641,19 @@ class BackendControlGateway:
                     status=503,
                 )
             filters = (
-                {"indexerIds": ",".join(str(value) for value in request.indexer_ids)}
+                (
+                    ReleaseSearchFilter(
+                        key="indexer-ids",
+                        values=tuple(str(value) for value in request.indexer_ids),
+                    ),
+                )
                 if request.indexer_ids
-                else {}
+                else ()
             )
             try:
-                results = resolved.value.search(request.query, filters)
+                results = resolved.value.search(
+                    ModuleReleaseSearchQuery(query=request.query, filters=filters)
+                )
             except Exception as error:
                 raise self._failure_for(error, "prowlarr_search_failed") from None
             return tuple(

@@ -4,11 +4,18 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from media_finder_sdk import (
+    MagnetArtifact,
+    PrivateReleaseSelection,
+    ReleaseCandidate,
+    ReleaseSearchQuery,
+    SafeReleaseSnapshot,
+)
 from sqlalchemy import select
 
 from media_finder.db import migrate_to_head, session_factory
 from media_finder.models import Acquisition, MediaItem
-from media_finder.prowlarr import ProwlarrAdapter, SearchResultCache
+from media_finder.release_selection import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder.sdk.types import CorrelationResult, DownloadDestination, SubmissionResult
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 from media_finder.ui import create_ui_app
@@ -26,19 +33,24 @@ def _value(text: str, test_id: str) -> str:
     return match.group(1)
 
 
-class FakeProwlarrTransport:
-    def search(self, query: str, filters: dict[str, str]) -> list[dict[str, object]]:
-        return [
-            {
-                "protocol": "torrent",
-                "title": query,
-                "indexer": "Fixture Indexer",
-                "magnetUrl": "magnet:?xt=urn:btih:0123456789012345678901234567890123456789",
-            }
-        ]
+class FakeReleaseProvider:
+    def validate(self) -> None:
+        return None
 
-    def fetch_torrent(self, url: str) -> bytes:
-        raise AssertionError("magnet result must not fetch torrent bytes")
+    def search(self, query: ReleaseSearchQuery) -> tuple[ReleaseCandidate, ...]:
+        return (
+            ReleaseCandidate(
+                snapshot=SafeReleaseSnapshot(title=query.query, indexer="Fixture Indexer"),
+                selection=PrivateReleaseSelection.from_bytes(b"fixture-release"),
+            ),
+        )
+
+    def resolve(self, selection: PrivateReleaseSelection) -> MagnetArtifact:
+        assert selection.payload() == b"fixture-release"
+        return MagnetArtifact(uri="magnet:?xt=urn:btih:0123456789012345678901234567890123456789")
+
+    def close(self) -> None:
+        return None
 
 
 class MutableClient:
@@ -70,7 +82,7 @@ def release_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     app = create_ui_app(
         database_url,
         session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
-        prowlarr=ProwlarrAdapter(FakeProwlarrTransport(), SearchResultCache()),
+        prowlarr=ReleaseSelectionService(FakeReleaseProvider(), ReleaseSelectionCache()),
         client_loader=lambda _: qbittorrent,
     )
     app.state.fake_client = qbittorrent

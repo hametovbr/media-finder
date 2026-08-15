@@ -4,6 +4,19 @@ from uuid import UUID
 
 import httpx
 import pytest
+from media_finder_sdk import (
+    MagnetArtifact as SDKMagnetArtifact,
+)
+from media_finder_sdk import (
+    ModuleError as SDKModuleError,
+)
+from media_finder_sdk import (
+    ModuleFailureCategory,
+    PrivateReleaseSelection,
+    ReleaseCandidate,
+    ReleaseSearchQuery,
+    SafeReleaseSnapshot,
+)
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,7 +28,11 @@ from media_finder.acquisition import (
 from media_finder.domain import CatalogService
 from media_finder.models import Acquisition, DownloadClientInstance, MetadataRevision
 from media_finder.modules.qbittorrent import QbittorrentClient, QbittorrentConfig
-from media_finder.prowlarr import ExpiredSearchToken, ProwlarrAdapter, SearchResultCache
+from media_finder.release_selection import (
+    ReleaseSelectionCache,
+    ReleaseSelectionExpired,
+    ReleaseSelectionService,
+)
 from media_finder.sdk.errors import ModuleError
 from media_finder.sdk.types import (
     CorrelationResult,
@@ -28,25 +45,40 @@ from media_finder.sdk.types import (
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 
 
-class SearchTransport:
-    def search(self, query: str, filters: dict[str, str]) -> list[dict[str, object]]:
-        return [
-            {
-                "protocol": "torrent",
-                "title": "Fixture.Release.2026",
-                "indexer": "Fixture Indexer",
-                "magnetUrl": "magnet:?xt=urn:btih:" + "a" * 40,
-                "guid": "fixture:release-1",
-                "guidIsPublic": True,
-                "infoHash": "a" * 40,
-                "infoUrl": "https://indexer.example/releases/1?passkey=never-store",
-                "publicRoutePath": True,
-                "normalizedPublicPath": "/releases/1",
-            }
-        ]
+class SearchProvider:
+    def validate(self) -> None:
+        return None
 
-    def fetch_torrent(self, url: str) -> bytes:
-        raise AssertionError("magnet result must not fetch a torrent file")
+    def search(self, query: ReleaseSearchQuery) -> tuple[ReleaseCandidate, ...]:
+        assert query.query == "Fixture"
+        return (
+            ReleaseCandidate(
+                snapshot=SafeReleaseSnapshot(
+                    title="Fixture.Release.2026",
+                    indexer="Fixture Indexer",
+                    guid="fixture:release-1",
+                    infohash="a" * 40,
+                    source_page_url="https://indexer.example/releases/1",
+                ),
+                selection=PrivateReleaseSelection.from_bytes(b"fixture-selection"),
+            ),
+        )
+
+    def resolve(self, selection: PrivateReleaseSelection) -> SDKMagnetArtifact:
+        assert selection.payload() == b"fixture-selection"
+        return SDKMagnetArtifact(uri="magnet:?xt=urn:btih:" + "a" * 40)
+
+    def close(self) -> None:
+        return None
+
+
+class FailingResolveProvider(SearchProvider):
+    def resolve(self, selection: PrivateReleaseSelection) -> SDKMagnetArtifact:
+        del selection
+        raise SDKModuleError(
+            category=ModuleFailureCategory.LIMIT_EXCEEDED,
+            code="release_torrent_too_large",
+        )
 
 
 class AcceptingClient:
@@ -86,10 +118,32 @@ def seed(database: Session) -> tuple[str, str, DownloadClientInstance]:
     return item.id, revision.id, instance
 
 
-def search_token() -> tuple[ProwlarrAdapter, str]:
-    prowlarr = ProwlarrAdapter(SearchTransport(), SearchResultCache())
-    token = prowlarr.search("Fixture", {})[0].token
-    return prowlarr, token
+def search_token() -> tuple[ReleaseSelectionService, str]:
+    releases = ReleaseSelectionService(SearchProvider(), ReleaseSelectionCache())
+    token = releases.search(ReleaseSearchQuery(query="Fixture"))[0].token
+    return releases, token
+
+
+def test_sdk_release_failure_preserves_stable_module_code(database: Session) -> None:
+    item_id, revision_id, instance = seed(database)
+    releases = ReleaseSelectionService(FailingResolveProvider(), ReleaseSelectionCache())
+    token = releases.search(ReleaseSearchQuery(query="Fixture"))[0].token
+    client = AcceptingClient(database)
+
+    acquisition = AcquisitionService(database, releases, lambda stored: client).submit(
+        AcquisitionRequest(
+            media_item_id=item_id,
+            metadata_revision_id=revision_id,
+            client_instance_id=instance.id,
+            destination="anime",
+            release_token=token,
+            idempotency_key="sdk-release-failure",
+        )
+    )
+
+    assert acquisition.status == "failed"
+    assert acquisition.failure_code == "release_torrent_too_large"
+    assert client.submissions == []
 
 
 def test_submission_is_pending_first_exactly_correlated_and_idempotent(database: Session) -> None:
@@ -117,7 +171,7 @@ def test_submission_is_pending_first_exactly_correlated_and_idempotent(database:
     assert first.release_title == "Fixture.Release.2026"
     assert first.guid == "fixture:release-1"
     assert first.infohash == "a" * 40
-    assert first.source_page_url == "https://indexer.example"
+    assert first.source_page_url == "https://indexer.example/releases/1"
     assert first.external_task_id == "qb-task-1"
     assert client.submissions == [("anime", f"mf-acq-{first.id}")]
 
@@ -264,7 +318,7 @@ def test_failed_retry_requires_a_fresh_selection_and_creates_a_new_uuid(
     )
     assert first.status == "failed"
 
-    with pytest.raises(ExpiredSearchToken):
+    with pytest.raises(ReleaseSelectionExpired):
         service.submit(
             AcquisitionRequest(
                 media_item_id=item_id,
@@ -276,7 +330,7 @@ def test_failed_retry_requires_a_fresh_selection_and_creates_a_new_uuid(
             )
         )
 
-    second_token = prowlarr.search("Fixture", {})[0].token
+    second_token = prowlarr.search(ReleaseSearchQuery(query="Fixture"))[0].token
     client.lookup = "found"
     second = service.submit(
         AcquisitionRequest(
