@@ -12,7 +12,7 @@
     "py:lint": "uv run ruff check .",
     "py:type": "uv run mypy",
     "py:test": "uv run pytest",
-    "spec:validate": "openspec validate bootstrap-media-finder --strict",
+    "spec:validate": "openspec validate --all --strict",
     "spec:list": "openspec list"
   },
   "devDependencies": {
