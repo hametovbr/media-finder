@@ -1,3 +1,5 @@
+import traceback
+
 import httpx
 import pytest
 from pydantic import ValidationError
@@ -18,11 +20,17 @@ class FakeQbittorrentTransport:
         self.submissions: list[tuple[str, object, str, str]] = []
         self.fail_with: Exception | None = None
         self.lookup_failure: Exception | None = None
+        self.auth_failure: Exception | None = None
+        self.destination_failure: Exception | None = None
 
     def authenticate(self, username: str, password: str) -> None:
+        if self.auth_failure:
+            raise self.auth_failure
         self.auth = (username, password)
 
     def list_categories(self) -> dict[str, str]:
+        if self.destination_failure:
+            raise self.destination_failure
         return {"manual-radarr": "/downloads/movies", "anime": "/downloads/anime"}
 
     def add_magnet(self, uri: str, category: str, tag: str) -> str:
@@ -136,6 +144,48 @@ def test_qbittorrent_timeout_and_lookup_failures_are_safe_and_unambiguous() -> N
         client.find_by_correlation("mf-acq-timeout")
     assert inconclusive.value.code == "correlation_lookup_inconclusive"
     assert "credential" not in str(inconclusive.value)
+
+
+def test_httpx_timeout_is_ambiguous_and_all_transport_errors_suppress_raw_causes() -> None:
+    transport = FakeQbittorrentTransport()
+    client, _ = build_client(transport)
+
+    transport.fail_with = httpx.ReadTimeout("passkey=raw-secret")
+    with pytest.raises(ModuleError) as timed_out:
+        client.submit(MagnetArtifact(uri="magnet:?xt=secret"), "anime", "mf-acq-httpx")
+    assert timed_out.value.code == "submission_timeout"
+    assert timed_out.value.__cause__ is None
+    assert "raw-secret" not in "".join(traceback.format_exception(timed_out.value))
+
+    transport.fail_with = RuntimeError("credential=raw-secret")
+    with pytest.raises(ModuleError) as failed:
+        client.submit(MagnetArtifact(uri="magnet:?xt=secret"), "anime", "mf-acq-safe")
+    assert failed.value.code == "download_client_submission_failed"
+    assert failed.value.__cause__ is None
+    assert "raw-secret" not in "".join(traceback.format_exception(failed.value))
+
+    transport.lookup_failure = httpx.ReadTimeout("token=raw-secret")
+    with pytest.raises(ModuleError) as lookup:
+        client.find_by_correlation("mf-acq-httpx")
+    assert lookup.value.code == "correlation_lookup_inconclusive"
+    assert lookup.value.__cause__ is None
+    assert "raw-secret" not in "".join(traceback.format_exception(lookup.value))
+
+    transport.lookup_failure = None
+    transport.auth_failure = RuntimeError("password=raw-secret")
+    with pytest.raises(ModuleError) as auth:
+        client.validate_config()
+    assert auth.value.code == "download_client_authentication_failed"
+    assert auth.value.__cause__ is None
+    assert "raw-secret" not in "".join(traceback.format_exception(auth.value))
+
+    transport.auth_failure = None
+    transport.destination_failure = RuntimeError("api_key=raw-secret")
+    with pytest.raises(ModuleError) as destinations:
+        client.list_destinations()
+    assert destinations.value.code == "download_client_destinations_unavailable"
+    assert destinations.value.__cause__ is None
+    assert "raw-secret" not in "".join(traceback.format_exception(destinations.value))
 
 
 def test_http_transport_uses_qbittorrent_web_api_fields() -> None:

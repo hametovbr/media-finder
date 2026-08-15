@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import Acquisition, DownloadClientInstance, MediaItem, MetadataRevision
+from .modules.registry import normalize_download_client_config
 from .prowlarr import ExpiredSearchToken, ProwlarrAdapter
 from .sdk.errors import ModuleError
 from .sdk.protocols import DownloadClient
@@ -47,11 +48,7 @@ def create_download_client_instance(
 ) -> DownloadClientInstance:
     """Persist only generic values and secret references, never literal secrets."""
 
-    safe_config = dict(config_payload)
-    for key, value in safe_config.items():
-        secret_field = any(marker in key.casefold() for marker in ("password", "secret", "token"))
-        if secret_field and (not isinstance(value, str) or not value.startswith("env:")):
-            raise ValueError("download_client_secret_reference_required")
+    safe_config = normalize_download_client_config(module_key, dict(config_payload))
     instance = DownloadClientInstance(
         name=name.strip(), module_key=module_key, config_payload=safe_config
     )

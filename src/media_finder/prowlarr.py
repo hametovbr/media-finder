@@ -55,7 +55,11 @@ class HttpxProwlarrTransport:
     ) -> None:
         if not api_key_ref.startswith("env:"):
             raise ValueError("prowlarr_api_key_reference_required")
+        origin = _authenticated_origin(base_url)
+        if origin is None:
+            raise ValueError("prowlarr_base_url_invalid")
         self._base_url = base_url.rstrip("/")
+        self._origin = origin
         self._api_key_ref = api_key_ref
         self._secret_resolver = secret_resolver
         self._client = client
@@ -67,7 +71,10 @@ class HttpxProwlarrTransport:
                 f"{self._base_url}/api/v1/search",
                 params=params,
                 headers=self._headers(),
+                follow_redirects=False,
             )
+            if response.is_redirect:
+                raise ProwlarrError("prowlarr_search_failed")
             response.raise_for_status()
             payload = response.json()
         except Exception:
@@ -77,8 +84,12 @@ class HttpxProwlarrTransport:
         return [dict(item) for item in payload if isinstance(item, dict)]
 
     def fetch_torrent(self, url: str) -> bytes:
+        if _authenticated_origin(url) != self._origin:
+            raise ProwlarrError("prowlarr_download_origin_rejected") from None
         try:
-            response = self._client.get(url, headers=self._headers())
+            response = self._client.get(url, headers=self._headers(), follow_redirects=False)
+            if response.is_redirect:
+                raise ProwlarrError("prowlarr_download_failed")
             response.raise_for_status()
             return response.content
         except Exception:
@@ -90,6 +101,22 @@ class HttpxProwlarrTransport:
         except Exception:
             raise ProwlarrError("prowlarr_configuration_invalid") from None
         return {"X-Api-Key": api_key}
+
+
+def _authenticated_origin(value: str) -> tuple[str, str, int] | None:
+    try:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            return None
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError:
+        return None
+    return parsed.scheme, parsed.hostname.casefold(), port
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,20 +258,10 @@ class ProwlarrAdapter:
 
 def _snapshot(raw: Mapping[str, object]) -> ReleaseSnapshot:
     guid_value = _string(raw.get("guid"))
-    guid = (
-        guid_value
-        if raw.get("guidIsPublic") is True
-        and guid_value is not None
-        and SAFE_GUID.fullmatch(guid_value)
-        else None
-    )
+    guid = _classify_guid(guid_value)
     hash_value = _string(raw.get("infoHash"))
     infohash = hash_value.casefold() if hash_value and INFOHASH.fullmatch(hash_value) else None
-    source_page_url = _sanitize_public_page(
-        _string(raw.get("infoUrl")),
-        normalized_path=_string(raw.get("normalizedPublicPath")),
-        path_is_public=raw.get("publicRoutePath") is True,
-    )
+    source_page_url = _sanitize_public_page(_string(raw.get("infoUrl")))
     return ReleaseSnapshot(
         title=(_string(raw.get("title")) or "Untitled release")[:1000],
         indexer=(_string(raw.get("indexer")) or "Unknown indexer")[:300],
@@ -254,9 +271,15 @@ def _snapshot(raw: Mapping[str, object]) -> ReleaseSnapshot:
     )
 
 
-def _sanitize_public_page(
-    value: str | None, *, normalized_path: str | None, path_is_public: bool
-) -> str | None:
+def _classify_guid(value: str | None) -> str | None:
+    if value is None or SAFE_GUID.fullmatch(value) is None:
+        return None
+    if SUSPECT_SECRET_SEGMENT.fullmatch(value):
+        return None
+    return value
+
+
+def _sanitize_public_page(value: str | None) -> str | None:
     if not value:
         return None
     try:
@@ -269,20 +292,14 @@ def _sanitize_public_page(
         return None
     netloc = f"{host}:{port}" if port is not None else host
     origin = urlunsplit((parsed.scheme, netloc, "", "", ""))
-    if not path_is_public or not normalized_path:
-        return origin
-    segments = [segment for segment in normalized_path.split("/") if segment]
+    segments = [segment for segment in parsed.path.split("/") if segment]
     if any(
         segment.casefold() in DOWNLOAD_ROUTE_SEGMENTS
         or any(marker in segment.casefold() for marker in SECRET_MARKERS)
         for segment in segments
     ):
         return None
-    if not normalized_path.startswith("/") or any(
-        segment in {".", ".."} or SUSPECT_SECRET_SEGMENT.fullmatch(segment) for segment in segments
-    ):
-        return origin
-    return urlunsplit((parsed.scheme, netloc, normalized_path, "", ""))
+    return origin
 
 
 def _public_host(host: str) -> bool:

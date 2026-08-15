@@ -8,6 +8,7 @@ from media_finder.prowlarr import (
     ExpiredSearchToken,
     HttpxProwlarrTransport,
     ProwlarrAdapter,
+    ProwlarrError,
     SearchResultCache,
 )
 from media_finder.sdk.types import MagnetArtifact, TorrentArtifact
@@ -80,7 +81,7 @@ def test_prowlarr_results_are_torrent_only_ephemeral_and_resolve_in_memory(
     assert results[0].snapshot.source_page_url == "https://example.test"
     assert results[1].snapshot.guid is None
     assert results[1].snapshot.infohash is None
-    assert results[1].snapshot.source_page_url == "https://example.test/public/release/43"
+    assert results[1].snapshot.source_page_url == "https://example.test"
 
     magnet = adapter.resolve(results[0].token)
     torrent = adapter.resolve(results[1].token)
@@ -152,7 +153,7 @@ def test_release_snapshot_rejects_download_routes_and_secret_bearing_identifiers
     assert first.snapshot.source_page_url is None
     assert second.snapshot.guid is None
     assert second.snapshot.infohash == "c" * 40
-    assert second.snapshot.source_page_url == "https://example.test"
+    assert second.snapshot.source_page_url is None
     captured = caplog.text.casefold()
     assert "password" not in captured
     assert "never-log" not in captured
@@ -197,3 +198,88 @@ def test_http_transport_uses_prowlarr_api_without_exposing_key() -> None:
     assert search.url.params["indexerIds"] == "4"
     assert search.url.params["categories"] == "5000"
     assert "prowlarr-secret" not in str(result)
+
+
+def test_authenticated_torrent_resolution_rejects_every_cross_origin_variant(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, content=b"must-not-be-fetched")
+
+    native = HttpxProwlarrTransport(
+        "https://prowlarr.example.test:9696",
+        "env:PROWLARR_API_KEY",
+        lambda reference: "api-key-secret",
+        httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    rejected = [
+        "https://evil.example.test:9696/api/v1/download/passkey-secret",
+        "http://prowlarr.example.test:9696/api/v1/download/1",
+        "https://prowlarr.example.test/api/v1/download/1",
+        "https://prowlarr.example.test:443/api/v1/download/1",
+        "file://prowlarr.example.test:9696/api/v1/download/1",
+        "https://user:password@prowlarr.example.test:9696/api/v1/download/1",
+    ]
+
+    for url in rejected:
+        with pytest.raises(ProwlarrError) as error:
+            native.fetch_torrent(url)
+        assert str(error.value) == "prowlarr_download_origin_rejected"
+        assert error.value.__cause__ is None
+
+    assert requests == []
+    assert "api-key-secret" not in caplog.text
+    assert "passkey-secret" not in caplog.text
+    assert "password" not in caplog.text
+
+
+def test_snapshot_classification_ignores_upstream_safety_flags_and_paths() -> None:
+    class FlagTransport(FakeProwlarrTransport):
+        def search(self, query: str, filters: dict[str, str]) -> list[dict[str, object]]:
+            return [
+                {
+                    "protocol": "torrent",
+                    "title": "Flag fixture",
+                    "indexer": "Indexer",
+                    "magnetUrl": "magnet:?xt=urn:btih:" + "d" * 40,
+                    "guid": "adapter.safe:opaque-42",
+                    "guidIsPublic": False,
+                    "infoUrl": "https://example.test/releases/42?session=secret#fragment",
+                    "publicRoutePath": True,
+                    "normalizedPublicPath": "/upstream-claims-safe/42",
+                }
+            ]
+
+    result = ProwlarrAdapter(FlagTransport(), SearchResultCache()).search("Flag", {})[0]
+
+    assert result.snapshot.guid == "adapter.safe:opaque-42"
+    assert result.snapshot.source_page_url == "https://example.test"
+
+
+def test_authenticated_resolution_never_follows_a_result_controlled_redirect() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.host == "prowlarr.example.test":
+            return httpx.Response(
+                302,
+                headers={"Location": "https://evil.example.test/passkey-secret"},
+            )
+        return httpx.Response(200, content=b"credential-leak")
+
+    native = HttpxProwlarrTransport(
+        "https://prowlarr.example.test",
+        "env:PROWLARR_API_KEY",
+        lambda reference: "api-key-secret",
+        httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True),
+    )
+
+    with pytest.raises(ProwlarrError) as rejected:
+        native.fetch_torrent("https://prowlarr.example.test/api/v1/download/1")
+
+    assert str(rejected.value) == "prowlarr_download_failed"
+    assert [request.url.host for request in requests] == ["prowlarr.example.test"]

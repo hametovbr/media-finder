@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import Annotated, Protocol
 
@@ -19,6 +20,9 @@ from ...sdk.types import (
     SubmissionResult,
     TorrentArtifact,
 )
+
+ENV_REFERENCE = re.compile(r"^env:[A-Z_][A-Z0-9_]*$")
+SECRET_VALUE_MARKERS = ("credential", "passkey", "secret", "session", "token")
 
 
 class QbittorrentTransport(Protocol):
@@ -106,15 +110,19 @@ class QbittorrentConfig(BaseModel):
     @field_validator("base_url")
     @classmethod
     def require_non_secret_endpoint(cls, value: HttpUrl) -> HttpUrl:
-        if value.username or value.password or value.query or value.fragment:
+        secret_path = any(
+            marker in segment.casefold()
+            for segment in (value.path or "").split("/")
+            for marker in SECRET_VALUE_MARKERS
+        )
+        if value.username or value.password or value.query or value.fragment or secret_path:
             raise ValueError("base URL must not contain credentials, query, or fragment")
         return value
 
     @field_validator("username_ref", "password_ref")
     @classmethod
     def require_environment_reference(cls, value: str) -> str:
-        name = value.removeprefix("env:")
-        if not value.startswith("env:") or not name or not name.replace("_", "A").isalnum():
+        if ENV_REFERENCE.fullmatch(value) is None:
             raise ValueError("a valid env:NAME reference is required")
         return value
 
@@ -152,8 +160,8 @@ class QbittorrentClient:
         self._authenticate()
         try:
             categories = self._transport.list_categories()
-        except Exception as error:
-            raise _safe_error("download_client_destinations_unavailable") from error
+        except Exception:
+            raise _safe_error("download_client_destinations_unavailable") from None
         return [
             DownloadDestination(key=category, label=category)
             for category in sorted(categories)
@@ -171,12 +179,17 @@ class QbittorrentClient:
                 task_id = self._transport.add_torrent(artifact.content, destination, correlation)
             else:  # pragma: no cover - the public union is closed
                 raise _safe_error("download_artifact_unsupported")
-        except ModuleError:
-            raise
-        except TimeoutError as error:
-            raise _safe_error("submission_timeout") from error
-        except Exception as error:
-            raise _safe_error("download_client_submission_failed") from error
+        except ModuleError as error:
+            code = (
+                "download_artifact_unsupported"
+                if error.code == "download_artifact_unsupported"
+                else "download_client_submission_failed"
+            )
+            raise _safe_error(code) from None
+        except (TimeoutError, httpx.TimeoutException):
+            raise _safe_error("submission_timeout") from None
+        except Exception:
+            raise _safe_error("download_client_submission_failed") from None
         return SubmissionResult(
             accepted=True, external_task_id=task_id or None, correlation=correlation
         )
@@ -185,10 +198,10 @@ class QbittorrentClient:
         self._authenticate()
         try:
             matches = self._transport.find_by_tag(correlation)
-        except TimeoutError as error:
-            raise _safe_error("correlation_lookup_inconclusive") from error
-        except Exception as error:
-            raise _safe_error("correlation_lookup_inconclusive") from error
+        except (TimeoutError, httpx.TimeoutException):
+            raise _safe_error("correlation_lookup_inconclusive") from None
+        except Exception:
+            raise _safe_error("correlation_lookup_inconclusive") from None
         exact = [
             match
             for match in matches
@@ -209,9 +222,9 @@ class QbittorrentClient:
             password = self._secret_resolver(self._config.password_ref)
             self._transport.authenticate(username, password)
         except ModuleError:
-            raise
-        except Exception as error:
-            raise _safe_error("download_client_authentication_failed") from error
+            raise _safe_error("download_client_authentication_failed") from None
+        except Exception:
+            raise _safe_error("download_client_authentication_failed") from None
 
 
 def _safe_error(code: str) -> ModuleError:
