@@ -370,6 +370,13 @@ dependencies = [
     { name = "uvicorn" },
 ]
 
+[package.dev-dependencies]
+test = [
+    { name = "httpx" },
+    { name = "playwright" },
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "babel", specifier = ">=2.17,<3" },
@@ -377,6 +384,13 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1,<4" },
     { name = "media-finder-control-contracts", editable = "packages/control-contracts" },
     { name = "uvicorn", specifier = ">=0.35,<1" },
+]
+
+[package.metadata.requires-dev]
+test = [
+    { name = "httpx", specifier = ">=0.28,<1" },
+    { name = "playwright", specifier = ">=1.55,<2" },
+    { name = "pytest", specifier = ">=9.0.3,<10" },
 ]
 
 [[package]]

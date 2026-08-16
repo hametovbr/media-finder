@@ -196,3 +196,58 @@ def test_test_runtime_does_not_inject_workspace_source_directories() -> None:
     config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert config["tool"]["pytest"]["ini_options"].get("pythonpath", []) == []
+
+
+def test_builtin_ui_package_owns_fake_only_unit_and_browser_suites() -> None:
+    tests = PACKAGES["ui"] / "tests"
+    expected = {
+        tests / "test_fake_gateway.py",
+        tests / "test_html_contract.py",
+        tests / "test_browser.py",
+    }
+    prohibited = (
+        "alembic",
+        "media_finder_core",
+        "media_finder_server",
+        "media_finder_sdk",
+        "media_finder_metadata_manual",
+        "media_finder_metadata_tmdb",
+        "media_finder_release_prowlarr",
+        "media_finder_download_qbittorrent",
+        "sqlalchemy",
+    )
+    violations: list[str] = []
+
+    assert all(path.is_file() for path in expected)
+    for path in sorted(tests.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            imported: tuple[str, ...] = ()
+            if isinstance(node, ast.Import):
+                imported = tuple(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported = (node.module,)
+            for module in imported:
+                if any(
+                    module == prefix or module.startswith(f"{prefix}.") for prefix in prohibited
+                ):
+                    violations.append(f"{path.relative_to(ROOT)}:{node.lineno}:{module}")
+
+    assert violations == []
+
+
+def test_first_party_modules_do_not_ship_browser_assets() -> None:
+    violations = [
+        path.relative_to(ROOT).as_posix()
+        for owner in ("manual", "tmdb", "prowlarr", "qbittorrent")
+        for path in sorted(PACKAGES[owner].rglob("*"))
+        if path.is_file() and path.suffix.casefold() in {".html", ".htm", ".js", ".mjs"}
+    ]
+
+    assert violations == []
+
+
+def test_builtin_ui_does_not_duplicate_concrete_module_translation_catalogs() -> None:
+    duplicated = PACKAGES["ui"] / "src" / "media_finder_builtin_ui" / "module_translations"
+
+    assert not tuple(duplicated.rglob("*.json"))

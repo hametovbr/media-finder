@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
 
 ROOT = Path(__file__).parents[1]
 UV = Path(shutil.which("uv") or ROOT / ".venv" / "Scripts" / "uv.exe")
@@ -181,3 +182,33 @@ def test_foundation_wheel_builds_and_imports_without_source_tree_leakage(
         for expected in expected_dependencies
     )
     _assert_isolated_import(wheel, import_name, tmp_path / "installed")
+
+
+def test_builtin_ui_wheel_contains_presentation_resources_and_only_declared_boundaries(
+    tmp_path: Path,
+) -> None:
+    wheel = _build_wheel("media-finder-builtin-ui", tmp_path / "wheels")
+    requirements = tuple(wheel.metadata.get_all("Requires-Dist", []))
+    expected_members = {
+        "media_finder_builtin_ui/templates/base.html",
+        "media_finder_builtin_ui/static/ui.js",
+        "media_finder_builtin_ui/locales/en/LC_MESSAGES/messages.mo",
+        "media_finder_builtin_ui/locales/ru/LC_MESSAGES/messages.mo",
+        "media_finder_builtin_ui/py.typed",
+    }
+    forbidden = {
+        "alembic",
+        "media-finder",
+        "media-finder-core",
+        "media-finder-module-sdk",
+        "media-finder-metadata-manual",
+        "media-finder-metadata-tmdb",
+        "media-finder-release-prowlarr",
+        "media-finder-download-qbittorrent",
+        "sqlalchemy",
+    }
+
+    assert expected_members <= wheel.members
+    assert not any("/module_translations/" in member for member in wheel.members)
+    assert any(value.lower().startswith("media-finder-control-contracts") for value in requirements)
+    assert {Requirement(value).name.casefold() for value in requirements}.isdisjoint(forbidden)

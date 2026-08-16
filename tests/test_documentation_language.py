@@ -41,6 +41,18 @@ def test_developer_facing_cyrillic_is_rejected(path: Path, content: str) -> None
             '{"module.manual.name": "Вручную"}\n',
         ),
         (Path("tests/test_ui_i18n.py"), 'expected = "Разрешённый перевод"\n'),
+        (
+            Path("packages/builtin-ui/tests/test_browser.py"),
+            'expected = "Разрешённый перевод"\n',
+        ),
+        (
+            Path("packages/builtin-ui/tests/test_fake_gateway.py"),
+            'expected = "Разрешённый перевод"\n',
+        ),
+        (
+            Path("packages/builtin-ui/tests/test_html_contract.py"),
+            'expected = "Разрешённый перевод"\n',
+        ),
         (Path("tests/test_naming.py"), 'title = "Пользовательский тайтл"\n'),
         (
             Path("tests/fixtures/user_metadata/manual.json"),

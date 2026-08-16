@@ -289,6 +289,20 @@ function validateVerification(root, verify, verifyText, failures) {
       `.github/workflows/verify.yaml: missing ${job} job`,
     );
   }
+  const unitCommands = (verify.jobs?.unit?.steps ?? []).map((step) => step.run ?? "").join("\n");
+  const browserCommands = (verify.jobs?.browser?.steps ?? [])
+    .map((step) => step.run ?? "")
+    .join("\n");
+  requireValue(
+    failures,
+    unitCommands.includes("packages/builtin-ui/tests/run_isolated.py unit"),
+    ".github/workflows/verify.yaml: unit job must run the wheel-only built-in UI suite",
+  );
+  requireValue(
+    failures,
+    browserCommands.includes("packages/builtin-ui/tests/run_isolated.py browser"),
+    ".github/workflows/verify.yaml: browser job must run the wheel-only built-in UI suite",
+  );
   const testsPath = path.join(root, "tests");
   if (fs.existsSync(testsPath)) {
     for (const testFile of fs.readdirSync(testsPath).filter((name) => /^test_.*\.py$/.test(name))) {

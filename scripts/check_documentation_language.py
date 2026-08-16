@@ -36,12 +36,14 @@ TEXT_SUFFIXES = {
 }
 TEXT_FILENAMES = {".dockerignore", "Dockerfile", "LICENSE"}
 LOCALIZATION_TESTS = {
+    "packages/builtin-ui/tests/test_browser.py",
+    "packages/builtin-ui/tests/test_fake_gateway.py",
+    "packages/builtin-ui/tests/test_html_contract.py",
     "tests/core/exports/test_exports_slice.py",
     "tests/test_documentation_language.py",
     "tests/test_naming.py",
     "tests/test_nfo.py",
     "tests/test_ui_browser.py",
-    "tests/test_builtin_ui_fake_host.py",
     "tests/test_ui_catalog.py",
     "tests/test_ui_error_feedback.py",
     "tests/test_ui_foundation.py",
@@ -50,10 +52,7 @@ LOCALIZATION_TESTS = {
     "tests/test_ui_release_live_clients.py",
     "tests/test_ui_release_acceptance.py",
 }
-MODULE_TRANSLATION = re.compile(
-    r"^(packages/modules/[^/]+/src/[^/]+/translations|"
-    r"packages/builtin-ui/src/media_finder_builtin_ui/module_translations/[^/]+)/ru\.json$"
-)
+MODULE_TRANSLATION = re.compile(r"^packages/modules/[^/]+/src/[^/]+/translations/ru\.json$")
 
 Position = tuple[int, int]
 Span = tuple[Position, Position]

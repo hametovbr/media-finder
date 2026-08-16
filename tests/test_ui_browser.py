@@ -16,8 +16,7 @@ from catalog_fixtures import CatalogFixture as CatalogService
 from catalog_fixtures import RevisionInput
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, Response
-from media_finder_builtin_ui import create_builtin_ui
-from media_finder_builtin_ui.fake import FakeBrowserSecurity, FakeControlGateway
+from media_finder_builtin_ui.fake import FakeControlGateway
 from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
 from media_finder_core.catalog.persistence import MediaItemRecord as MediaItem
@@ -394,26 +393,6 @@ def unavailable_runtime_browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 @pytest.fixture
-def fake_gateway_browser_site():
-    app = create_builtin_ui(
-        gateway=FakeControlGateway(),
-        security=FakeBrowserSecurity(),
-    )
-    port = _port()
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 10
-    while not server.started and time.monotonic() < deadline:
-        time.sleep(0.02)
-    if not server.started:
-        raise RuntimeError("fake gateway browser server did not start")
-    yield BrowserSite(f"http://127.0.0.1:{port}", app, "")
-    server.should_exit = True
-    thread.join(timeout=10)
-
-
-@pytest.fixture
 def external_ui_browser_site():
     frontend = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     control = create_control_app(
@@ -515,24 +494,6 @@ def _axe(page: Page, site: BrowserSite, selector: str | None = None) -> None:
 
 def _csrf(page: Page) -> str:
     return page.locator('input[name="csrf"]').first.get_attribute("value") or ""
-
-
-def test_isolated_builtin_ui_browser_uses_only_fake_ports(
-    browser: Browser,
-    fake_gateway_browser_site: BrowserSite,
-) -> None:
-    page, failures = _strict_page(browser, locale="ru-RU")
-    page.goto(fake_gateway_browser_site.url)
-    assert page.get_by_text("Пример фильма").is_visible()
-    page.keyboard.press("Tab")
-    assert page.evaluate("document.activeElement.classList.contains('skip-link')")
-    _axe(page, fake_gateway_browser_site)
-    page.get_by_role("link", name="Добавить тайтл").click()
-    page.get_by_test_id("add-mode-manual").click()
-    assert page.get_by_test_id("manual-structured-form").is_visible()
-    _axe(page, fake_gateway_browser_site)
-    assert failures == []
-    page.context.close()
 
 
 def test_minimal_same_origin_external_ui_uses_only_control_api(

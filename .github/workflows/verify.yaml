@@ -66,6 +66,8 @@ jobs:
           version: "0.12.5"
           enable-cache: true
       - run: uv sync --frozen --all-groups
+      - name: Isolated built-in UI unit tests
+        run: uv run python packages/builtin-ui/tests/run_isolated.py unit
       - name: Unit tests
         run: >-
           uv run pytest
@@ -77,7 +79,6 @@ jobs:
           tests/test_nfo.py
           tests/test_prowlarr.py
           tests/test_control_contracts.py
-          tests/test_builtin_ui_fake_host.py
           tests/test_workspace_packages.py
 
   integration:
@@ -100,10 +101,6 @@ jobs:
           tests/test_runtime.py
           tests/test_runtime_ui_mode.py
           tests/test_system_download_client.py
-          tests/test_builtin_ui_acquisition_gateway.py
-          tests/test_builtin_ui_catalog_gateway.py
-          tests/test_builtin_ui_compatibility.py
-          tests/test_builtin_ui_metadata_gateway.py
           tests/test_control_gateway_acquisition.py
           tests/test_control_gateway_catalog.py
           tests/test_control_gateway_contract.py
@@ -162,6 +159,8 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen --all-groups
       - run: uv run playwright install --with-deps chromium
+      - name: Isolated built-in UI browser tests
+        run: uv run python packages/builtin-ui/tests/run_isolated.py browser
       - run: uv run pytest tests/test_ui_browser.py
 
   image:

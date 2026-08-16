@@ -126,6 +126,38 @@ test("verification must build both independently replaceable UI boundary wheels"
   assert.match(validateDelivery(root).join("\n"), /wheel build is missing media-finder-builtin-ui/);
 });
 
+test("verification must run built-in UI tests through the wheel-only isolation runner", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace(
+      "packages/builtin-ui/tests/run_isolated.py unit",
+      "packages/builtin-ui/tests/test_fake_gateway.py",
+    ),
+  );
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /unit job must run the wheel-only built-in UI suite/,
+  );
+});
+
+test("browser verification must run the fake gateway UI from installed wheels", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace(
+      "packages/builtin-ui/tests/run_isolated.py browser",
+      "packages/builtin-ui/tests/test_browser.py",
+    ),
+  );
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /browser job must run the wheel-only built-in UI suite/,
+  );
+});
+
 test("image smoke must prove disabled mode retains the control API", (context) => {
   const root = copyDeliveryFixture();
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));

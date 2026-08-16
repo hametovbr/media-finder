@@ -3,6 +3,7 @@ import asyncio
 from fastapi.testclient import TestClient
 from media_finder_builtin_ui.dev import create_dev_app
 from media_finder_builtin_ui.fake import FakeControlGateway
+from media_finder_builtin_ui.i18n import message_for
 from media_finder_control import AcquisitionStatus, Locale, PageRequest
 from media_finder_control.manual import ManualDocumentV1
 from media_finder_control.models import (
@@ -71,7 +72,7 @@ def test_fake_gateway_covers_critical_deterministic_states() -> None:
     asyncio.run(scenario())
 
 
-def test_dev_host_renders_without_database_or_integrations() -> None:
+def test_dev_host_renders_english_and_russian_without_backend_services() -> None:
     with TestClient(create_dev_app()) as client:
         english = client.get("/", headers={"Accept-Language": "en"})
     with TestClient(create_dev_app()) as client:
@@ -83,3 +84,5 @@ def test_dev_host_renders_without_database_or_integrations() -> None:
     assert russian.status_code == 200
     assert "Пример фильма" in russian.text
     assert "Пример сериала" in russian.text
+    assert message_for("csrf_invalid", "en") == "Request rejected."
+    assert message_for("csrf_invalid", "ru") == "Запрос отклонён."

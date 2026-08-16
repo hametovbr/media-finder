@@ -278,14 +278,3 @@ def test_kind_and_acquisition_status_are_localized(
     assert media_kind_label(kind, "en") == kind.title()
     assert media_kind_label(kind, "ru") == russian_kind
     assert acquisition_status_label(status, "ru") == russian_status
-
-
-def test_module_translation_assets_resolve_keys_with_locale_fallback() -> None:
-    from media_finder_builtin_ui.i18n import module_translation
-
-    assert module_translation("tmdb", "module.tmdb.settings.base_url", "ru") == "Базовый адрес API"
-    assert module_translation("qbittorrent", "module.qbittorrent.password_ref", "ru") == (
-        "Ссылка на переменную среды с паролем"
-    )
-    assert module_translation("manual", "module.manual.name", "en") == "Manual"
-    assert module_translation("manual", "missing.key", "ru") == "missing.key"
