@@ -588,6 +588,63 @@ def test_sqlalchemy_repository_appends_without_mutating_a_committed_revision(dat
     assert queries.list_revisions(item.id)[0].normalized.kind is MediaKind.MOVIE
 
 
+def _two_persisted_revisions(database):
+    api = _catalog_api(persistence=True)
+    repository = api.persistence.SqlAlchemyCatalogRepository(database)
+    commands = api.CatalogCommands(repository=repository, clock=lambda: NOW)
+    item = commands.get_or_create_item(
+        _identity(api, "manual", "retention-scope", MediaKind.MOVIE)
+    ).item
+    first = commands.append_revision(
+        item.id,
+        _draft(api, external_id="retention-scope", title="First"),
+    )
+    second = commands.append_revision(
+        item.id,
+        _draft(api, external_id="retention-scope", title="Second"),
+    )
+    database.commit()
+    item_record = database.get(api.persistence.MediaItemRecord, item.id)
+    first_record = database.get(api.persistence.MetadataRevisionRecord, first.id)
+    second_record = database.get(api.persistence.MetadataRevisionRecord, second.id)
+    assert item_record is not None
+    assert first_record is not None
+    assert second_record is not None
+    return api, repository, first_record, second_record
+
+
+def test_retention_purge_does_not_authorize_another_revision_in_the_same_flush(database) -> None:
+    api, repository, first, second = _two_persisted_revisions(database)
+    original_second_payload = dict(second.raw_payload or {})
+    second.raw_payload = {"title": "unauthorized same-flush mutation"}
+
+    with (
+        database.no_autoflush,
+        pytest.raises(ValueError, match="metadata revision envelope is immutable"),
+    ):
+        repository.purge_revision(first.id, NOW)
+
+    database.rollback()
+    stored_first = database.get(api.persistence.MetadataRevisionRecord, first.id)
+    stored_second = database.get(api.persistence.MetadataRevisionRecord, second.id)
+    assert stored_first is not None and stored_first.raw_payload is not None
+    assert stored_second is not None and stored_second.raw_payload == original_second_payload
+
+    stored_second.raw_payload = {"title": "unauthorized after failed purge"}
+    with pytest.raises(ValueError, match="metadata revision envelope is immutable"):
+        database.flush()
+
+
+def test_retention_purge_authorization_is_cleared_after_the_target_flush(database) -> None:
+    _api, repository, first, second = _two_persisted_revisions(database)
+
+    repository.purge_revision(first.id, NOW)
+    second.raw_payload = {"title": "unauthorized after successful purge"}
+
+    with pytest.raises(ValueError, match="metadata revision envelope is immutable"):
+        database.flush()
+
+
 def test_sqlalchemy_page_cursor_keeps_the_original_sort_key_when_title_changes(database) -> None:
     api = _catalog_api(persistence=True)
     repository = api.persistence.SqlAlchemyCatalogRepository(database)

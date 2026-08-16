@@ -40,6 +40,7 @@ from .models import (
 )
 
 JSON_MAPPING = TypeAdapter(dict[str, JsonValue])
+_RETENTION_PURGE_REVISION_KEY = "retention_purge_revision_id"
 
 
 def _new_id() -> str:
@@ -177,7 +178,8 @@ def enforce_catalog_immutability(session: Session, *_: object) -> None:
         }
         retention_fields = {"raw_payload", "normalized_payload", "effective_payload"}
         maintenance_purge = (
-            bool(session.info.get("retention_purge")) and changed <= retention_fields
+            session.info.get(_RETENTION_PURGE_REVISION_KEY) == instance.id
+            and changed <= retention_fields
         )
         if changed and not maintenance_purge:
             raise ValueError("metadata revision envelope is immutable")
@@ -293,18 +295,21 @@ class SqlAlchemyCatalogRepository:
     def purge_revision(self, revision_id: str, attempted_at: datetime) -> None:
         revision = self._require_revision(revision_id)
         item = self._require_item(revision.media_item_id)
-        self._session.info["retention_purge"] = True
-        revision.raw_payload = None
-        revision.normalized_payload = None
-        revision.effective_payload = None
-        revision.expired_at = attempted_at
-        revision.maintenance_status = "purged"
-        revision.maintenance_error_code = None
-        revision.maintenance_attempted_at = attempted_at
-        if item.current_revision_id == revision.id:
-            item.normalized_title = None
-            item.year = None
-        self._session.flush()
+        self._session.info[_RETENTION_PURGE_REVISION_KEY] = revision.id
+        try:
+            revision.raw_payload = None
+            revision.normalized_payload = None
+            revision.effective_payload = None
+            revision.expired_at = attempted_at
+            revision.maintenance_status = "purged"
+            revision.maintenance_error_code = None
+            revision.maintenance_attempted_at = attempted_at
+            if item.current_revision_id == revision.id:
+                item.normalized_title = None
+                item.year = None
+            self._session.flush()
+        finally:
+            self._session.info.pop(_RETENTION_PURGE_REVISION_KEY, None)
 
     def record_retention_refreshed(self, revision_id: str, attempted_at: datetime) -> None:
         revision = self._require_revision(revision_id)

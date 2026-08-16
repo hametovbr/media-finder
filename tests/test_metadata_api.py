@@ -5,8 +5,9 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 from media_finder.api import create_app
 from media_finder.domain import CatalogService, RevisionInput
-from media_finder.models import Acquisition, MetadataRevision
+from media_finder.models import Acquisition
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance, RetentionPolicy
+from media_finder_core.catalog.persistence import SqlAlchemyCatalogRepository
 from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
 
 
@@ -143,12 +144,7 @@ def test_expiry_is_enforced_at_boundary_before_and_after_purge(tmp_path: Path, m
 
     engine = create_database(url)
     with session_factory(engine)() as session:
-        revision = session.get(MetadataRevision, revision_id)
-        assert revision is not None
-        session.info["retention_purge"] = True
-        revision.raw_payload = None
-        revision.normalized_payload = None
-        revision.effective_payload = None
+        SqlAlchemyCatalogRepository(session).purge_revision(revision_id, expiry)
         session.commit()
     engine.dispose()
 
@@ -214,12 +210,7 @@ def test_naming_and_nfo_expiry_at_boundary_and_after_purge_for_current_and_pinne
 
     engine = create_database(url)
     with session_factory(engine)() as session:
-        revision = session.get(MetadataRevision, revision_id)
-        assert revision is not None
-        session.info["retention_purge"] = True
-        revision.raw_payload = None
-        revision.normalized_payload = None
-        revision.effective_payload = None
+        SqlAlchemyCatalogRepository(session).purge_revision(revision_id, expiry)
         session.commit()
     engine.dispose()
 

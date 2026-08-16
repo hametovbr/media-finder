@@ -6,7 +6,7 @@ from pathlib import Path
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import Engine, create_engine, event, inspect
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from alembic import command
@@ -66,9 +66,10 @@ def migrate_to_head(url: str) -> None:
     try:
         with probe.connect() as connection:
             current = MigrationContext.configure(connection).get_current_revision()
+            tables = frozenset(inspect(connection).get_table_names())
     finally:
         probe.dispose()
-    if current is not None and current != head:
+    if (current is None and tables) or (current is not None and current != head):
         raise UnsupportedMigrationState
     command.upgrade(config, "head")
 
