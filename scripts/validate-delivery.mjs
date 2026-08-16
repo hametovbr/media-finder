@@ -37,6 +37,86 @@ function normalizedExpression(value) {
   return String(value ?? "").replaceAll(/\s+/g, " ").trim();
 }
 
+const VERIFICATION_JOBS = [
+  "documentation",
+  "python",
+  "unit",
+  "integration",
+  "contract",
+  "browser",
+  "image",
+];
+
+const WORKSPACE_DISTRIBUTIONS = [
+  "media-finder",
+  "media-finder-core",
+  "media-finder-module-sdk",
+  "media-finder-control-contracts",
+  "media-finder-builtin-ui",
+  "media-finder-metadata-manual",
+  "media-finder-metadata-tmdb",
+  "media-finder-release-prowlarr",
+  "media-finder-download-qbittorrent",
+];
+
+function stepByName(job, name) {
+  return (job?.steps ?? []).find((step) => step.name === name);
+}
+
+function pytestInvocations(command) {
+  const normalized = String(command ?? "").replaceAll(/\s+/g, " ").trim();
+  return normalized
+    .split(/\s*(?:&&|\|\||;)\s*/)
+    .map((segment) =>
+      segment.match(/^(?:uv run )?(?:(?:python|python3) -m )?pytest\b(?<arguments>.*)$/),
+    )
+    .filter(Boolean)
+    .map((match) => String(match.groups?.arguments ?? ""));
+}
+
+function runsPytest(step, requiredPaths) {
+  return pytestInvocations(step?.run).some((invocationArguments) =>
+    requiredPaths.every((required) => invocationArguments.includes(required)),
+  );
+}
+
+function runsShellCommand(step, expected) {
+  return String(step?.run ?? "")
+    .split(/\s*(?:\r?\n|&&|\|\||;)\s*/)
+    .some((command) => command.trim() === expected);
+}
+
+function testPathsFromCommands(verify) {
+  const paths = new Set();
+  for (const job of Object.values(verify.jobs ?? {})) {
+    for (const step of job.steps ?? []) {
+      for (const arguments_ of pytestInvocations(step.run)) {
+        for (const match of arguments_.matchAll(/\b(?:tests|packages)\/[A-Za-z0-9_./-]+/g)) {
+          const candidate = match[0].replace(/[.,:;]+$/, "");
+          if (candidate.includes("/tests") || candidate.startsWith("tests/")) {
+            paths.add(candidate);
+          }
+        }
+      }
+    }
+  }
+  return paths;
+}
+
+function recursivelyListTests(root) {
+  const files = [];
+  function visit(directory) {
+    if (!fs.existsSync(directory)) return;
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) visit(target);
+      else if (/^test_.*\.py$/.test(entry.name)) files.push(target);
+    }
+  }
+  visit(path.join(root, "tests"));
+  return files;
+}
+
 function validateActionPins(workflows, failures) {
   const immutableAction = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[^@\s]+)?@[0-9a-f]{40}$/;
   for (const [workflowPath, workflow] of workflows) {
@@ -255,20 +335,6 @@ function validateImage(root, verify, verifyText, failures) {
       /docker exec "\$container_name" id -g/.test(smoke),
     "scripts/smoke-container.sh: image smoke test must validate UID and GID",
   );
-  const pythonSteps = verify.jobs?.python?.steps ?? [];
-  const wheelStep = pythonSteps.find((step) => step.name === "Build independent workspace wheels");
-  const wheelCommand = String(wheelStep?.run ?? "");
-  for (const packageName of [
-    "media-finder-control-contracts",
-    "media-finder-builtin-ui",
-    "media-finder",
-  ]) {
-    requireValue(
-      failures,
-      wheelCommand.includes(`--package ${packageName}`),
-      `.github/workflows/verify.yaml: wheel build is missing ${packageName}`,
-    );
-  }
   requireValue(
     failures,
     verifyText.includes("packages/builtin-ui/src/media_finder_builtin_ui/static"),
@@ -282,7 +348,18 @@ function validateVerification(root, verify, verifyText, failures) {
     Object.hasOwn(verify.on ?? {}, "workflow_call"),
     ".github/workflows/verify.yaml: reusable verification must use workflow_call",
   );
-  for (const job of ["documentation", "python", "unit", "integration", "contract", "browser", "image"]) {
+  requireValue(
+    failures,
+    verify.env?.UV_CACHE_DIR === "${{ github.workspace }}/.tools/uv-cache",
+    ".github/workflows/verify.yaml: repository-local uv cache must be seeded for offline isolation runners",
+  );
+  requireValue(
+    failures,
+    JSON.stringify(Object.keys(verify.jobs ?? {}).sort()) ===
+      JSON.stringify([...VERIFICATION_JOBS].sort()),
+    ".github/workflows/verify.yaml: exactly the seven protected job identifiers are required",
+  );
+  for (const job of VERIFICATION_JOBS) {
     requireValue(
       failures,
       Boolean(verify.jobs?.[job]),
@@ -293,40 +370,139 @@ function validateVerification(root, verify, verifyText, failures) {
   const browserCommands = (verify.jobs?.browser?.steps ?? [])
     .map((step) => step.run ?? "")
     .join("\n");
-  const contractCommands = (verify.jobs?.contract?.steps ?? [])
-    .map((step) => step.run ?? "")
-    .join("\n");
   requireValue(
     failures,
-    unitCommands.includes("packages/builtin-ui/tests/run_isolated.py unit"),
+    unitCommands
+      .split("\n")
+      .some(
+        (line) =>
+          line.trim() === "uv run python packages/builtin-ui/tests/run_isolated.py unit",
+      ),
     ".github/workflows/verify.yaml: unit job must run the wheel-only built-in UI suite",
   );
   requireValue(
     failures,
-    browserCommands.includes("packages/builtin-ui/tests/run_isolated.py browser"),
+    browserCommands
+      .split("\n")
+      .some(
+        (line) =>
+          line.trim() === "uv run python packages/builtin-ui/tests/run_isolated.py browser",
+      ),
     ".github/workflows/verify.yaml: browser job must run the wheel-only built-in UI suite",
   );
   requireValue(
     failures,
-    contractCommands.includes("tests/test_control_conformance_real.py"),
+    (verify.jobs?.contract?.steps ?? []).some((step) =>
+      runsPytest(step, ["tests/test_control_conformance_real.py"]),
+    ),
     ".github/workflows/verify.yaml: contract job must run real browser-control conformance",
   );
   requireValue(
     failures,
-    contractCommands.includes("pnpm module-conformance:test") &&
-      contractCommands.includes("pnpm module-conformance:validate"),
+    (verify.jobs?.contract?.steps ?? []).some(
+      (step) =>
+        runsShellCommand(step, "pnpm module-conformance:test") &&
+        runsShellCommand(step, "pnpm module-conformance:validate"),
+    ),
     ".github/workflows/verify.yaml: contract job must validate serialized module conformance independently",
   );
-  const testsPath = path.join(root, "tests");
-  if (fs.existsSync(testsPath)) {
-    for (const testFile of fs.readdirSync(testsPath).filter((name) => /^test_.*\.py$/.test(name))) {
-      requireValue(
-        failures,
-        verifyText.includes(`tests/${testFile}`),
-        `.github/workflows/verify.yaml: ${testFile} is absent from the categorized test jobs`,
-      );
-    }
+
+  const wheelCommand = String(
+    stepByName(verify.jobs?.python, "Build independent workspace wheels")?.run ?? "",
+  );
+  for (const distribution of WORKSPACE_DISTRIBUTIONS) {
+    requireValue(
+      failures,
+      new RegExp(`^\\s*uv build .*--package ${distribution}(?:\\s|$)`, "m").test(wheelCommand),
+      `.github/workflows/verify.yaml: wheel build is missing ${distribution}`,
+    );
   }
+
+  const listedTestPaths = testPathsFromCommands(verify);
+  for (const requiredSuite of ["tests/core", "tests/server", "tests/characterization"]) {
+    requireValue(
+      failures,
+      listedTestPaths.has(requiredSuite),
+      `.github/workflows/verify.yaml: required pytest suite ${requiredSuite} is missing`,
+    );
+  }
+  for (const listedPath of listedTestPaths) {
+    requireValue(
+      failures,
+      fs.existsSync(path.join(root, listedPath)),
+      `.github/workflows/verify.yaml: listed pytest path does not exist: ${listedPath}`,
+    );
+  }
+  for (const testFile of recursivelyListTests(root)) {
+    const relative = path.relative(root, testFile).replaceAll(path.sep, "/");
+    const covered = [...listedTestPaths].some(
+      (listedPath) => relative === listedPath || relative.startsWith(`${listedPath}/`),
+    );
+    requireValue(
+      failures,
+      covered,
+      `.github/workflows/verify.yaml: ${relative} is absent from the categorized test jobs`,
+    );
+  }
+
+  const requiredPytestSteps = [
+    [
+      "Metadata provider conformance",
+      [
+        "packages/modules/metadata-manual/tests",
+        "packages/modules/metadata-tmdb/tests",
+      ],
+    ],
+    ["Release provider conformance", ["packages/modules/release-prowlarr/tests"]],
+    ["Download client conformance", ["packages/modules/download-qbittorrent/tests"]],
+    [
+      "Manifest and SDK schema drift",
+      [
+        "packages/module-sdk/tests/test_manifest.py",
+        "packages/module-sdk/tests/test_schema_artifacts.py",
+      ],
+    ],
+    [
+      "Control and processor OpenAPI drift",
+      ["tests/test_control_openapi.py", "tests/test_processor_openapi.py"],
+    ],
+  ];
+  for (const [name, requiredPaths] of requiredPytestSteps) {
+    requireValue(
+      failures,
+      runsPytest(stepByName(verify.jobs?.contract, name), requiredPaths),
+      `.github/workflows/verify.yaml: ${name.toLowerCase()} is required with its exact checks`,
+    );
+  }
+  const serialized = stepByName(verify.jobs?.contract, "Serialized module fixture drift");
+  requireValue(
+    failures,
+    runsShellCommand(serialized, "pnpm module-conformance:test") &&
+      runsShellCommand(serialized, "pnpm module-conformance:validate"),
+    ".github/workflows/verify.yaml: serialized module fixture drift is required with its exact checks",
+  );
+  const schemaDrift = stepByName(verify.jobs?.contract, "Clean migration and schema drift");
+  requireValue(
+    failures,
+    runsShellCommand(schemaDrift, "uv run python scripts/check_schema_drift.py") &&
+      runsPytest(schemaDrift, [
+        "tests/test_db.py",
+        "tests/architecture/test_clean_core_schema.py",
+      ]),
+    ".github/workflows/verify.yaml: clean migration and schema drift is required with its exact checks",
+  );
+
+  const isolatedUiRunner = readText(
+    root,
+    "packages/builtin-ui/tests/run_isolated.py",
+    failures,
+  );
+  requireValue(
+    failures,
+    isolatedUiRunner.includes('sorted(TESTS.rglob("test_*.py"))') &&
+      isolatedUiRunner.includes('path.name.startswith("test_browser")'),
+    "packages/builtin-ui/tests/run_isolated.py: UI isolation runner must discover test files recursively",
+  );
 }
 
 function validatePublishWorkflows(ci, release, failures) {

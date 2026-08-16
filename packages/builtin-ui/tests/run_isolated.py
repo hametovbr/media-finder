@@ -12,6 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[3]
 PACKAGE = ROOT / "packages" / "builtin-ui"
+TESTS = PACKAGE / "tests"
 UV = Path(shutil.which("uv") or ROOT / ".venv" / "Scripts" / "uv.exe")
 PROHIBITED_IMPORTS = (
     "alembic",
@@ -129,16 +130,12 @@ def main() -> None:
         )
         _run([str(python), "-I", "-c", probe], cwd=scratch, environment=environment)
 
+        discovered = sorted(TESTS.rglob("test_*.py"))
         tests = []
         if selected in {"unit", "all"}:
-            tests.extend(
-                (
-                    PACKAGE / "tests" / "test_fake_gateway.py",
-                    PACKAGE / "tests" / "test_html_contract.py",
-                )
-            )
+            tests.extend(path for path in discovered if not path.name.startswith("test_browser"))
         if selected in {"browser", "all"}:
-            tests.append(PACKAGE / "tests" / "test_browser.py")
+            tests.extend(path for path in discovered if path.name.startswith("test_browser"))
         _run(
             [
                 str(python),

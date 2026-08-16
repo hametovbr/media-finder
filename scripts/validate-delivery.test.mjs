@@ -10,8 +10,20 @@ const sourceRoot = path.resolve(import.meta.dirname, "..");
 
 function copyDeliveryFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "media-finder-delivery-"));
-  for (const entry of [".github", "tests", "docs"]) {
+  for (const entry of [".github", "docs", "tests"]) {
     fs.cpSync(path.join(sourceRoot, entry), path.join(root, entry), { recursive: true });
+  }
+  for (const entry of [
+    "packages/builtin-ui/tests",
+    "packages/module-sdk/tests",
+    "packages/modules/download-qbittorrent/tests",
+    "packages/modules/metadata-manual/tests",
+    "packages/modules/metadata-tmdb/tests",
+    "packages/modules/release-prowlarr/tests",
+  ]) {
+    const target = path.join(root, entry);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.cpSync(path.join(sourceRoot, entry), target, { recursive: true });
   }
   fs.mkdirSync(path.join(root, "scripts"));
   fs.copyFileSync(
@@ -203,4 +215,153 @@ test("production workspace installs cannot retain builder-only editable paths", 
   mutate(root, "Dockerfile", (value) => value.replace(" --no-editable", ""));
 
   assert.match(validateDelivery(root).join("\n"), /installed non-editably/);
+});
+
+for (const distribution of [
+  "media-finder",
+  "media-finder-core",
+  "media-finder-module-sdk",
+  "media-finder-control-contracts",
+  "media-finder-builtin-ui",
+  "media-finder-metadata-manual",
+  "media-finder-metadata-tmdb",
+  "media-finder-release-prowlarr",
+  "media-finder-download-qbittorrent",
+]) {
+  test(`verification builds the ${distribution} wheel`, (context) => {
+    const root = copyDeliveryFixture();
+    context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    mutate(root, ".github/workflows/verify.yaml", (value) =>
+      value.replace(`--package ${distribution}`, `--package omitted-${distribution}`),
+    );
+
+    assert.match(validateDelivery(root).join("\n"), new RegExp(`wheel build is missing ${distribution}`));
+  });
+}
+
+for (const suite of ["tests/core", "tests/server", "tests/characterization"]) {
+  test(`verification includes the nested ${suite} suite`, (context) => {
+    const root = copyDeliveryFixture();
+    context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    mutate(root, ".github/workflows/verify.yaml", (value) =>
+      value.replace(suite, `${suite}-omitted`),
+    );
+
+    assert.match(
+      validateDelivery(root).join("\n"),
+      new RegExp(`required pytest suite ${suite.replace("/", "\\/")} is missing`),
+    );
+  });
+}
+
+for (const [stepName, expected] of [
+  ["Metadata provider conformance", "metadata provider conformance"],
+  ["Release provider conformance", "release provider conformance"],
+  ["Download client conformance", "download client conformance"],
+  ["Manifest and SDK schema drift", "manifest and SDK schema drift"],
+  ["Serialized module fixture drift", "serialized module fixture drift"],
+  ["Control and processor OpenAPI drift", "control and processor OpenAPI drift"],
+  ["Clean migration and schema drift", "clean migration and schema drift"],
+]) {
+  test(`${stepName} remains a visible verification step`, (context) => {
+    const root = copyDeliveryFixture();
+    context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    mutate(root, ".github/workflows/verify.yaml", (value) =>
+      value.replace(`name: ${stepName}`, `name: Omitted ${stepName}`),
+    );
+
+    assert.match(validateDelivery(root).join("\n"), new RegExp(`${expected}.*required`, "i"));
+  });
+}
+
+test("verification rejects listed pytest paths that do not exist", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace("tests/test_db.py", "tests/missing/test_db.py"),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /listed pytest path does not exist/);
+});
+
+test("image smoke must prove the built-in UI mode", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, "scripts/smoke-container.sh", (value) =>
+    value.replace('assert_response "UI root" "$base_url/"', 'assert_response "Omitted root" "$base_url/"'),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /image smoke test must validate UI root/);
+});
+
+test("verification preserves exactly the seven protected job identifiers", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    `${value}\n  accidental-eighth-context:\n    runs-on: ubuntu-latest\n    steps: []\n`,
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /exactly the seven protected job identifiers/);
+});
+
+test("verification seeds the repository-local cache used by offline isolation runners", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace(
+      "UV_CACHE_DIR: ${{ github.workspace }}/.tools/uv-cache",
+      "UV_CACHE_DIR: /tmp/unshared-uv-cache",
+    ),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /repository-local uv cache/);
+});
+
+test("test paths printed by a no-op command do not count as executed", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace("uv run pytest\n          tests/core", "echo tests/core"),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /required pytest suite tests\/core is missing/);
+});
+
+test("named conformance steps must execute pytest rather than echo expected strings", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace(
+      "run: uv run pytest --no-cov packages/modules/release-prowlarr/tests",
+      "run: echo uv run pytest --no-cov packages/modules/release-prowlarr/tests",
+    ),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /release provider conformance.*required/i);
+});
+
+test("schema drift must execute the Alembic checker rather than echo it", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace(
+      "uv run python scripts/check_schema_drift.py &&",
+      "echo uv run python scripts/check_schema_drift.py &&",
+    ),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /clean migration and schema drift.*required/i);
+});
+
+test("isolated UI runner must discover future test files recursively", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, "packages/builtin-ui/tests/run_isolated.py", (value) =>
+    value.replace(
+      'sorted(TESTS.rglob("test_*.py"))',
+      '(TESTS / "test_fake_gateway.py", TESTS / "test_html_contract.py", TESTS / "test_browser.py")',
+    ),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /UI isolation runner must discover test files/);
 });

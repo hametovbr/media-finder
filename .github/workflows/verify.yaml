@@ -6,6 +6,9 @@ on:
 permissions:
   contents: read
 
+env:
+  UV_CACHE_DIR: ${{ github.workspace }}/.tools/uv-cache
+
 jobs:
   documentation:
     runs-on: ubuntu-latest
@@ -22,11 +25,16 @@ jobs:
         with:
           node-version: "24"
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm docs:check
-      - run: pnpm spec:validate
-      - run: pnpm delivery:test
-      - run: pnpm delivery:validate
+      - name: Install locked documentation tooling
+        run: pnpm install --frozen-lockfile
+      - name: Enforce English repository documentation
+        run: pnpm docs:check
+      - name: Validate OpenSpec strictly
+        run: pnpm spec:validate
+      - name: Validate delivery policy mutations
+        run: pnpm delivery:test
+      - name: Validate delivery artifacts
+        run: pnpm delivery:validate
 
   python:
     runs-on: ubuntu-latest
@@ -44,18 +52,40 @@ jobs:
         with:
           node-version: "24"
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: uv sync --frozen --all-groups
-      - run: uv run ruff format --check .
-      - run: uv run ruff check .
-      - run: uv run mypy
+      - name: Install locked Python workspace
+        run: uv sync --frozen --all-groups
+      - name: Install locked asset tooling
+        run: pnpm install --frozen-lockfile
+      - name: Check Python formatting
+        run: uv run ruff format --check .
+      - name: Lint Python
+        run: uv run ruff check .
+      - name: Type-check all distributions
+        run: uv run mypy
       - name: Build independent workspace wheels
         run: |
-          uv build --wheel --package media-finder-control-contracts --out-dir dist/control-contracts
-          uv build --wheel --package media-finder-builtin-ui --out-dir dist/builtin-ui
-          uv build --wheel --package media-finder --out-dir dist/backend
-      - run: pnpm assets:build
-      - run: git diff --exit-code -- packages/builtin-ui/src/media_finder_builtin_ui/static
+          uv build --wheel --package media-finder --out-dir dist/wheels
+          uv build --wheel --package media-finder-core --out-dir dist/wheels
+          uv build --wheel --package media-finder-module-sdk --out-dir dist/wheels
+          uv build --wheel --package media-finder-control-contracts --out-dir dist/wheels
+          uv build --wheel --package media-finder-builtin-ui --out-dir dist/wheels
+          uv build --wheel --package media-finder-metadata-manual --out-dir dist/wheels
+          uv build --wheel --package media-finder-metadata-tmdb --out-dir dist/wheels
+          uv build --wheel --package media-finder-release-prowlarr --out-dir dist/wheels
+          uv build --wheel --package media-finder-download-qbittorrent --out-dir dist/wheels
+      - name: Verify wheel isolation and package architecture
+        run: >-
+          uv run pytest
+          tests/test_wheel_isolation.py
+          tests/test_workspace_packages.py
+          tests/architecture/test_package_boundaries.py
+          tests/architecture/test_legacy_root_removal.py
+      - name: Rebuild static assets and locales
+        run: |
+          pnpm assets:build
+          pnpm locales:check
+      - name: Reject generated asset drift
+        run: git diff --exit-code -- packages/builtin-ui/src/media_finder_builtin_ui/static packages/builtin-ui/src/media_finder_builtin_ui/locales
 
   unit:
     runs-on: ubuntu-latest
@@ -65,21 +95,22 @@ jobs:
         with:
           version: "0.12.5"
           enable-cache: true
-      - run: uv sync --frozen --all-groups
+      - name: Install locked Python workspace
+        run: uv sync --frozen --all-groups
       - name: Isolated built-in UI unit tests
         run: uv run python packages/builtin-ui/tests/run_isolated.py unit
-      - name: Unit tests
+      - name: Core and unit suites
         run: >-
           uv run pytest
-          tests/test_config.py
+          tests/core
+          tests/test_control_contracts.py
           tests/test_documentation_language.py
           tests/test_ephemeral_cache.py
+          tests/test_localization_build.py
           tests/test_manual.py
           tests/test_naming.py
           tests/test_nfo.py
           tests/test_prowlarr.py
-          tests/test_control_contracts.py
-          tests/test_workspace_packages.py
 
   integration:
     runs-on: ubuntu-latest
@@ -89,18 +120,13 @@ jobs:
         with:
           version: "0.12.5"
           enable-cache: true
-      - run: uv sync --frozen --all-groups
-      - name: Integration tests
+      - name: Install locked Python workspace
+        run: uv sync --frozen --all-groups
+      - name: Server and integration suites
         run: >-
           uv run pytest
-          tests/test_acquisition.py
+          tests/server
           tests/test_api_foundation.py
-          tests/test_db.py
-          tests/test_domain.py
-          tests/test_metadata_api.py
-          tests/test_runtime.py
-          tests/test_runtime_ui_mode.py
-          tests/test_system_download_client.py
           tests/test_control_gateway_acquisition.py
           tests/test_control_gateway_catalog.py
           tests/test_control_gateway_contract.py
@@ -108,13 +134,17 @@ jobs:
           tests/test_control_gateway_manual.py
           tests/test_control_gateway_metadata.py
           tests/test_control_security.py
+          tests/test_domain.py
+          tests/test_metadata_api.py
+          tests/test_runtime.py
+          tests/test_runtime_ui_mode.py
           tests/test_ui_catalog.py
           tests/test_ui_error_feedback.py
           tests/test_ui_foundation.py
           tests/test_ui_i18n.py
           tests/test_ui_manual_structured.py
-          tests/test_ui_release_live_clients.py
           tests/test_ui_release_acceptance.py
+          tests/test_ui_release_live_clients.py
           tests/test_ui_runtime_settings.py
           tests/test_ui_semantic_feedback.py
           tests/test_ui_settings.py
@@ -136,32 +166,49 @@ jobs:
         with:
           node-version: "24"
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: uv sync --frozen --all-groups
-      - name: Serialized module conformance
+      - name: Install locked contract tooling
+        run: |
+          pnpm install --frozen-lockfile
+          uv sync --frozen --all-groups
+      - name: Architecture rules and public characterization
+        run: uv run pytest tests/architecture tests/characterization
+      - name: Module SDK contracts
+        run: uv run pytest --no-cov packages/module-sdk/tests
+      - name: Manifest and SDK schema drift
+        run: >-
+          uv run pytest --no-cov
+          packages/module-sdk/tests/test_manifest.py
+          packages/module-sdk/tests/test_schema_artifacts.py
+      - name: Metadata provider conformance
+        run: >-
+          uv run pytest --no-cov
+          packages/modules/metadata-manual/tests
+          packages/modules/metadata-tmdb/tests
+          tests/test_tmdb_retention.py
+      - name: Release provider conformance
+        run: uv run pytest --no-cov packages/modules/release-prowlarr/tests
+      - name: Download client conformance
+        run: uv run pytest --no-cov packages/modules/download-qbittorrent/tests
+      - name: Serialized module fixture drift
         run: |
           pnpm module-conformance:test
           pnpm module-conformance:validate
-      - name: Module contract tests
+      - name: Control and processor OpenAPI drift
+        run: uv run pytest tests/test_control_openapi.py tests/test_processor_openapi.py
+      - name: Clean migration and schema drift
+        run: >-
+          uv run python scripts/check_schema_drift.py &&
+          uv run pytest --no-cov tests/test_db.py tests/architecture/test_clean_core_schema.py
+      - name: Browser control and processor contracts
         run: >-
           uv run pytest
-          tests/test_tmdb_retention.py
           tests/test_control_api_acquisition.py
           tests/test_control_api_catalog.py
           tests/test_control_api_metadata.py
           tests/test_control_api_security.py
           tests/test_control_conformance_real.py
-          tests/test_control_openapi.py
-          tests/test_processor_openapi.py
           tests/test_module_registry_composition.py
           tests/test_module_runtime_transport_hardening.py
-          tests/test_wheel_isolation.py
-          tests/architecture
-          packages/module-sdk/tests
-          packages/modules/metadata-manual/tests
-          packages/modules/metadata-tmdb/tests
-          packages/modules/release-prowlarr/tests
-          packages/modules/download-qbittorrent/tests
 
   browser:
     runs-on: ubuntu-latest
@@ -171,11 +218,14 @@ jobs:
         with:
           version: "0.12.5"
           enable-cache: true
-      - run: uv sync --frozen --all-groups
-      - run: uv run playwright install --with-deps chromium
+      - name: Install locked Python workspace
+        run: uv sync --frozen --all-groups
+      - name: Install Chromium
+        run: uv run playwright install --with-deps chromium
       - name: Isolated built-in UI browser tests
         run: uv run python packages/builtin-ui/tests/run_isolated.py browser
-      - run: uv run pytest tests/test_ui_browser.py
+      - name: Same-origin browser acceptance
+        run: uv run pytest tests/test_ui_browser.py
 
   image:
     runs-on: ubuntu-latest
