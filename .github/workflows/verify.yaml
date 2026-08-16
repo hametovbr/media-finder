@@ -173,7 +173,9 @@ jobs:
           pnpm install --frozen-lockfile
           uv sync --frozen --all-groups
       - name: Architecture rules and public characterization
-        run: uv run pytest tests/architecture tests/characterization
+        run: >-
+          uv run pytest tests/architecture tests/characterization
+          tests/test_project_skills.py
       - name: Module SDK contracts
         run: uv run pytest --no-cov packages/module-sdk/tests
       - name: Manifest and SDK schema drift
