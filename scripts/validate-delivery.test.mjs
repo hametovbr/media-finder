@@ -30,6 +30,10 @@ function copyDeliveryFixture() {
     path.join(sourceRoot, "scripts/smoke-container.sh"),
     path.join(root, "scripts/smoke-container.sh"),
   );
+  fs.copyFileSync(
+    path.join(sourceRoot, "scripts/verify-image.py"),
+    path.join(root, "scripts/verify-image.py"),
+  );
   for (const entry of ["Dockerfile", "compose.example.yaml", "README.md"]) {
     fs.copyFileSync(path.join(sourceRoot, entry), path.join(root, entry));
   }
@@ -51,15 +55,6 @@ function replaceDockerInstructionWithComment(value, instructionStart) {
   return `${value.slice(0, start)}RUN true\n# ${commented}${value.slice(end)}`;
 }
 
-function replaceRuntimeProbeWithInertHeredoc(value) {
-  const start = value.indexOf('docker exec -i "$container_name" python -I - <<\'PY\'');
-  assert.notEqual(start, -1, "missing runtime Python probe");
-  const end = value.indexOf("\nPY\n", start) + "\nPY\n".length;
-  assert.notEqual(end, "\nPY\n".length - 1, "missing runtime Python probe terminator");
-  const probe = value.slice(start, end);
-  return `${value.slice(0, start)}: <<'IGNORED'\n${probe}IGNORED\n${value.slice(end)}`;
-}
-
 function moveBuilderRunToUnusedProofStage(value) {
   const start = value.indexOf("RUN mkdir /wheels");
   assert.notEqual(start, -1, "missing wheel builder instruction");
@@ -67,30 +62,6 @@ function moveBuilderRunToUnusedProofStage(value) {
   assert.notEqual(runtimeStage, -1, "missing runtime stage");
   const builderRun = value.slice(start, runtimeStage);
   return `${value.slice(0, start)}RUN true\n\nFROM builder AS unused-proof-stage\n${builderRun}${value.slice(runtimeStage)}`;
-}
-
-function wrapRuntimeProbeInConditionalBranch(value, condition) {
-  const start = value.indexOf('docker exec -i "$container_name" python -I - <<\'PY\'');
-  assert.notEqual(start, -1, "missing runtime Python probe");
-  const end = value.indexOf("\nPY\n", start) + "\nPY\n".length;
-  assert.notEqual(end, "\nPY\n".length - 1, "missing runtime Python probe terminator");
-  const probe = value.slice(start, end);
-  return `${value.slice(0, start)}if ${condition}; then\n${probe}fi\n${value.slice(end)}`;
-}
-
-function wrapRuntimeProbeInSubshellFunction(value) {
-  const start = value.indexOf('docker exec -i "$container_name" python -I - <<\'PY\'');
-  assert.notEqual(start, -1, "missing runtime Python probe");
-  const end = value.indexOf("\nPY\n", start) + "\nPY\n".length;
-  assert.notEqual(end, "\nPY\n".length - 1, "missing runtime Python probe terminator");
-  const probe = value.slice(start, end);
-  return `${value.slice(0, start)}runtime_probe() (\n${probe})\n${value.slice(end)}`;
-}
-
-function continueIntoRuntimeProbe(value, precedingLine) {
-  const start = value.indexOf('docker exec -i "$container_name" python -I - <<\'PY\'');
-  assert.notEqual(start, -1, "missing runtime Python probe");
-  return `${value.slice(0, start)}${precedingLine}\n${value.slice(start)}`;
 }
 
 test("current delivery workflows satisfy the structural contract", () => {
@@ -317,97 +288,60 @@ test("an unused Docker stage cannot satisfy the runtime venv dataflow contract",
   assert.match(validateDelivery(root).join("\n"), /build every workspace package as wheels/);
 });
 
-test("an inert shell heredoc cannot satisfy runtime resource or process smoke checks", (context) => {
+test("production image verifier file is required", (context) => {
   const root = copyDeliveryFixture();
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  mutate(root, "scripts/smoke-container.sh", replaceRuntimeProbeWithInertHeredoc);
+  fs.rmSync(path.join(root, "scripts/verify-image.py"));
 
-  assert.match(validateDelivery(root).join("\n"), /installed distribution origins|packaged runtime resources|one application process/);
+  assert.match(validateDelivery(root).join("\n"), /scripts\/verify-image\.py: required delivery artifact is missing/);
 });
 
-test("a false shell branch cannot satisfy runtime resource or process smoke checks", (context) => {
-  const root = copyDeliveryFixture();
-  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  mutate(root, "scripts/smoke-container.sh", (value) =>
-    wrapRuntimeProbeInConditionalBranch(value, "false"),
-  );
-
-  assert.match(validateDelivery(root).join("\n"), /installed distribution origins|packaged runtime resources|one application process/);
-});
-
-test("a non-equality false shell branch cannot satisfy runtime resource or process smoke checks", (context) => {
+test("production smoke must execute the standalone image verifier", (context) => {
   const root = copyDeliveryFixture();
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
   mutate(root, "scripts/smoke-container.sh", (value) =>
-    wrapRuntimeProbeInConditionalBranch(value, "[ 1 -ne 1 ]"),
+    value.replace("python -I - < scripts/verify-image.py", "python -I - < scripts/omitted.py"),
   );
 
-  assert.match(validateDelivery(root).join("\n"), /installed distribution origins|packaged runtime resources|one application process/);
+  assert.match(validateDelivery(root).join("\n"), /must execute scripts\/verify-image\.py/);
 });
 
-test("an unknown conditional shell wrapper cannot satisfy runtime resource or process smoke checks", (context) => {
+test("verification workflow must execute image verifier tests", (context) => {
   const root = copyDeliveryFixture();
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  mutate(root, "scripts/smoke-container.sh", (value) =>
-    wrapRuntimeProbeInConditionalBranch(value, "check_runtime_environment"),
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace("tests/test_verify_image.py", "tests/omitted_verify_image.py"),
   );
 
-  assert.match(validateDelivery(root).join("\n"), /installed distribution origins|packaged runtime resources|one application process/);
+  assert.match(validateDelivery(root).join("\n"), /must execute tests\/test_verify_image\.py/);
 });
 
-test("a subshell function body cannot satisfy runtime resource or process smoke checks", (context) => {
-  const root = copyDeliveryFixture();
-  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  mutate(root, "scripts/smoke-container.sh", wrapRuntimeProbeInSubshellFunction);
-
-  assert.match(validateDelivery(root).join("\n"), /installed distribution origins|packaged runtime resources|one application process/);
-});
-
-for (const [label, precedingLine] of [
-  ["AND-list", "false &&"],
-  ["OR-list", "true ||"],
-  ["pipeline", "printf ignored |"],
-  ["backslash continuation", "true \\"],
+for (const [label, from, to, expected] of [
+  ["runtime user", "USER 10001:10001", "USER root", /runtime must use UID\/GID 10001/],
+  [
+    "runtime entrypoint",
+    '["python", "-m", "media_finder_server"]',
+    '["python", "-m", "omitted_server"]',
+    /runtime entrypoint must gate startup/,
+  ],
 ]) {
-  test(`an incoming ${label} cannot satisfy runtime resource or process smoke checks`, (context) => {
+  test(`production image must retain its ${label} invariant`, (context) => {
     const root = copyDeliveryFixture();
     context.after(() => fs.rmSync(root, { recursive: true, force: true }));
-    mutate(root, "scripts/smoke-container.sh", (value) =>
-      continueIntoRuntimeProbe(value, precedingLine),
-    );
+    mutate(root, "Dockerfile", (value) => value.replace(from, to));
 
-    assert.match(validateDelivery(root).join("\n"), /installed distribution origins|packaged runtime resources|one application process/);
+    assert.match(validateDelivery(root).join("\n"), expected);
   });
 }
 
-test("production smoke must prove runtime distributions come from the venv rather than sources", (context) => {
+test("production image must copy the venv from its wheel-builder stage", (context) => {
   const root = copyDeliveryFixture();
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  mutate(root, "scripts/smoke-container.sh", (value) =>
-    value.replace("/opt/venv/lib/python3.13/site-packages", "/app/packages"),
+  mutate(root, "Dockerfile", (value) =>
+    value.replace("--from=builder /opt/venv /opt/venv", "--from=builder /opt/venv /app/venv"),
   );
 
-  assert.match(validateDelivery(root).join("\n"), /installed distribution origins/);
-});
-
-test("production smoke must check packaged UI, module, fixture, and migration resources", (context) => {
-  const root = copyDeliveryFixture();
-  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  mutate(root, "scripts/smoke-container.sh", (value) =>
-    value.replace("media_finder_core/_migration_resources/alembic/versions/0001_clean_core.py", "omitted.py"),
-  );
-
-  assert.match(validateDelivery(root).join("\n"), /complete packaged runtime resources/);
-});
-
-test("production smoke must prove the container has one application process", (context) => {
-  const root = copyDeliveryFixture();
-  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  mutate(root, "scripts/smoke-container.sh", (value) =>
-    value.replace("assert len(application_processes) == 1", "assert len(application_processes) >= 1"),
-  );
-
-  assert.match(validateDelivery(root).join("\n"), /one application process/);
+  assert.match(validateDelivery(root).join("\n"), /install every workspace wheel into a fresh runtime venv/);
 });
 
 for (const distribution of [

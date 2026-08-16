@@ -145,9 +145,7 @@ def test_runtime_snapshot_requires_exactly_one_application_process(
 ) -> None:
     verifier = _load_verifier()
     snapshot = _valid_snapshot(verifier)
-    invalid = verifier.RuntimeSnapshot(
-        **{**vars(snapshot), "application_processes": processes}
-    )
+    invalid = verifier.RuntimeSnapshot(**{**vars(snapshot), "application_processes": processes})
 
     with pytest.raises(verifier.VerificationError, match="exactly one application process"):
         verifier.validate_runtime_snapshot(invalid)

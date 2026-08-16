@@ -276,177 +276,6 @@ function dockerStages(dockerfile) {
   return stages;
 }
 
-function shellTokens(line) {
-  const tokens = [];
-  let lineContinuation = false;
-  let index = 0;
-  while (index < line.length) {
-    if (/\s/.test(line[index])) {
-      index += 1;
-      continue;
-    }
-    if (line[index] === "#") break;
-    const operator = shellOperatorAt(line, index);
-    if (operator) {
-      tokens.push({ kind: "operator", value: operator });
-      index += operator.length;
-      continue;
-    }
-    let quoted = false;
-    let value = "";
-    while (index < line.length && !/\s/.test(line[index]) && !shellOperatorAt(line, index)) {
-      const character = line[index];
-      if (character === "\\") {
-        if (index + 1 < line.length) {
-          value += line[index + 1];
-          index += 2;
-        } else {
-          lineContinuation = true;
-          index += 1;
-        }
-        continue;
-      }
-      if (character === "'" || character === '"') {
-        quoted = true;
-        const quote = character;
-        index += 1;
-        while (index < line.length && line[index] !== quote) {
-          if (quote === '"' && line[index] === "\\") {
-            if (index + 1 < line.length) {
-              value += line[index + 1];
-              index += 2;
-            } else {
-              lineContinuation = true;
-              index += 1;
-            }
-          } else {
-            value += line[index];
-            index += 1;
-          }
-        }
-        if (index < line.length) index += 1;
-        continue;
-      }
-      value += character;
-      index += 1;
-    }
-    if (value.length > 0 || quoted) tokens.push({ kind: "word", value, quoted });
-  }
-  return { lineContinuation, tokens };
-}
-
-function functionBody(tokens, index) {
-  let cursor = index;
-  const first = tokens[cursor];
-  if (first?.kind !== "word" || first.quoted) return undefined;
-  if (first.value === "function") {
-    cursor += 1;
-    const name = tokens[cursor];
-    if (name?.kind !== "word" || name.quoted || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name.value)) {
-      return undefined;
-    }
-    cursor += 1;
-    if (tokens[cursor]?.value === "(" && tokens[cursor + 1]?.value === ")") cursor += 2;
-  } else {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(first.value)) return undefined;
-    if (tokens[cursor + 1]?.value !== "(" || tokens[cursor + 2]?.value !== ")") return undefined;
-    cursor += 3;
-  }
-  const opener = tokens[cursor]?.value;
-  if (opener !== "{" && opener !== "(") return undefined;
-  return { bodyIndex: cursor, closing: opener === "{" ? "}" : ")" };
-}
-
-function executableHereDocuments(script) {
-  const documents = [];
-  const blocks = [];
-  const lines = script.split(/\r?\n/);
-  let incomingCommand = false;
-  let valid = true;
-  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-    const line = lines[lineIndex];
-    const { lineContinuation, tokens } = shellTokens(line);
-    const startedInIncomingCommand = incomingCommand;
-    let commandStart = true;
-    for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex += 1) {
-      const token = tokens[tokenIndex];
-      if (token.value === "<<" || token.value === "<<-") {
-        const delimiter = tokens[tokenIndex + 1];
-        if (delimiter?.kind !== "word" || delimiter.value.length === 0) {
-          valid = false;
-          break;
-        }
-        const body = [];
-        const stripTabs = token.value === "<<-";
-        lineIndex += 1;
-        while (lineIndex < lines.length) {
-          const candidate = stripTabs ? lines[lineIndex].replace(/^\t+/, "") : lines[lineIndex];
-          if (candidate === delimiter.value) break;
-          body.push(lines[lineIndex]);
-          lineIndex += 1;
-        }
-        if (lineIndex >= lines.length) {
-          valid = false;
-        } else if (blocks.length === 0 && !startedInIncomingCommand) {
-          documents.push({ header: line.trim(), body: body.join("\n") });
-        }
-        break;
-      }
-      if (commandStart) {
-        const definition = functionBody(tokens, tokenIndex);
-        if (definition) {
-          blocks.push(definition.closing);
-          tokenIndex = definition.bodyIndex;
-          commandStart = true;
-          continue;
-        }
-      }
-      if (token.kind === "operator") {
-        if (token.value === "{" || token.value === "(") {
-          blocks.push(token.value === "{" ? "}" : ")");
-          commandStart = true;
-        } else if (token.value === "}" || token.value === ")") {
-          if (blocks.at(-1) === token.value) blocks.pop();
-          commandStart = false;
-        } else if ([";", ";;", ";&", ";;&", "&&", "||", "&", "|"].includes(token.value)) {
-          commandStart = true;
-        }
-        continue;
-      }
-      if (!commandStart || token.quoted) {
-        commandStart = false;
-        continue;
-      }
-      if (["fi", "esac", "done"].includes(token.value)) {
-        if (blocks.at(-1) === token.value) blocks.pop();
-        else valid = false;
-        commandStart = false;
-      } else if (token.value === "if") {
-        blocks.push("fi");
-        commandStart = false;
-      } else if (token.value === "case") {
-        blocks.push("esac");
-        commandStart = false;
-      } else if (["for", "select", "while", "until"].includes(token.value)) {
-        blocks.push("done");
-        commandStart = false;
-      } else if (["then", "do", "else", "elif"].includes(token.value)) {
-        commandStart = true;
-      } else {
-        commandStart = false;
-      }
-    }
-    if (!valid) break;
-    if (tokens.length > 0) {
-      incomingCommand =
-        lineContinuation || ["&&", "||", "|"].includes(tokens.at(-1).value);
-    } else if (lineContinuation) {
-      incomingCommand = true;
-    }
-  }
-  return valid && blocks.length === 0 ? documents : [];
-}
-
 function validateImage(root, verify, verifyText, failures) {
   const dockerfile = readText(root, "Dockerfile", failures);
   const stages = dockerStages(dockerfile);
@@ -528,50 +357,12 @@ function validateImage(root, verify, verifyText, failures) {
     smokeStep?.run === "bash scripts/smoke-container.sh",
     ".github/workflows/verify.yaml: image job must run the production smoke script",
   );
+  readText(root, "scripts/verify-image.py", failures);
   const smoke = readText(root, "scripts/smoke-container.sh", failures);
-  const runtimeProbe = executableHereDocuments(smoke).find(
-    (document) => document.header === 'docker exec -i "$container_name" python -I - <<\'PY\'',
-  )?.body;
-  for (const distribution of WORKSPACE_DISTRIBUTIONS) {
-    requireValue(
-      failures,
-      runtimeProbe?.includes(`"${distribution}"`),
-      `scripts/smoke-container.sh: image smoke must import ${distribution}`,
-    );
-  }
   requireValue(
     failures,
-    runtimeProbe?.includes("/opt/venv/lib/python3.13/site-packages") &&
-      runtimeProbe.includes("assert len(versions) == 1") &&
-      runtimeProbe.includes('assert not Path("/build").exists()') &&
-      runtimeProbe.includes('assert not Path("/app/packages").exists()'),
-    "scripts/smoke-container.sh: image smoke must validate installed distribution origins, lockstep versions, and source-path exclusion",
-  );
-  for (const resource of [
-    "media_finder_builtin_ui/templates/base.html",
-    "media_finder_builtin_ui/static/ui.js",
-    "media_finder_builtin_ui/locales/en/LC_MESSAGES/messages.mo",
-    "media_finder_builtin_ui/locales/ru/LC_MESSAGES/messages.mo",
-    "media_finder_metadata_manual/module.toml",
-    "media_finder_metadata_manual/fixtures/conformance.json",
-    "media_finder_metadata_tmdb/module.toml",
-    "media_finder_metadata_tmdb/fixtures/conformance.json",
-    "media_finder_release_prowlarr/module.toml",
-    "media_finder_release_prowlarr/fixtures/conformance.json",
-    "media_finder_download_qbittorrent/module.toml",
-    "media_finder_download_qbittorrent/fixtures/conformance.json",
-    "media_finder_core/_migration_resources/alembic/versions/0001_clean_core.py",
-  ]) {
-    requireValue(
-      failures,
-      runtimeProbe?.includes(resource),
-      "scripts/smoke-container.sh: image smoke must validate complete packaged runtime resources",
-    );
-  }
-  requireValue(
-    failures,
-    runtimeProbe?.includes("assert len(application_processes) == 1"),
-    "scripts/smoke-container.sh: image smoke must validate exactly one application process",
+    smoke.includes('docker exec -i "$container_name" python -I - < scripts/verify-image.py'),
+    "scripts/smoke-container.sh: image smoke must execute scripts/verify-image.py",
   );
   const expectations = [
     ["UI root", /assert_response\s+"UI root"\s+"\$base_url\/"\s+"200"\s+"<!doctype html>"/],
@@ -674,6 +465,13 @@ function validateVerification(root, verify, verifyText, failures) {
       runsPytest(step, ["tests/test_control_conformance_real.py"]),
     ),
     ".github/workflows/verify.yaml: contract job must run real browser-control conformance",
+  );
+  requireValue(
+    failures,
+    (verify.jobs?.unit?.steps ?? []).some((step) =>
+      runsPytest(step, ["tests/test_verify_image.py"]),
+    ),
+    ".github/workflows/verify.yaml: unit job must execute tests/test_verify_image.py",
   );
   requireValue(
     failures,

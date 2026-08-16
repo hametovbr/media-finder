@@ -111,6 +111,7 @@ jobs:
           tests/test_naming.py
           tests/test_nfo.py
           tests/test_prowlarr.py
+          tests/test_verify_image.py
 
   integration:
     runs-on: ubuntu-latest

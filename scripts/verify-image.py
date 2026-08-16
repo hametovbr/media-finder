@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from importlib import import_module, metadata, resources
 from pathlib import Path
 
-
 EXPECTED_DISTRIBUTIONS = {
     "media-finder": "media_finder_server",
     "media-finder-core": "media_finder_core",
@@ -169,12 +168,9 @@ def collect_runtime_snapshot() -> RuntimeSnapshot:
 
     return RuntimeSnapshot(
         distributions=tuple(distributions),
-        existing_forbidden_paths=tuple(
-            path for path in FORBIDDEN_SOURCE_PATHS if path.exists()
-        ),
+        existing_forbidden_paths=tuple(path for path in FORBIDDEN_SOURCE_PATHS if path.exists()),
         pth_files=tuple(
-            (path, path.read_text(encoding="utf-8"))
-            for path in Path("/opt/venv").rglob("*.pth")
+            (path, path.read_text(encoding="utf-8")) for path in Path("/opt/venv").rglob("*.pth")
         ),
         available_resources=frozenset(available_resources),
         migration_head=ScriptDirectory.from_config(_alembic_config()).get_current_head(),
