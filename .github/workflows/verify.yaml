@@ -53,7 +53,7 @@ jobs:
           node-version: "24"
           cache: pnpm
       - name: Install locked Python workspace
-        run: uv sync --frozen --all-packages --all-groups
+        run: uv sync --frozen --all-groups
       - name: Install locked asset tooling
         run: pnpm install --frozen-lockfile
       - name: Check Python formatting
@@ -96,7 +96,7 @@ jobs:
           version: "0.12.5"
           enable-cache: true
       - name: Install locked Python workspace
-        run: uv sync --frozen --all-packages --all-groups
+        run: uv sync --frozen --all-groups
       - name: Isolated built-in UI unit tests
         run: uv run python packages/builtin-ui/tests/run_isolated.py unit
       - name: Core and unit suites
@@ -122,7 +122,7 @@ jobs:
           version: "0.12.5"
           enable-cache: true
       - name: Install locked Python workspace
-        run: uv sync --frozen --all-packages --all-groups
+        run: uv sync --frozen --all-groups
       - name: Server and integration suites
         run: >-
           uv run pytest
@@ -170,7 +170,7 @@ jobs:
       - name: Install locked contract tooling
         run: |
           pnpm install --frozen-lockfile
-          uv sync --frozen --all-packages --all-groups
+          uv sync --frozen --all-groups
       - name: Architecture rules and public characterization
         run: uv run pytest tests/architecture tests/characterization
       - name: Module SDK contracts
@@ -220,7 +220,7 @@ jobs:
           version: "0.12.5"
           enable-cache: true
       - name: Install locked Python workspace
-        run: uv sync --frozen --all-packages --all-groups
+        run: uv sync --frozen --all-groups
       - name: Install Chromium
         run: uv run playwright install --with-deps chromium
       - name: Isolated built-in UI browser tests

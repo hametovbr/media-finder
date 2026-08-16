@@ -104,7 +104,6 @@ def _clean_environment() -> dict[str, str]:
         not in {"pythonhome", "pythonpath", "virtual_env", "uv_project_environment"}
     }
     environment["UV_CACHE_DIR"] = str(UV_CACHE)
-    environment["UV_OFFLINE"] = "1"
     return environment
 
 

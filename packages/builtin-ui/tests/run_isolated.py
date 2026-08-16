@@ -46,7 +46,6 @@ def main() -> None:
         if key.casefold() not in {"pythonpath", "pythonhome", "virtual_env"}
     }
     environment["UV_CACHE_DIR"] = str(ROOT / ".tools" / "uv-cache")
-    environment["UV_OFFLINE"] = "1"
 
     with tempfile.TemporaryDirectory(prefix="media-finder-ui-") as directory:
         scratch = Path(directory)
