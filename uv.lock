@@ -17,7 +17,8 @@ members = [
 
 [manifest.dependency-groups]
 dev = [
-    { name = "hatchling", specifier = ">=1.27,<2" },
+    { name = "babel", specifier = ">=2.17,<3" },
+    { name = "hatchling", specifier = "==1.32.0" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "media-finder", editable = "apps/server" },
     { name = "mypy", specifier = ">=1.17,<2" },
@@ -333,6 +334,7 @@ dependencies = [
     { name = "media-finder-download-qbittorrent" },
     { name = "media-finder-metadata-manual" },
     { name = "media-finder-metadata-tmdb" },
+    { name = "media-finder-module-sdk" },
     { name = "media-finder-release-prowlarr" },
     { name = "pydantic-settings" },
     { name = "python-dateutil" },
@@ -351,6 +353,7 @@ requires-dist = [
     { name = "media-finder-download-qbittorrent", editable = "packages/modules/download-qbittorrent" },
     { name = "media-finder-metadata-manual", editable = "packages/modules/metadata-manual" },
     { name = "media-finder-metadata-tmdb", editable = "packages/modules/metadata-tmdb" },
+    { name = "media-finder-module-sdk", editable = "packages/module-sdk" },
     { name = "media-finder-release-prowlarr", editable = "packages/modules/release-prowlarr" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "python-dateutil", specifier = ">=2.9,<3" },

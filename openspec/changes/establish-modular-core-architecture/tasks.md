@@ -65,7 +65,7 @@
 
 ## 8. Delivery, Documentation, and Contributor Workflow
 
-- [ ] 8.1 Update uv workspace metadata, lockfile, type/lint/test discovery, package data, asset/localization builds, and wheel metadata so every distribution builds reproducibly from the same product version and lock.
+- [x] 8.1 Update uv workspace metadata, lockfile, type/lint/test discovery, package data, asset/localization builds, and wheel metadata so every distribution builds reproducibly from the same product version and lock.
 - [ ] 8.2 Extend the existing reusable GitHub verification workflow with isolated wheel installs, architecture rules, three module conformance suites, manifest/JSON Schema/processor OpenAPI drift, clean schema migration, and both UI-mode smokes while preserving all seven required `verification/*` contexts.
 - [ ] 8.3 Update the multi-stage Docker build to build and install wheels rather than workspace source paths; prove the production image includes module manifests, fixtures needed at runtime, templates, catalogs, static assets, migrations, and only one non-root application process.
 - [ ] 8.4 Update Compose and environment documentation from the first-party manifests without adding private infrastructure, runtime plugin mounts, another service, or persisted integration configuration.

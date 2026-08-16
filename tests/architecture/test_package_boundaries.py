@@ -6,6 +6,8 @@ import ast
 import tomllib
 from pathlib import Path
 
+from packaging.requirements import Requirement
+
 ROOT = Path(__file__).parents[2]
 
 PACKAGES = {
@@ -79,6 +81,56 @@ def test_distribution_dependencies_follow_the_approved_graph() -> None:
         "media-finder-release-prowlarr",
         "media-finder-download-qbittorrent",
     } <= dependencies["server"]
+
+
+def test_every_workspace_import_has_a_direct_declared_distribution_dependency() -> None:
+    import_distributions = {
+        "media_finder_server": "media-finder",
+        "media_finder_core": "media-finder-core",
+        "media_finder_sdk": "media-finder-module-sdk",
+        "media_finder_control": "media-finder-control-contracts",
+        "media_finder_builtin_ui": "media-finder-builtin-ui",
+        "media_finder_metadata_manual": "media-finder-metadata-manual",
+        "media_finder_metadata_tmdb": "media-finder-metadata-tmdb",
+        "media_finder_release_prowlarr": "media-finder-release-prowlarr",
+        "media_finder_download_qbittorrent": "media-finder-download-qbittorrent",
+    }
+    violations: list[str] = []
+    for owner, directory in PACKAGES.items():
+        project = _project(directory)
+        own_distribution = str(project["name"])
+        declared = {
+            Requirement(value).name.casefold()
+            for value in project.get("dependencies", [])
+            if isinstance(value, str)
+        }
+        for path, line, imported in _imports(directory):
+            import_root = imported.partition(".")[0]
+            required = import_distributions.get(import_root)
+            if required is None or required == own_distribution:
+                continue
+            if required.casefold() not in declared:
+                violations.append(f"{owner}:{path.relative_to(ROOT)}:{line}:{imported}->{required}")
+
+    assert violations == []
+
+
+def test_every_build_backend_is_exactly_pinned_to_the_uv_lock() -> None:
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    hatchling_version = next(
+        str(package["version"]) for package in lock["package"] if package["name"] == "hatchling"
+    )
+    expected = [f"hatchling=={hatchling_version}"]
+
+    for owner, directory in PACKAGES.items():
+        configuration = tomllib.loads((directory / "pyproject.toml").read_text(encoding="utf-8"))
+        assert configuration["build-system"] == {
+            "requires": expected,
+            "build-backend": "hatchling.build",
+        }, owner
+
+    root = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert f"hatchling=={hatchling_version}" in root["dependency-groups"]["dev"]
 
 
 def test_imports_do_not_cross_package_ownership_boundaries() -> None:

@@ -212,7 +212,6 @@ def test_tmdb_wheel_is_independent_versioned_and_contains_declared_resources(
             str(UV),
             "build",
             "--wheel",
-            "--no-build-isolation",
             "--package",
             "media-finder-metadata-tmdb",
             "--out-dir",

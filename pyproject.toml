@@ -1,6 +1,7 @@
 [dependency-groups]
 dev = [
-  "hatchling>=1.27,<2",
+  "babel>=2.17,<3",
+  "hatchling==1.32.0",
   "httpx>=0.28,<1",
   "media-finder",
   "mypy>=1.17,<2",
@@ -62,7 +63,14 @@ mypy_path = [
 
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers --cov=media_finder_server --cov=media_finder_core --cov-branch --cov-report=term-missing"
-testpaths = ["tests"]
+testpaths = [
+  "tests",
+  "packages/module-sdk/tests",
+  "packages/modules/metadata-manual/tests",
+  "packages/modules/metadata-tmdb/tests",
+  "packages/modules/release-prowlarr/tests",
+  "packages/modules/download-qbittorrent/tests",
+]
 pythonpath = []
 # Starlette 1.x still falls back to httpx while its test client migrates to the
 # separately distributed httpx2 package. Keep that single import-time boundary

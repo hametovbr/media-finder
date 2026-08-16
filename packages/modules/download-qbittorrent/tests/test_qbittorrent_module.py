@@ -125,7 +125,6 @@ def test_qbittorrent_wheel_is_independent_versioned_and_contains_declared_resour
             str(UV),
             "build",
             "--wheel",
-            "--no-build-isolation",
             "--package",
             "media-finder-download-qbittorrent",
             "--out-dir",

@@ -118,7 +118,6 @@ def test_manual_wheel_is_independent_and_contains_declared_resources(tmp_path: P
             str(UV),
             "build",
             "--wheel",
-            "--no-build-isolation",
             "--package",
             "media-finder-metadata-manual",
             "--out-dir",

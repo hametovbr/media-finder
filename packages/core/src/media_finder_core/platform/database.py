@@ -45,7 +45,8 @@ def _alembic_config(url: str | None = None) -> Config:
 
 
 def _migration_root() -> Path:
-    candidates = (Path.cwd(), *Path(__file__).resolve().parents)
+    packaged = Path(__file__).resolve().parents[1] / "_migration_resources"
+    candidates = (packaged, Path.cwd(), *Path(__file__).resolve().parents)
     for candidate in candidates:
         if (candidate / "alembic.ini").is_file() and (candidate / "alembic").is_dir():
             return candidate
