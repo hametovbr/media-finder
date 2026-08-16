@@ -2,21 +2,17 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from catalog_fixtures import CatalogFixture as CatalogService
 from fastapi.testclient import TestClient
-from media_finder.domain import CatalogService
-from media_finder.models import Acquisition
-from media_finder.sdk.types import NormalizedMetadata as LegacyNormalizedMetadata
+from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
 from media_finder_core.exports import EntityType, render_naming
 from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
 from media_finder_sdk import Episode, MediaKind, NormalizedMetadata, Provenance, Season
-from media_finder_server.runtime import create_standalone_processor_app as create_app
+from processor_fixtures import create_processor_test_app as create_app
 
 
-def _legacy(metadata: NormalizedMetadata) -> LegacyNormalizedMetadata:
-    payload = metadata.model_dump(mode="json")
-    provenance = payload["provenance"]
-    provenance["provider_key"] = provenance.pop("provider_id")
-    return LegacyNormalizedMetadata.model_validate(payload)
+def _legacy(metadata: NormalizedMetadata) -> NormalizedMetadata:
+    return metadata
 
 
 def _series(title: str = "Мой: сериал / ../ CON") -> NormalizedMetadata:

@@ -4,7 +4,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from media_finder_core.platform.database import migrate_to_head
 from media_finder_server.processor_api import APIError
-from media_finder_server.runtime import create_standalone_processor_app as create_app
+from processor_fixtures import create_processor_test_app as create_app
 
 
 def test_health_is_public_and_readiness_requires_alembic_head(tmp_path: Path, monkeypatch) -> None:

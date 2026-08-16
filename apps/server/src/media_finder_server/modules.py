@@ -14,14 +14,9 @@ from media_finder_metadata_manual import registration as manual_registration
 from media_finder_metadata_tmdb import registration as tmdb_registration
 from media_finder_release_prowlarr import registration as prowlarr_registration
 from media_finder_sdk import (
-    DownloadClientRegistration,
-    MetadataProviderRegistration,
     ModuleManifest,
     StaticModuleRegistry,
 )
-
-from .legacy_registry import create_legacy_registry
-from .legacy_sdk.registration import StaticModuleRegistry as LegacyModuleRegistry
 
 SELECTED_RELEASE_MODULE_ID = "prowlarr"
 SELECTED_DOWNLOAD_MODULE_ID = "qbittorrent"
@@ -55,36 +50,6 @@ def _create_module_registry(
         release=(release,),
         download=(download,),
     )
-
-
-def create_legacy_module_registry(
-    *,
-    runtime: ModuleRuntime | None = None,
-    registry: StaticModuleRegistry | None = None,
-) -> LegacyModuleRegistry:
-    """Bridge the new host registry while legacy contexts are moved into core."""
-
-    selected = registry or create_module_registry()
-    return create_legacy_registry(
-        editor_metadata=selected.metadata["manual"],
-        remote_metadata=selected.metadata["tmdb"],
-        remote_metadata_factory=_tmdb_registration,
-        download=selected.download["qbittorrent"],
-        download_factory=_qbittorrent_registration,
-        runtime=runtime,
-    )
-
-
-def _tmdb_registration(
-    client_factory: Callable[[], httpx.Client],
-) -> MetadataProviderRegistration:
-    return tmdb_registration(client_factory=client_factory)
-
-
-def _qbittorrent_registration(
-    client_factory: Callable[[], httpx.Client],
-) -> DownloadClientRegistration:
-    return qbittorrent_registration(client_factory=client_factory)
 
 
 def create_runtime_module_composition(
@@ -131,7 +96,6 @@ def _english_translations(package: str) -> dict[str, str]:
 
 __all__ = [
     "RuntimeModuleComposition",
-    "create_legacy_module_registry",
     "create_module_registry",
     "create_runtime_module_composition",
 ]

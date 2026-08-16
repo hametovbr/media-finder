@@ -2,28 +2,26 @@ import asyncio
 from uuid import UUID, uuid4
 
 import pytest
-from acquisition_fakes import StaticAcquisitionModules
-from media_finder.domain import CatalogService, RevisionInput
-from media_finder.models import Acquisition
-from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
+from catalog_fixtures import CatalogFixture as CatalogService
+from catalog_fixtures import RevisionInput
+from gateway_fixtures import create_gateway
 from media_finder_control import ControlFailure
 from media_finder_control.models import AcquisitionSubmissionRequest, ReleaseSearchRequest
 from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
-from media_finder_core.platform import EphemeralCache
+from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
 from media_finder_sdk import (
     MagnetArtifact,
+    MediaKind,
+    NormalizedMetadata,
     PrivateReleaseSelection,
+    Provenance,
     ReleaseCandidate,
     ReleaseSearchFilter,
     ReleaseSearchQuery,
     SafeReleaseSnapshot,
 )
-from media_finder_server import create_legacy_module_registry
 from media_finder_server.control_gateway import BackendControlGateway
-from media_finder_server.integration_runtime import RuntimeResolver
-from sqlalchemy.orm import Session, sessionmaker
-
-REGISTRY = create_legacy_module_registry()
+from sqlalchemy.orm import Session
 
 
 class FixtureReleaseProvider:
@@ -66,7 +64,7 @@ def _item(database: Session):
             NormalizedMetadata(
                 kind=MediaKind.MOVIE,
                 titles={"en": "Example"},
-                provenance=Provenance(provider_key="manual", external_id="item-1", locale="en"),
+                provenance=Provenance(provider_id="manual", external_id="item-1", locale="en"),
             )
         ),
     )
@@ -80,22 +78,11 @@ def _gateway(
     client,
     download_id: str = "fixture-download",
 ) -> BackendControlGateway:
-    sessions = sessionmaker(bind=database.get_bind(), expire_on_commit=False)
-    runtime = RuntimeResolver(
-        providers={},
-        acquisition=StaticAcquisitionModules(
-            releases=releases,
-            download_client=client,
-            download_id=download_id,
-        ),
-    )
-    return BackendControlGateway(
-        sessions=sessions,
-        cursor_secret=b"cursor-secret-for-tests",
-        runtime=runtime,
-        metadata_selections=EphemeralCache(),
-        manual_drafts=EphemeralCache(),
-        registry=REGISTRY,
+    return create_gateway(
+        database,
+        release_selections=releases,
+        download_client=client,
+        download_id=download_id,
     )
 
 

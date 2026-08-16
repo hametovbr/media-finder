@@ -5,8 +5,14 @@ from pathlib import Path
 import pytest
 from acquisition_fakes import StaticAcquisitionModules
 from fastapi.testclient import TestClient
-from media_finder.models import Acquisition, MediaItem, MetadataRevision
 from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
+from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
+from media_finder_core.catalog.persistence import (
+    MediaItemRecord as MediaItem,
+)
+from media_finder_core.catalog.persistence import (
+    MetadataRevisionRecord as MetadataRevision,
+)
 from media_finder_core.platform.database import migrate_to_head, session_factory
 from media_finder_sdk import (
     MagnetArtifact,
@@ -15,10 +21,8 @@ from media_finder_sdk import (
     ReleaseSearchQuery,
     SafeReleaseSnapshot,
 )
-from media_finder_server import create_legacy_module_registry, create_ui_app
 from sqlalchemy import func, select
-
-LEGACY_REGISTRY = create_legacy_module_registry()
+from ui_fixtures import create_ui_test_app
 
 
 def _csrf(text: str) -> str:
@@ -70,12 +74,11 @@ def workflow_app(
     prowlarr = ReleaseSelectionService(
         provider=FakeReleaseProvider(), cache=ReleaseSelectionCache()
     )
-    app = create_ui_app(
+    app = create_ui_test_app(
         database_url,
         session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
         providers={
-            fake_provider.manifest.key: fake_provider,
-            "manual": LEGACY_REGISTRY.retention_providers()["manual"],
+            fake_provider.manifest.module_id: fake_provider,
         },
         acquisition=StaticAcquisitionModules(
             releases=prowlarr,

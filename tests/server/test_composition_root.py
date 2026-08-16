@@ -5,34 +5,24 @@ from __future__ import annotations
 import ast
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import cast
 
 import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
+from media_finder_core.acquisition import ReleaseSelectionCache
 from media_finder_core.platform import migrate_to_head
-from media_finder_sdk import ReleaseProvider
-from media_finder_server import (
-    create_application,
-    create_legacy_module_registry,
-    create_runtime_factory,
-)
-from media_finder_server import modules as server_modules
+from media_finder_server import create_application
 from media_finder_server import runtime as server_runtime
-from media_finder_server.integration_runtime import DefaultRuntimeFactory
 
 ROOT = Path(__file__).parents[2]
 HOST = ROOT / "apps" / "server" / "src" / "media_finder_server"
 PRODUCTION_ROOTS = (
-    ROOT / "apps" / "server" / "src" / "media_finder",
     ROOT / "packages" / "core" / "src" / "media_finder_core",
     ROOT / "packages" / "builtin-ui" / "src" / "media_finder_builtin_ui",
 )
 SHARED_CONSTRUCTORS = {
     "BackendBrowserSecurity",
-    "DefaultRuntimeFactory",
     "EphemeralCache",
     "MaintenanceRunner",
     "ModuleRuntime",
@@ -113,56 +103,19 @@ def test_application_shell_allocates_nothing_before_lifespan(
     assert getattr(application.state, "resources", None) is None
 
 
-def test_compatibility_factory_borrows_release_selection_service() -> None:
-    """Catch compatibility cleanup duplicating the service owner's cache close."""
-
-    cache = _RecordingReleaseCache()
-    selections = ReleaseSelectionService(
-        provider=cast(ReleaseProvider, object()),
-        cache=cache,
-    )
-    factory = DefaultRuntimeFactory(
-        registry=create_legacy_module_registry(),
-        environment={},
-        release_selections=selections,
-    )
-
-    factory.close()
-    factory.close()
-    assert cache.clear_calls == 0
-
-    selections.close()
-    assert cache.clear_calls == 1
-
-
-def test_production_control_uses_no_legacy_registry_or_runtime_adapters(
+def test_production_control_uses_the_typed_registry_and_module_runtime(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Catch the production graph restoring legacy registry/runtime construction."""
+    """Catch production control diverging from the root-owned typed module graph."""
 
     _configure(monkeypatch, tmp_path, ui_mode="disabled", filename="typed-control.db")
-
-    def legacy_used(*_: object, **__: object) -> object:
-        raise AssertionError("legacy_control_adapter_used")
-
-    monkeypatch.setattr(server_modules, "create_legacy_registry", legacy_used)
-    monkeypatch.setattr(
-        "media_finder_server.integration_runtime.DefaultRuntimeFactory.__init__",
-        legacy_used,
-    )
-    monkeypatch.setattr(
-        "media_finder_server.integration_runtime.RuntimeResolver.__init__",
-        legacy_used,
-    )
 
     application = create_application()
     with TestClient(application):
         resources = application.state.resources
         assert resources.registry is resources.module_runtime.registry
-        assert not hasattr(resources, "legacy_registry")
-        assert not hasattr(resources, "runtime_factory")
-        assert not hasattr(resources, "runtime")
+        assert resources.release_selections is not None
 
 
 @pytest.mark.parametrize(
@@ -224,21 +177,6 @@ def test_typed_diagnostics_preserve_frozen_compatibility_codes(
             return httpx.Response(404)
 
         return httpx.Client(transport=httpx.MockTransport(handler))
-
-    compatibility = create_runtime_factory(
-        environment=environment,
-        http_client_factory=client_factory,
-    )
-    try:
-        frozen = {
-            "manual": None,
-            "tmdb": compatibility.metadata_provider("tmdb").error_code,
-            "prowlarr": compatibility.release_selections().error_code,
-            "qbittorrent": compatibility.selected_download_client().error_code,
-        }
-    finally:
-        compatibility.close()
-    assert frozen == expected
 
     application = create_application(
         environment=environment,

@@ -6,19 +6,22 @@ from uuid import uuid4
 import pytest
 from acquisition_fakes import StaticAcquisitionModules
 from fastapi.testclient import TestClient
-from media_finder.models import Acquisition, MediaItem
-from media_finder.sdk.types import CorrelationResult, DownloadDestination, SubmissionResult
 from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
+from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
+from media_finder_core.catalog.persistence import MediaItemRecord as MediaItem
 from media_finder_core.platform.database import migrate_to_head, session_factory
 from media_finder_sdk import (
+    CorrelationResult,
+    DownloadDestination,
     MagnetArtifact,
     PrivateReleaseSelection,
     ReleaseCandidate,
     ReleaseSearchQuery,
     SafeReleaseSnapshot,
+    SubmissionResult,
 )
-from media_finder_server import create_ui_app
 from sqlalchemy import select
+from ui_fixtures import create_ui_test_app
 
 
 def _csrf(text: str) -> str:
@@ -58,6 +61,9 @@ class MutableClient:
         self.destinations = [DownloadDestination(key="movies", label="MOVIES")]
         self.tasks: dict[str, str] = {}
 
+    def validate(self) -> None:
+        return None
+
     def list_destinations(self) -> list[DownloadDestination]:
         return list(self.destinations)
 
@@ -72,6 +78,9 @@ class MutableClient:
             external_task_id="task" if correlation in self.tasks else None,
         )
 
+    def close(self) -> None:
+        return None
+
 
 @pytest.fixture
 def release_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -79,7 +88,7 @@ def release_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     migrate_to_head(database_url)
     monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long test session secret")
     qbittorrent = MutableClient()
-    app = create_ui_app(
+    app = create_ui_test_app(
         database_url,
         session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
         acquisition=StaticAcquisitionModules(

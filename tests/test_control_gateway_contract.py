@@ -2,29 +2,17 @@ import asyncio
 import inspect
 
 import pytest
-from media_finder.domain import CatalogService, RevisionInput
-from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
+from catalog_fixtures import CatalogFixture as CatalogService
+from catalog_fixtures import RevisionInput
+from gateway_fixtures import create_gateway
 from media_finder_control import ControlFailure, ControlGateway, Locale, PageRequest
-from media_finder_core.platform import EphemeralCache
-from media_finder_server import create_legacy_module_registry
+from media_finder_sdk import MediaKind, NormalizedMetadata, Provenance
 from media_finder_server.control_gateway import BackendControlGateway
-from media_finder_server.integration_runtime import RuntimeResolver
-from sqlalchemy.orm import Session, sessionmaker
-
-REGISTRY = create_legacy_module_registry()
+from sqlalchemy.orm import Session
 
 
 def _gateway(database: Session) -> BackendControlGateway:
-    return BackendControlGateway(
-        sessions=sessionmaker(bind=database.get_bind(), expire_on_commit=False),
-        cursor_secret=b"cursor-secret-for-tests",
-        metadata_selections=EphemeralCache(),
-        manual_drafts=EphemeralCache(),
-        runtime=RuntimeResolver(
-            providers={},
-        ),
-        registry=REGISTRY,
-    )
+    return create_gateway(database)
 
 
 def test_real_gateway_implements_every_public_async_operation(database: Session) -> None:
@@ -48,7 +36,7 @@ def test_collection_and_item_operations_share_stable_gateway_failures(database: 
             NormalizedMetadata(
                 kind=MediaKind.MOVIE,
                 titles={"en": "Example"},
-                provenance=Provenance(provider_key="manual", external_id="item-1", locale="en"),
+                provenance=Provenance(provider_id="manual", external_id="item-1", locale="en"),
             )
         ),
     )

@@ -11,16 +11,12 @@ from typing import Any
 __all__ = [
     "ApplicationResources",
     "create_application",
-    "create_legacy_module_registry",
     "create_module_registry",
-    "create_runtime_factory",
-    "create_ui_app",
     "run",
 ]
 
 _MODULE_EXPORTS = frozenset(
     {
-        "create_legacy_module_registry",
         "create_module_registry",
     }
 )
@@ -28,8 +24,6 @@ _RUNTIME_EXPORTS = frozenset(
     {
         "ApplicationResources",
         "create_application",
-        "create_runtime_factory",
-        "create_ui_app",
         "run",
     }
 )

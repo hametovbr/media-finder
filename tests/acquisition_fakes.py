@@ -2,25 +2,21 @@
 
 from __future__ import annotations
 
-from media_finder_core.acquisition import ReleaseSelectionService
+from media_finder_core.acquisition import ModuleVersionSnapshot, ReleaseSelectionService
+from media_finder_core.control import ControlPortError
 from media_finder_sdk import (
-    CorrelationResult,
-    DownloadArtifact,
     DownloadClient,
-    DownloadDestination,
     EnvironmentVariableSpec,
     ModuleKind,
     ModuleManifest,
-    SubmissionResult,
 )
-from media_finder_server.integration_runtime import RuntimeResult
 
 
 def _manifest(module_id: str, kind: ModuleKind, version: str) -> ModuleManifest:
     capabilities = (
-        frozenset({"search", "resolve"})
+        frozenset({"search", "resolve", "magnet"})
         if kind is ModuleKind.RELEASE_PROVIDER
-        else frozenset({"magnet", "torrent"})
+        else frozenset({"destinations", "submit", "correlation", "magnet", "torrent"})
     )
     environment = (
         (
@@ -100,58 +96,29 @@ class StaticAcquisitionModules:
             download_version,
         )
         self._releases = releases
-        self._download_client = (
-            _TypedDownloadClient(download_client) if download_client is not None else None
+        self._download_client = download_client
+
+    def release_selections(self) -> ReleaseSelectionService:
+        if self._releases is None:
+            raise ControlPortError("release_provider_unavailable")
+        return self._releases
+
+    def download_client(self) -> DownloadClient:
+        if self._download_client is None:
+            raise ControlPortError("download_client_unavailable")
+        return self._download_client
+
+    def release_module(self) -> ModuleVersionSnapshot:
+        return ModuleVersionSnapshot(
+            module_id=self.release_manifest.module_id,
+            module_version=self.release_manifest.module_version,
         )
 
-    def release_selections(self) -> RuntimeResult[ReleaseSelectionService]:
-        return RuntimeResult(
-            self._releases,
-            None if self._releases is not None else "release_provider_unavailable",
-        )
-
-    def selected_download_client(self) -> RuntimeResult[DownloadClient]:
-        return RuntimeResult(
-            self._download_client,
-            None if self._download_client is not None else "download_client_unavailable",
+    def download_module(self) -> ModuleVersionSnapshot:
+        return ModuleVersionSnapshot(
+            module_id=self.download_manifest.module_id,
+            module_version=self.download_manifest.module_version,
         )
 
 
 __all__ = ["StaticAcquisitionModules"]
-
-
-class _TypedDownloadClient:
-    """Adapt transitional server test doubles to the canonical SDK protocol."""
-
-    def __init__(self, client: object) -> None:
-        self._client = client
-
-    def validate(self) -> None:
-        validate = getattr(self._client, "validate", None)
-        if callable(validate):
-            validate()
-            return
-        validate_config = self._client.validate_config
-        validate_config()
-
-    def list_destinations(self) -> tuple[DownloadDestination, ...]:
-        values = self._client.list_destinations()
-        return tuple(
-            DownloadDestination.model_validate(value.model_dump(mode="json")) for value in values
-        )
-
-    def submit(
-        self,
-        artifact: DownloadArtifact,
-        destination: str,
-        correlation: str,
-    ) -> SubmissionResult:
-        value = self._client.submit(artifact, destination, correlation)
-        return SubmissionResult.model_validate(value.model_dump(mode="json"))
-
-    def find_by_correlation(self, correlation: str) -> CorrelationResult:
-        value = self._client.find_by_correlation(correlation)
-        return CorrelationResult.model_validate(value.model_dump(mode="json"))
-
-    def close(self) -> None:
-        return None

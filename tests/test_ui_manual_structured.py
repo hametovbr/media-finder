@@ -4,10 +4,15 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from media_finder.models import MediaItem, MetadataRevision
+from media_finder_core.catalog.persistence import (
+    MediaItemRecord as MediaItem,
+)
+from media_finder_core.catalog.persistence import (
+    MetadataRevisionRecord as MetadataRevision,
+)
 from media_finder_core.platform.database import migrate_to_head, session_factory
-from media_finder_server import create_ui_app
 from sqlalchemy import func, select
+from ui_fixtures import create_ui_test_app
 
 
 def _csrf(text: str) -> str:
@@ -21,7 +26,7 @@ def manual_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     url = f"sqlite:///{tmp_path / 'manual-ui.db'}"
     migrate_to_head(url)
     monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long test session secret")
-    return create_ui_app(url, session_secret_reference="env:MEDIA_FINDER_UI_SECRET")
+    return create_ui_test_app(url, session_secret_reference="env:MEDIA_FINDER_UI_SECRET")
 
 
 def test_structured_manual_series_create_and_confirmed_edit_are_immutable(manual_app) -> None:

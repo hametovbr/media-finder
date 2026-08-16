@@ -38,7 +38,6 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 python_version = "3.13"
 strict = true
 packages = [
-  "media_finder",
   "media_finder_server",
   "media_finder_core",
   "media_finder_sdk",
@@ -62,7 +61,7 @@ mypy_path = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--strict-config --strict-markers --cov=media_finder --cov-branch --cov-report=term-missing"
+addopts = "--strict-config --strict-markers --cov=media_finder_server --cov=media_finder_core --cov-branch --cov-report=term-missing"
 testpaths = ["tests"]
 pythonpath = []
 # Starlette 1.x still falls back to httpx while its test client migrates to the

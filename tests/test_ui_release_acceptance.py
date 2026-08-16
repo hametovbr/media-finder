@@ -4,22 +4,19 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from catalog_fixtures import CatalogFixture as CatalogService
+from catalog_fixtures import RevisionInput
 from fastapi.testclient import TestClient
-from media_finder.domain import CatalogService, RevisionInput
-from media_finder.models import MediaItem, MetadataRevision
-from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
+from media_finder_core.catalog.persistence import (
+    MediaItemRecord as MediaItem,
+)
+from media_finder_core.catalog.persistence import (
+    SqlAlchemyCatalogRepository,
+)
 from media_finder_core.exports import EntityType, render_naming, render_nfo
 from media_finder_core.platform.database import migrate_to_head, session_factory
-from media_finder_sdk import NormalizedMetadata as CoreNormalizedMetadata
-from media_finder_server import create_ui_app
-from sqlalchemy import select
-
-
-def _core_metadata(metadata: NormalizedMetadata) -> CoreNormalizedMetadata:
-    payload = metadata.model_dump(mode="json")
-    provenance = payload["provenance"]
-    provenance["provider_id"] = provenance.pop("provider_key")
-    return CoreNormalizedMetadata.model_validate(payload)
+from media_finder_sdk import MediaKind, NormalizedMetadata, Provenance
+from ui_fixtures import create_ui_test_app
 
 
 def _csrf(text: str) -> str:
@@ -45,7 +42,7 @@ def acceptance_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     url = f"sqlite:///{tmp_path / 'acceptance.db'}"
     migrate_to_head(url)
     monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long test session secret")
-    return create_ui_app(url, session_secret_reference="env:MEDIA_FINDER_UI_SECRET")
+    return create_ui_test_app(url, session_secret_reference="env:MEDIA_FINDER_UI_SECRET")
 
 
 def test_rich_manual_import_edit_preserves_unedited_contract_fields(acceptance_app) -> None:
@@ -136,16 +133,12 @@ def test_rich_manual_import_edit_preserves_unedited_contract_fields(acceptance_a
     with sessions() as database:
         item = database.get(MediaItem, item_id)
         assert item is not None and item.current_revision is not None
-        revisions = list(
-            database.scalars(
-                select(MetadataRevision)
-                .where(MetadataRevision.media_item_id == item_id)
-                .order_by(MetadataRevision.revision_number)
-            )
-        )
+        revisions = SqlAlchemyCatalogRepository(database).list_revisions(item_id)
         assert len(revisions) == 2
-        assert revisions[0].effective_payload["titles"]["en"] == "Rich show"
-        metadata = NormalizedMetadata.model_validate(item.current_revision.effective_payload)
+        assert revisions[0].effective is not None
+        assert revisions[0].effective.titles["en"] == "Rich show"
+        metadata = revisions[-1].effective
+        assert metadata is not None
         assert metadata.titles == {"en": "Rich show revised", "ru": "Богатый сериал"}
         assert metadata.original_title == "Original"
         assert str(metadata.release_date) == "2024-01-02"
@@ -167,11 +160,10 @@ def test_rich_manual_import_edit_preserves_unedited_contract_fields(acceptance_a
         assert episode.runtime_minutes == 25
         assert episode.provider_ids == {"tmdb": "e1"}
         assert episode.ordering == 7
-        exported_metadata = _core_metadata(metadata)
         assert (
             "Rich show revised"
             in render_naming(
-                exported_metadata,
+                metadata,
                 entity_type=EntityType.EPISODE,
                 season_number=0,
                 episode_numbers=(1,),
@@ -180,7 +172,7 @@ def test_rich_manual_import_edit_preserves_unedited_contract_fields(acceptance_a
         assert (
             "<displayepisode>7</displayepisode>"
             in render_nfo(
-                exported_metadata,
+                metadata,
                 entity_type=EntityType.EPISODE,
                 season_number=0,
                 episode_numbers=(1,),
@@ -196,7 +188,7 @@ def test_existing_identity_cannot_change_media_kind(database) -> None:
     series = NormalizedMetadata(
         kind=MediaKind.SERIES,
         titles={"en": "Wrong"},
-        provenance=Provenance(provider_key="manual", external_id=item.external_id, locale="en"),
+        provenance=Provenance(provider_id="manual", external_id=item.external_id, locale="en"),
     )
     with pytest.raises(ValueError, match="provider_identity_mismatch"):
         catalog.add_revision(item, RevisionInput(normalized=series))
@@ -243,7 +235,7 @@ def test_catalog_renders_safe_lazy_poster_and_placeholder(acceptance_app) -> Non
                             }
                         ],
                         "provenance": {
-                            "provider_key": "tmdb",
+                            "provider_id": "tmdb",
                             "external_id": with_poster.external_id,
                             "locale": "en",
                         },
@@ -259,7 +251,7 @@ def test_catalog_renders_safe_lazy_poster_and_placeholder(acceptance_app) -> Non
                     kind=MediaKind.MOVIE,
                     titles={"en": "Placeholder"},
                     provenance=Provenance(
-                        provider_key="manual", external_id=without.external_id, locale="en"
+                        provider_id="manual", external_id=without.external_id, locale="en"
                     ),
                 )
             ),
@@ -287,7 +279,7 @@ def test_legacy_download_client_lifecycle_is_absent_and_unreachable(
                     kind=MediaKind.MOVIE,
                     titles={"en": "Client lifecycle"},
                     provenance=Provenance(
-                        provider_key="manual", external_id=item.external_id, locale="en"
+                        provider_id="manual", external_id=item.external_id, locale="en"
                     ),
                 )
             ),

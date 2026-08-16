@@ -1,4 +1,4 @@
-"""Compatibility composition for the core browser-control facade."""
+"""Server composition for the core browser-control facade."""
 
 from __future__ import annotations
 
@@ -44,14 +44,8 @@ from .control_adapters import (
     AcquisitionRuntimeAdapter,
     CatalogControlUnitOfWork,
     DiagnosticsRuntimeAdapter,
-    LegacyAcquisitionRuntimeAdapter,
-    LegacyDiagnosticsRuntimeAdapter,
-    LegacyMetadataRuntimeAdapter,
-    MetadataCapabilitiesPort,
     MetadataRuntimeAdapter,
 )
-from .integration_runtime import RuntimeResolver
-from .legacy_sdk.registration import StaticModuleRegistry as LegacyModuleRegistry
 
 __all__ = ["BackendControlGateway", "CursorCodec"]
 
@@ -66,15 +60,13 @@ class BackendControlGateway(ControlFacade):
         cursor_secret: bytes,
         metadata_selections: EphemeralCache[CoreMetadataSearchResult],
         manual_drafts: EphemeralCache[ManualDraft],
-        registry: TypedModuleRegistry | LegacyModuleRegistry,
-        module_runtime: ModuleRuntime | None = None,
-        release_selections: ReleaseSelectionService | None = None,
-        release_manifest: ModuleManifest | None = None,
-        download_manifest: ModuleManifest | None = None,
+        registry: TypedModuleRegistry,
+        module_runtime: ModuleRuntime,
+        release_selections: ReleaseSelectionService,
+        release_manifest: ModuleManifest,
+        download_manifest: ModuleManifest,
         environment: Mapping[str, str] | None = None,
         attribution_notices: Mapping[str, str] | None = None,
-        runtime: RuntimeResolver | None = None,
-        metadata_capabilities: MetadataCapabilitiesPort | None = None,
         build_version: str = "0.1.0",
     ) -> None:
         catalog_queries = SqlAlchemyCatalogQueries(sessions)
@@ -85,45 +77,24 @@ class BackendControlGateway(ControlFacade):
             catalog=catalog_queries,
             acquisitions=acquisition_queries,
         )
-        metadata_modules: MetadataControlModules
-        acquisition_modules: AcquisitionControlModules
-        diagnostics_modules: DiagnosticsControlModules
-        if module_runtime is not None:
-            if not isinstance(registry, TypedModuleRegistry):
-                raise TypeError("typed_module_registry_required")
-            if release_selections is None or release_manifest is None or download_manifest is None:
-                raise TypeError("typed_acquisition_resources_required")
-            metadata_modules = MetadataRuntimeAdapter(
-                runtime=module_runtime,
-                registry=registry,
-            )
-            acquisition_modules = AcquisitionRuntimeAdapter(
-                runtime=module_runtime,
-                release_selections=release_selections,
-                release_manifest=release_manifest,
-                download_manifest=download_manifest,
-            )
-            diagnostics_modules = DiagnosticsRuntimeAdapter(
-                runtime=module_runtime,
-                registry=registry,
-                environment=environment or {},
-                release_manifest=release_manifest,
-                download_manifest=download_manifest,
-                attribution_notices=attribution_notices or {},
-            )
-        else:
-            if not isinstance(registry, LegacyModuleRegistry):
-                raise TypeError("legacy_module_registry_required")
-            metadata_modules = LegacyMetadataRuntimeAdapter(
-                runtime=runtime,
-                registry=registry,
-                capabilities=metadata_capabilities,
-            )
-            acquisition_modules = LegacyAcquisitionRuntimeAdapter(runtime)
-            diagnostics_modules = LegacyDiagnosticsRuntimeAdapter(
-                runtime=runtime,
-                registry=registry,
-            )
+        metadata_modules: MetadataControlModules = MetadataRuntimeAdapter(
+            runtime=module_runtime,
+            registry=registry,
+        )
+        acquisition_modules: AcquisitionControlModules = AcquisitionRuntimeAdapter(
+            runtime=module_runtime,
+            release_selections=release_selections,
+            release_manifest=release_manifest,
+            download_manifest=download_manifest,
+        )
+        diagnostics_modules: DiagnosticsControlModules = DiagnosticsRuntimeAdapter(
+            runtime=module_runtime,
+            registry=registry,
+            environment=environment or {},
+            release_manifest=release_manifest,
+            download_manifest=download_manifest,
+            attribution_notices=attribution_notices or {},
+        )
         super().__init__(
             catalog=CatalogControlService(
                 query_port=catalog_queries,

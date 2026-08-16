@@ -12,44 +12,43 @@ import httpx
 import pytest
 import uvicorn
 from acquisition_fakes import StaticAcquisitionModules
+from catalog_fixtures import CatalogFixture as CatalogService
+from catalog_fixtures import RevisionInput
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, Response
-from media_finder.domain import CatalogService, RevisionInput
-from media_finder.models import Acquisition, MediaItem
-from media_finder.sdk.types import (
-    Attribution,
+from media_finder_builtin_ui import create_builtin_ui
+from media_finder_builtin_ui.fake import FakeBrowserSecurity, FakeControlGateway
+from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
+from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
+from media_finder_core.catalog.persistence import MediaItemRecord as MediaItem
+from media_finder_core.platform.database import migrate_to_head, session_factory
+from media_finder_sdk import (
+    AttributionSpec,
     CorrelationResult,
+    DownloadArtifact,
     DownloadDestination,
+    MagnetArtifact,
     MediaKind,
+    MetadataIdentity,
+    MetadataSearchQuery,
     MetadataSearchResult,
     ModuleKind,
     ModuleManifest,
     NormalizedMetadata,
-    Provenance,
-    RetentionAction,
-    RetentionActionKind,
-    RetentionPolicy,
-    SubmissionResult,
-)
-from media_finder_builtin_ui import create_builtin_ui
-from media_finder_builtin_ui.fake import FakeBrowserSecurity, FakeControlGateway
-from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
-from media_finder_core.platform.database import migrate_to_head, session_factory
-from media_finder_sdk import (
-    MagnetArtifact,
     PrivateReleaseSelection,
+    Provenance,
+    ProviderPayload,
     ReleaseCandidate,
     ReleaseSearchQuery,
     SafeReleaseSnapshot,
+    SubmissionResult,
 )
-from media_finder_server import create_legacy_module_registry, create_ui_app
+from media_finder_server import create_application
 from media_finder_server.control_api import create_control_app
 from media_finder_server.control_security import BackendBrowserSecurity
 from playwright.sync_api import Browser, Page, Playwright, sync_playwright
-from pydantic import BaseModel
 from sqlalchemy import func, select
-
-LEGACY_REGISTRY = create_legacy_module_registry()
+from ui_fixtures import create_ui_test_app
 
 
 def _port() -> int:
@@ -58,63 +57,57 @@ def _port() -> int:
         return int(listener.getsockname()[1])
 
 
-class EmptyConfig(BaseModel):
-    pass
-
-
 class BrowserProvider:
-    config_model = EmptyConfig
-
     def __init__(self, key: str) -> None:
         self.manifest = ModuleManifest(
-            key=key,
-            version="1.0.0",
+            module_id=key,
+            module_kind=ModuleKind.METADATA_PROVIDER,
+            module_version="1.0.0",
+            sdk_compatibility=">=1,<2",
             contract_version="1",
             name_key=f"module.{key}.name",
-            capabilities=frozenset({"movie"}),
+            capabilities=frozenset({"search", "fetch", "normalize"}),
+            translation_keys=frozenset({f"module.{key}.name", f"module.{key}.notice"}),
+            attribution=AttributionSpec(notice_key=f"module.{key}.notice"),
         )
 
-    def validate_config(self) -> None:
+    def validate(self) -> None:
         return None
 
-    def search(self, query: str, locale: str) -> list[MetadataSearchResult]:
-        return [
+    def search(self, query: MetadataSearchQuery) -> tuple[MetadataSearchResult, ...]:
+        return (
             MetadataSearchResult(
-                provider_key=self.manifest.key,
-                external_id=f"{self.manifest.key}-shared",
-                kind=MediaKind.MOVIE,
+                provider_id=self.manifest.module_id,
+                external_id=f"{self.manifest.module_id}-shared",
+                media_kind=MediaKind.MOVIE,
                 title="Shared Title",
                 year=2024,
-                locale=locale,
-            )
-        ]
-
-    def fetch(self, kind: str, external_id: str, locale: str) -> dict[str, object]:
-        return {"title": "Shared Title", "year": 2024}
-
-    def normalize(self, payload, kind: str, external_id: str, locale: str) -> NormalizedMetadata:
-        return NormalizedMetadata(
-            kind=MediaKind.MOVIE,
-            titles={locale: "Shared Title"},
-            year=2024,
-            provenance=Provenance(
-                provider_key=self.manifest.key, external_id=external_id, locale=locale
+                locale=query.locale,
             ),
         )
 
-    def attribution(self) -> Attribution:
-        return Attribution(
-            provider_key=self.manifest.key,
-            notice=f"Fixture data from {self.manifest.key}",
+    def fetch(self, identity: MetadataIdentity) -> ProviderPayload:
+        del identity
+        return ProviderPayload(data={"title": "Shared Title", "year": 2024})
+
+    def normalize(
+        self,
+        payload: ProviderPayload,
+        identity: MetadataIdentity,
+    ) -> NormalizedMetadata:
+        del payload
+        return NormalizedMetadata(
+            kind=identity.media_kind,
+            titles={identity.locale: "Shared Title"},
+            year=2024,
+            provenance=Provenance(
+                provider_id=self.manifest.module_id,
+                external_id=identity.external_id,
+                locale=identity.locale,
+            ),
         )
 
-    def retention_for(self, created_at: datetime) -> RetentionPolicy:
-        return RetentionPolicy()
-
-    def plan_retention(self, policy, now: datetime) -> RetentionAction:
-        return RetentionAction(kind=RetentionActionKind.NONE)
-
-    def export_warning(self, policy, now: datetime):
+    def close(self) -> None:
         return None
 
 
@@ -144,26 +137,30 @@ class BrowserReleaseProvider:
 
 class BrowserClient:
     manifest = ModuleManifest(
-        key="browser-client",
-        version="1.0.0",
+        module_id="browser-client",
+        module_kind=ModuleKind.DOWNLOAD_CLIENT,
+        module_version="1.0.0",
+        sdk_compatibility=">=1,<2",
         contract_version="1",
         name_key="browser.client",
-        kind=ModuleKind.DOWNLOAD_CLIENT,
-        capabilities=frozenset({"magnet", "correlation"}),
+        capabilities=frozenset({"destinations", "submit", "correlation", "magnet"}),
+        translation_keys=frozenset({"browser.client"}),
     )
-    config_model = EmptyConfig
 
     def __init__(self, destination: str) -> None:
         self.destination = destination
         self.tasks: dict[str, str] = {}
 
-    def validate_config(self) -> None:
+    def validate(self) -> None:
         return None
 
-    def list_destinations(self) -> list[DownloadDestination]:
-        return [DownloadDestination(key=self.destination, label=self.destination.upper())]
+    def list_destinations(self) -> tuple[DownloadDestination, ...]:
+        return (DownloadDestination(key=self.destination, label=self.destination.upper()),)
 
-    def submit(self, artifact, destination: str, correlation: str) -> SubmissionResult:
+    def submit(
+        self, artifact: DownloadArtifact, destination: str, correlation: str
+    ) -> SubmissionResult:
+        del artifact
         self.tasks[correlation] = destination
         return SubmissionResult(
             accepted=True, external_task_id="browser-task", correlation=correlation
@@ -176,6 +173,9 @@ class BrowserClient:
             external_task_id="reconciled-task",
             conclusive=True,
         )
+
+    def close(self) -> None:
+        return None
 
 
 @dataclass(frozen=True)
@@ -214,13 +214,19 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long browser test secret")
     clients = {"qBittorrent": BrowserClient("second")}
 
-    app = create_ui_app(
+    app = create_ui_test_app(
         database_url,
         session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
+        environment={
+            "PROWLARR_URL": "https://prowlarr.browser.test",
+            "PROWLARR_API_KEY": "browser-prowlarr-secret",
+            "QBITTORRENT_URL": "https://qbittorrent.browser.test",
+            "QBITTORRENT_USERNAME": "browser-user",
+            "QBITTORRENT_PASSWORD": "browser-password",
+        },
         providers={
             "provider-a": BrowserProvider("provider-a"),
             "provider-b": BrowserProvider("provider-b"),
-            "manual": LEGACY_REGISTRY.retention_providers()["manual"],
         },
         acquisition=StaticAcquisitionModules(
             releases=ReleaseSelectionService(
@@ -246,7 +252,7 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             kind=MediaKind.MOVIE,
             titles={"en": "Pending Movie", "ru": "Ожидающий фильм"},
             year=2024,
-            provenance=Provenance(provider_key="manual", external_id=item.external_id, locale="en"),
+            provenance=Provenance(provider_id="manual", external_id=item.external_id, locale="en"),
         )
         revision = CatalogService(session).add_revision(item, RevisionInput(normalized=metadata))
         pending = Acquisition(
@@ -308,9 +314,20 @@ def default_runtime_browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     def factory() -> httpx.Client:
         return httpx.Client(transport=httpx.MockTransport(handler))
 
-    rebuilt = create_ui_app(
-        database_url,
-        session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
+    rebuilt = create_application(
+        environment={
+            "MEDIA_FINDER_DATABASE_URL": database_url,
+            "MEDIA_FINDER_UI_SECRET": "a sufficiently long browser test secret",
+            "MEDIA_FINDER_INTEGRATION_TOKEN": "browser-integration-token",
+            "MEDIA_FINDER_SECURE_COOKIE": "false",
+            "MEDIA_FINDER_UI_MODE": "builtin",
+            "TMDB_TOKEN": "tmdb",
+            "PROWLARR_URL": "https://prowlarr.example.test",
+            "PROWLARR_API_KEY": "prowlarr",
+            "QBITTORRENT_URL": "https://qb.example.test",
+            "QBITTORRENT_USERNAME": "user",
+            "QBITTORRENT_PASSWORD": "password",
+        },
         http_client_factory=factory,
     )
     port = _port()
@@ -350,10 +367,15 @@ def unavailable_runtime_browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyP
             return httpx.Response(200, text="Ok.")
         return httpx.Response(200, json={})
 
-    app = create_ui_app(
-        database_url,
-        session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
-        environment=environment,
+    app = create_application(
+        environment={
+            "MEDIA_FINDER_DATABASE_URL": database_url,
+            "MEDIA_FINDER_UI_SECRET": "a sufficiently long browser test secret",
+            "MEDIA_FINDER_INTEGRATION_TOKEN": "browser-integration-token",
+            "MEDIA_FINDER_SECURE_COOKIE": "false",
+            "MEDIA_FINDER_UI_MODE": "builtin",
+            **environment,
+        },
         http_client_factory=lambda: httpx.Client(transport=httpx.MockTransport(handler)),
     )
     app.state.test_environment_values = tuple(environment.values())
@@ -809,7 +831,7 @@ def test_metadata_locale_poster_placeholder_and_read_only_settings_browser(
     assert page.locator('[data-environment-variable="QBITTORRENT_PASSWORD"]').is_visible()
     page.get_by_test_id("locale-switcher").select_option("ru")
     page.wait_for_load_state("networkidle")
-    assert page.locator('[data-environment-variable="TMDB_TOKEN"]').is_visible()
+    assert page.locator('[data-environment-variable="PROWLARR_URL"]').is_visible()
     _axe(page, browser_site)
     assert failures == []
     page.context.close()

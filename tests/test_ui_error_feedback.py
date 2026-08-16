@@ -6,10 +6,11 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from media_finder.models import Acquisition, MediaItem
+from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
+from media_finder_core.catalog.persistence import MediaItemRecord as MediaItem
 from media_finder_core.platform.database import migrate_to_head, session_factory
-from media_finder_server import create_ui_app
 from sqlalchemy import select
+from ui_fixtures import create_ui_test_app
 
 
 def _csrf(text: str) -> str:
@@ -23,7 +24,7 @@ def feedback_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     database_url = f"sqlite:///{tmp_path / 'feedback.db'}"
     migrate_to_head(database_url)
     monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long test session secret")
-    return create_ui_app(database_url, session_secret_reference="env:MEDIA_FINDER_UI_SECRET")
+    return create_ui_test_app(database_url, session_secret_reference="env:MEDIA_FINDER_UI_SECRET")
 
 
 def test_same_stable_error_code_has_localized_message_and_csrf_is_localized(

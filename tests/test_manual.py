@@ -7,8 +7,10 @@ from threading import Barrier, Event
 from uuid import UUID, uuid4
 
 import pytest
-from media_finder.models import MediaItem
 from media_finder_core.catalog import ManualCatalogService
+from media_finder_core.catalog.persistence import (
+    MediaItemRecord as MediaItem,
+)
 from media_finder_core.catalog.persistence import (
     SqlAlchemyCatalogQueries,
     SqlAlchemyCatalogUnitOfWork,

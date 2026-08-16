@@ -192,7 +192,11 @@ function validateImage(root, verify, verifyText, failures) {
     dockerfile.includes("uv sync --frozen --no-dev --no-editable"),
     "Dockerfile: workspace packages must be installed non-editably for the runtime stage",
   );
-  for (const packageName of ["media_finder", "media_finder_builtin_ui", "media_finder_control"]) {
+  for (const packageName of [
+    "media_finder_server",
+    "media_finder_builtin_ui",
+    "media_finder_control",
+  ]) {
     requireValue(
       failures,
       dockerfile.includes("uv sync --frozen --no-dev") &&

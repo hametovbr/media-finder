@@ -9,7 +9,6 @@ from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
 import httpx
 import uvicorn
@@ -47,14 +46,10 @@ from starlette.types import Receive, Scope, Send
 from .control_api import create_control_app
 from .control_gateway import BackendControlGateway
 from .control_security import BackendBrowserSecurity
-from .integration_runtime import DefaultRuntimeFactory
 from .modules import (
-    RuntimeModuleComposition,
-    create_legacy_module_registry,
     create_runtime_module_composition,
 )
 from .processor_api import create_processor_app
-from .ui import create_ui_app as _create_ui_app
 
 MAINTENANCE_CHECK_SECONDS = 60 * 60
 logger = logging.getLogger(__name__)
@@ -129,60 +124,6 @@ def database_url() -> str:
 
 def ui_mode() -> str:
     return core_configuration().ui_mode
-
-
-class _StandaloneRuntimeLifecycle:
-    """Own compatibility resources without transferring ownership to the factory."""
-
-    def __init__(self, composition: RuntimeModuleComposition) -> None:
-        self._composition = composition
-        self._closed = False
-
-    def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        first_error: BaseException | None = None
-        for operation in (
-            self._composition.release_selections.close,
-            self._composition.runtime.close,
-        ):
-            try:
-                operation()
-            except BaseException as error:
-                if first_error is None:
-                    first_error = error
-        if first_error is not None:
-            raise first_error
-
-
-def create_runtime_factory(
-    *,
-    http_client_factory: Callable[[], httpx.Client] = httpx.Client,
-    environment: Mapping[str, str] | None = None,
-) -> DefaultRuntimeFactory:
-    """Create an owned standalone integration graph for compatibility tests."""
-
-    snapshot = dict(os.environ if environment is None else environment)
-    release_cache = ReleaseSelectionCache()
-    composition = create_runtime_module_composition(
-        environment=snapshot,
-        client_factory=http_client_factory,
-        release_cache=release_cache,
-    )
-    return DefaultRuntimeFactory(
-        http_client_factory=http_client_factory,
-        registry=create_legacy_module_registry(
-            runtime=composition.runtime,
-            registry=composition.registry,
-        ),
-        environment=snapshot,
-        lifecycle=_StandaloneRuntimeLifecycle(composition),
-        module_runtime=composition.runtime,
-        release_manifest=composition.release_manifest,
-        download_manifest=composition.download_manifest,
-        release_selections=composition.release_selections,
-    )
 
 
 class _CleanupScope:
@@ -423,83 +364,6 @@ async def _maintenance_loop(
             await asyncio.wait_for(stop.wait(), timeout=MAINTENANCE_CHECK_SECONDS)
 
 
-def create_standalone_processor_app(
-    database_url: str,
-    *,
-    integration_token: str,
-    clock: Callable[[], datetime] | None = None,
-    retention_policies: Mapping[str, Any] | None = None,
-    database_engine: Engine | None = None,
-    sessions: sessionmaker[Session] | None = None,
-) -> FastAPI:
-    """Compatibility host for processor-only tests; production uses the root graph."""
-
-    owns_engine = database_engine is None
-    engine = database_engine or create_database(database_url)
-    session_source = sessions or session_factory(engine)
-    app = create_processor_app(
-        integration_token=integration_token,
-        clock=clock,
-        retention_policies=retention_policies,
-        database_engine=engine,
-        sessions=session_source,
-    )
-    app.state.owns_engine = owns_engine
-
-    @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        try:
-            yield
-        finally:
-            if owns_engine:
-                engine.dispose()
-
-    app.router.lifespan_context = lifespan
-    return app
-
-
-def create_ui_app(database_url: str, **options: Any) -> FastAPI:
-    """Compatibility host for focused UI tests; production uses the root graph."""
-
-    reference = options.pop("session_secret_reference", None)
-    if reference is not None:
-        prefix = "env:"
-        if not isinstance(reference, str) or not reference.startswith(prefix):
-            raise ValueError("session_secret_reference_invalid")
-        variable = reference.removeprefix(prefix)
-        secret = os.environ.get(variable)
-        if not isinstance(secret, str) or not secret:
-            raise ValueError("session_secret_unavailable")
-        options["session_secret"] = secret
-    runtime_factory = options.pop("runtime_factory", None)
-    owns_runtime_factory = False
-    uses_explicit_test_capabilities = any(
-        options.get(name) is not None for name in ("providers", "acquisition")
-    )
-    if runtime_factory is None and not uses_explicit_test_capabilities:
-        runtime_factory = create_runtime_factory(
-            http_client_factory=options.get("http_client_factory", httpx.Client),
-            environment=options.get("environment"),
-        )
-        owns_runtime_factory = True
-    registry = (
-        runtime_factory.registry
-        if isinstance(runtime_factory, DefaultRuntimeFactory)
-        else create_legacy_module_registry()
-    )
-    try:
-        return _create_ui_app(
-            database_url,
-            registry=registry,
-            runtime_factory=runtime_factory,
-            **options,
-        )
-    except BaseException:
-        if owns_runtime_factory and runtime_factory is not None:
-            runtime_factory.close()
-        raise
-
-
 def run() -> None:
     """Migrate before constructing and serving one worker."""
 
@@ -519,9 +383,6 @@ __all__ = [
     "ApplicationResources",
     "core_configuration",
     "create_application",
-    "create_runtime_factory",
-    "create_standalone_processor_app",
-    "create_ui_app",
     "database_url",
     "run",
     "ui_mode",

@@ -59,7 +59,6 @@ def _table_names(path: Path) -> set[str]:
 def _persistence_sources() -> tuple[Path, ...]:
     return (
         *(CORE.glob("*/persistence.py")),
-        ROOT / "apps" / "server" / "src" / "media_finder" / "models.py",
         *VERSIONS.glob("*.py"),
     )
 

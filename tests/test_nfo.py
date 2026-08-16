@@ -4,13 +4,12 @@ from uuid import uuid4
 from xml.etree import ElementTree
 
 import pytest
+from catalog_fixtures import CatalogFixture as CatalogService
 from fastapi.testclient import TestClient
-from media_finder.domain import CatalogService
-from media_finder.models import Acquisition
-from media_finder.sdk.types import NormalizedMetadata as LegacyNormalizedMetadata
-from media_finder.sdk.types import RetentionPolicy as LegacyRetentionPolicy
+from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
 from media_finder_core.exports import EntityType, render_nfo
 from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
+from media_finder_metadata_tmdb import registration as tmdb_registration
 from media_finder_sdk import (
     Artwork,
     Episode,
@@ -21,19 +20,14 @@ from media_finder_sdk import (
     Person,
     Provenance,
     Rating,
+    RetentionPolicy,
     Season,
 )
-from media_finder_server import create_legacy_module_registry
-from media_finder_server.runtime import create_standalone_processor_app as create_app
-
-LEGACY_REGISTRY = create_legacy_module_registry()
+from processor_fixtures import create_processor_test_app as create_app
 
 
-def _legacy(metadata: NormalizedMetadata) -> LegacyNormalizedMetadata:
-    payload = metadata.model_dump(mode="json")
-    provenance = payload["provenance"]
-    provenance["provider_key"] = provenance.pop("provider_id")
-    return LegacyNormalizedMetadata.model_validate(payload)
+def _legacy(metadata: NormalizedMetadata) -> NormalizedMetadata:
+    return metadata
 
 
 def _rich_movie(provider: str = "manual") -> NormalizedMetadata:
@@ -164,7 +158,7 @@ def test_current_and_pinned_nfo_api_adds_provider_owned_warning_headers(
             {"private": "provider-only"},
             _legacy(_rich_movie("tmdb")),
             {},
-            LegacyRetentionPolicy(expires_at=expiry),
+            RetentionPolicy(expires_at=expiry),
             datetime(2025, 1, 1, tzinfo=UTC),
         )
         acquisition = Acquisition(
@@ -189,7 +183,7 @@ def test_current_and_pinned_nfo_api_adds_provider_owned_warning_headers(
         url,
         integration_token="integration-secret",
         clock=lambda: datetime(2025, 2, 1, tzinfo=UTC),
-        retention_policies={"tmdb": LEGACY_REGISTRY.metadata_providers["tmdb"].retention_factory()},
+        retention_policies={"tmdb": tmdb_registration().retention()},
     )
     client = TestClient(app)
     headers = {"Authorization": "Bearer integration-secret"}
@@ -385,7 +379,7 @@ def test_nfo_api_defensively_revalidates_forged_provider_warning(
             {"private": True},
             _legacy(_rich_movie("forged")),
             {},
-            LegacyRetentionPolicy(expires_at=datetime(2026, 1, 1, tzinfo=UTC)),
+            RetentionPolicy(expires_at=datetime(2026, 1, 1, tzinfo=UTC)),
             datetime(2025, 1, 1, tzinfo=UTC),
         )
         item_id = item.id

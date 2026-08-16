@@ -100,6 +100,7 @@
       "type": "array"
     },
     "module_id": {
+      "maxLength": 100,
       "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
       "title": "Module Id",
       "type": "string"

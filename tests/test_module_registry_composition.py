@@ -394,15 +394,19 @@ def test_server_registry_factory_accepts_no_runtime_service_container() -> None:
 
 def test_server_runtime_uses_the_typed_registry_as_its_single_module_lifecycle() -> None:
     from media_finder_core import ModuleRuntime
-    from media_finder_server import create_runtime_factory
+    from media_finder_core.acquisition import ReleaseSelectionCache
+    from media_finder_server.modules import create_runtime_module_composition
 
-    factory = create_runtime_factory(environment={})
-    runtime = factory.module_runtime
+    composition = create_runtime_module_composition(
+        environment={},
+        release_cache=ReleaseSelectionCache(),
+    )
+    runtime = composition.runtime
     assert isinstance(runtime, ModuleRuntime)
-    assert factory._lifecycle is not runtime
     assert set(runtime.registry.metadata) == {"manual", "tmdb"}
     assert set(runtime.registry.release) == {"prowlarr"}
     assert set(runtime.registry.download) == {"qbittorrent"}
 
-    factory.close()
-    factory.close()
+    composition.release_selections.close()
+    runtime.close()
+    runtime.close()

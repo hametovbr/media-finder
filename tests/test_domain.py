@@ -2,9 +2,19 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
-from media_finder.domain import CatalogService, RevisionInput
-from media_finder.models import Acquisition, Collection, MediaItem, MetadataRevision
-from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance, RetentionPolicy
+from catalog_fixtures import CatalogFixture as CatalogService
+from catalog_fixtures import RevisionInput
+from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
+from media_finder_core.catalog.persistence import (
+    CollectionRecord as Collection,
+)
+from media_finder_core.catalog.persistence import (
+    MediaItemRecord as MediaItem,
+)
+from media_finder_core.catalog.persistence import (
+    MetadataRevisionRecord as MetadataRevision,
+)
+from media_finder_sdk import MediaKind, NormalizedMetadata, Provenance, RetentionPolicy
 from sqlalchemy.exc import IntegrityError
 
 
@@ -13,7 +23,7 @@ def metadata(title: str = "Spirited Away", year: int = 2001) -> NormalizedMetada
         kind=MediaKind.MOVIE,
         titles={"en": title},
         year=year,
-        provenance=Provenance(provider_key="manual", external_id="placeholder", locale="en"),
+        provenance=Provenance(provider_id="manual", external_id="placeholder", locale="en"),
     )
 
 
@@ -168,7 +178,7 @@ def test_provider_revision_preserves_raw_and_validates_effective_snapshot(databa
     normalized = normalized.model_copy(
         update={
             "provenance": normalized.provenance.model_copy(
-                update={"provider_key": "tmdb", "external_id": "129"}
+                update={"provider_id": "tmdb", "external_id": "129"}
             )
         }
     )

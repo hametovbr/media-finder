@@ -56,6 +56,7 @@ def test_schemas_preserve_semantic_module_boundaries() -> None:
         "release-provider",
         "download-client",
     }
+    assert manifest["properties"]["module_id"]["maxLength"] == 100
 
     metadata_definitions = schemas["metadata.schema.json"]["$defs"]
     assert {

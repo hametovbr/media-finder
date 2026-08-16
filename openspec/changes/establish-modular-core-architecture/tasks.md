@@ -54,7 +54,7 @@
 - [x] 6.3 Add RED composition tests requiring `apps/server` to be the only concrete composition root and requiring child factories to receive rather than create shared engine, sessions, services, caches, security, modules, and maintenance resources.
 - [x] 6.4 Move FastAPI control, processor, health, browser-session, migration/startup, and CLI adapters into `media_finder_server`; explicitly assemble core, first-party registrations, and optional built-in UI, then make route and composition tests GREEN.
 - [x] 6.5 Implement one root lifespan with dependency-order startup and reverse-order shutdown for database, module instances, maintenance, and HTTP resources; cover successful reuse, partial construction failure, concurrent attempts, and both `builtin` and `disabled` UI modes.
-- [ ] 6.6 Remove the legacy root `src/media_finder` implementation and old import surfaces after all consumers move; add negative tests proving no compatibility shim, duplicated runtime path, concrete-core integration import, or child-owned infrastructure remains.
+- [x] 6.6 Remove the legacy root `src/media_finder` implementation and old import surfaces after all consumers move; add negative tests proving no compatibility shim, duplicated runtime path, concrete-core integration import, or child-owned infrastructure remains.
 
 ## 7. Preserve Serialized and Browser Boundaries
 

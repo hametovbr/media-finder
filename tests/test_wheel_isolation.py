@@ -88,6 +88,44 @@ def _assert_isolated_import(wheel: BuiltWheel, import_name: str, target: Path) -
     )
 
 
+def _assert_isolated_import_is_absent(
+    wheel: BuiltWheel,
+    import_name: str,
+    target: Path,
+) -> None:
+    environment = {**os.environ, "UV_CACHE_DIR": str(UV_CACHE)}
+    subprocess.run(
+        [str(UV), "pip", "install", "--target", str(target), "--no-deps", str(wheel.path)],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    probe = "\n".join(
+        (
+            "import importlib",
+            "import pathlib",
+            "import sys",
+            f"target = pathlib.Path({str(target)!r}).resolve()",
+            "sys.path[:] = [str(target)]",
+            "try:",
+            f"    importlib.import_module({import_name!r})",
+            "except ModuleNotFoundError as error:",
+            f"    assert error.name == {import_name!r}, error",
+            "else:",
+            f"    raise AssertionError({f'{import_name}_unexpectedly_importable'!r})",
+        )
+    )
+    subprocess.run(
+        [sys.executable, "-I", "-c", probe],
+        cwd=target,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 @pytest.mark.parametrize(
     ("distribution", "import_name", "source_root", "expected_dependencies"),
     (
@@ -129,8 +167,14 @@ def test_foundation_wheel_builds_and_imports_without_source_tree_leakage(
     assert f"{normalized_import_path}/__init__.py" in wheel.members
     assert f"{normalized_import_path}/py.typed" in wheel.members
     if distribution == "media-finder":
-        assert "media_finder/__init__.py" in wheel.members
-        assert "media_finder/py.typed" in wheel.members
+        member_roots = {member.partition("/")[0] for member in wheel.members}
+        dist_info_roots = {root for root in member_roots if root.endswith(".dist-info")}
+        assert member_roots == {"media_finder_server", *dist_info_roots}
+        _assert_isolated_import_is_absent(
+            wheel,
+            "media_finder",
+            tmp_path / "server-only-installed",
+        )
     requirements = tuple(wheel.metadata.get_all("Requires-Dist", []))
     assert all(
         any(requirement.lower().startswith(expected.lower()) for requirement in requirements)

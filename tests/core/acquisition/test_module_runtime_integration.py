@@ -11,28 +11,27 @@ from uuid import UUID
 
 import httpx
 import pytest
-from media_finder.control_gateway import BackendControlGateway
-from media_finder.domain import CatalogService, RevisionInput
-from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
+from catalog_fixtures import CatalogFixture as CatalogService
+from catalog_fixtures import RevisionInput
 from media_finder_control import ControlFailure
 from media_finder_control.models import AcquisitionSubmissionRequest, ReleaseSearchRequest
 from media_finder_core.acquisition import (
     AcquisitionDraft,
     AcquisitionStatus,
     ModuleVersionSnapshot,
+    ReleaseSelectionCache,
 )
 from media_finder_core.acquisition.persistence import (
     SqlAlchemyAcquisitionQueries,
     SqlAlchemyAcquisitionUnitOfWork,
 )
 from media_finder_core.platform import EphemeralCache
-from media_finder_sdk import SafeReleaseSnapshot
-from media_finder_server import create_runtime_factory
-from media_finder_server.integration_runtime import RuntimeResolver
+from media_finder_sdk import MediaKind, NormalizedMetadata, Provenance, SafeReleaseSnapshot
+from media_finder_server.control_gateway import BackendControlGateway
+from media_finder_server.modules import RuntimeModuleComposition, create_runtime_module_composition
 from sqlalchemy.orm import Session, sessionmaker
 
 ROOT = Path(__file__).parents[3]
-SERVER_LEGACY = ROOT / "apps" / "server" / "src" / "media_finder"
 FIRST_PARTY_ENVIRONMENT = {
     "PROWLARR_URL": "https://prowlarr.example.test/reverse/prowlarr",
     "PROWLARR_API_KEY": "prowlarr-key-never-log",
@@ -42,17 +41,6 @@ FIRST_PARTY_ENVIRONMENT = {
 }
 INFOHASH = "0123456789abcdef0123456789abcdef01234567"
 PENDING_ID = UUID("33333333-3333-4333-8333-333333333333")
-
-
-class _UnusedMetadataCapabilities:
-    def metadata_provider(self, module_id: str):
-        raise AssertionError(module_id)
-
-    def metadata_editor(self, module_id: str):
-        raise AssertionError(module_id)
-
-    def retention_policy(self, module_id: str):
-        raise AssertionError(module_id)
 
 
 class _FirstPartyTransport:
@@ -127,7 +115,7 @@ def _seed_item(database: Session):
                 kind=MediaKind.MOVIE,
                 titles={"en": "Fixture"},
                 provenance=Provenance(
-                    provider_key="manual",
+                    provider_id="manual",
                     external_id="runtime-item",
                     locale="en",
                 ),
@@ -140,17 +128,19 @@ def _seed_item(database: Session):
 
 def _gateway(
     database: Session,
-    runtime: RuntimeResolver,
-    factory,
+    composition: RuntimeModuleComposition,
 ) -> BackendControlGateway:
     return BackendControlGateway(
         sessions=sessionmaker(bind=database.get_bind(), expire_on_commit=False),
         cursor_secret=b"typed-module-runtime-test-secret",
         metadata_selections=EphemeralCache(),
         manual_drafts=EphemeralCache(),
-        runtime=runtime,
-        registry=factory.registry,
-        metadata_capabilities=_UnusedMetadataCapabilities(),
+        registry=composition.registry,
+        module_runtime=composition.runtime,
+        release_selections=composition.release_selections,
+        release_manifest=composition.release_manifest,
+        download_manifest=composition.download_manifest,
+        environment=FIRST_PARTY_ENVIRONMENT,
     )
 
 
@@ -159,13 +149,12 @@ def test_first_party_round_trip_uses_only_typed_module_runtime_and_exact_version
 ) -> None:
     item = _seed_item(database)
     transport = _FirstPartyTransport()
-    factory = create_runtime_factory(
+    composition = create_runtime_module_composition(
         environment=FIRST_PARTY_ENVIRONMENT,
-        http_client_factory=transport.client,
+        client_factory=transport.client,
+        release_cache=ReleaseSelectionCache(),
     )
-    assert factory.module_runtime is not None
-    runtime = RuntimeResolver(module_runtime=factory.module_runtime, acquisition=factory)
-    gateway = _gateway(database, runtime, factory)
+    gateway = _gateway(database, composition)
 
     async def scenario() -> tuple[str, str]:
         releases = await gateway.search_releases(
@@ -220,7 +209,8 @@ def test_first_party_round_trip_uses_only_typed_module_runtime_and_exact_version
         ]
         assert len(add_requests) == 1
     finally:
-        factory.close()
+        composition.release_selections.close()
+        composition.runtime.close()
 
 
 def test_manual_reconcile_uses_persisted_download_module_without_release_provider(
@@ -249,17 +239,17 @@ def test_manual_reconcile_uses_persisted_download_module_without_release_provide
 
     transport = _FirstPartyTransport()
     transport.expected_reconcile_correlation = draft.correlation
-    factory = create_runtime_factory(
-        environment={
-            key: value
-            for key, value in FIRST_PARTY_ENVIRONMENT.items()
-            if key.startswith("QBITTORRENT_")
-        },
-        http_client_factory=transport.client,
+    environment = {
+        key: value
+        for key, value in FIRST_PARTY_ENVIRONMENT.items()
+        if key.startswith("QBITTORRENT_")
+    }
+    composition = create_runtime_module_composition(
+        environment=environment,
+        client_factory=transport.client,
+        release_cache=ReleaseSelectionCache(),
     )
-    assert factory.module_runtime is not None
-    runtime = RuntimeResolver(module_runtime=factory.module_runtime, acquisition=factory)
-    gateway = _gateway(database, runtime, factory)
+    gateway = _gateway(database, composition)
 
     try:
         reconciled = asyncio.run(gateway.reconcile_acquisition(acquisition_id=str(PENDING_ID)))
@@ -271,7 +261,8 @@ def test_manual_reconcile_uses_persisted_download_module_without_release_provide
             if request.url.path.endswith("/torrents/info")
         ] == ["/reverse/qb/api/v2/torrents/info"]
     finally:
-        factory.close()
+        composition.release_selections.close()
+        composition.runtime.close()
 
 
 def test_server_acquisition_path_has_no_concrete_or_parallel_runtime_branch() -> None:
@@ -314,35 +305,4 @@ def test_server_acquisition_path_has_no_concrete_or_parallel_runtime_branch() ->
             ):
                 violations.append(f"acquisition.py:{method.name}:{node.lineno}:{node.value}")
 
-    runtime_path = SERVER_LEGACY / "integration_runtime.py"
-    runtime_tree = ast.parse(runtime_path.read_text(encoding="utf-8"), filename=str(runtime_path))
-    forbidden_runtime_symbols = {
-        "SYSTEM_QBITTORRENT_ID",
-        "_CoreDownloadClientAdapter",
-        "_prowlarr",
-        "core_download_client",
-        "download_client_version",
-        "prowlarr",
-    }
-    for node in ast.walk(runtime_tree):
-        if isinstance(node, ast.Name) and node.id in forbidden_runtime_symbols:
-            violations.append(f"integration_runtime.py:{node.lineno}:{node.id}")
-        if isinstance(node, ast.Attribute) and node.attr in forbidden_runtime_symbols:
-            violations.append(f"integration_runtime.py:{node.lineno}:{node.attr}")
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id in {"ReleaseSelectionCache", "ReleaseSelectionService"}
-        ):
-            violations.append(f"integration_runtime.py:{node.lineno}:{node.func.id}")
-
-    parallel_paths = [
-        path.name
-        for path in (
-            SERVER_LEGACY / "acquisition.py",
-            SERVER_LEGACY / "release_selection.py",
-        )
-        if path.exists()
-    ]
     assert violations == []
-    assert parallel_paths == []

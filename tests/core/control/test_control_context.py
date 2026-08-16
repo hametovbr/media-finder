@@ -482,7 +482,7 @@ def test_control_sources_remain_framework_neutral_and_do_not_name_concrete_modul
 
 def test_server_gateway_is_only_narrow_composition_without_control_orchestration() -> None:
     """Retaining the old multi-context gateway in the host defeats the core boundary."""
-    gateway_path = ROOT / "apps" / "server" / "src" / "media_finder" / "control_gateway.py"
+    gateway_path = ROOT / "apps" / "server" / "src" / "media_finder_server" / "control_gateway.py"
     tree = ast.parse(gateway_path.read_text(encoding="utf-8"), filename=str(gateway_path))
     forbidden_identifiers = {
         "AcquisitionCommands",

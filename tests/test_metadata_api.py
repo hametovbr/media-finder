@@ -2,13 +2,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from catalog_fixtures import CatalogFixture as CatalogService
+from catalog_fixtures import RevisionInput
 from fastapi.testclient import TestClient
-from media_finder.domain import CatalogService, RevisionInput
-from media_finder.models import Acquisition
-from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance, RetentionPolicy
+from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
 from media_finder_core.catalog.persistence import SqlAlchemyCatalogRepository
 from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
-from media_finder_server.runtime import create_standalone_processor_app as create_app
+from media_finder_sdk import MediaKind, NormalizedMetadata, Provenance, RetentionPolicy
+from processor_fixtures import create_processor_test_app as create_app
 
 
 def _headers() -> dict[str, str]:
@@ -32,7 +33,7 @@ def _metadata(
         countries=("Japan",),
         studios=("Studio Ghibli",),
         provenance=Provenance(
-            provider_key=provider,
+            provider_id=provider,
             external_id=external_id,
             locale="en-US",
             source_label="Fixture",

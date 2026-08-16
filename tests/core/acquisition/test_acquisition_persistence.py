@@ -10,9 +10,7 @@ from threading import Barrier
 from typing import cast
 
 import pytest
-from media_finder.domain import CatalogService
-from media_finder.models import MetadataRevision
-from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
+from catalog_fixtures import CatalogFixture as CatalogService
 from media_finder_core.acquisition import (
     AcquisitionCommands,
     AcquisitionQueries,
@@ -27,15 +25,19 @@ from media_finder_core.acquisition.persistence import (
     SqlAlchemyAcquisitionQueries,
     SqlAlchemyAcquisitionUnitOfWork,
 )
+from media_finder_core.catalog.persistence import MetadataRevisionRecord as MetadataRevision
 from media_finder_core.catalog.persistence import SqlAlchemyCatalogQueries
 from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
 from media_finder_sdk import (
     CorrelationResult,
     DownloadDestination,
     MagnetArtifact,
+    MediaKind,
     ModuleError,
     ModuleFailureCategory,
+    NormalizedMetadata,
     PrivateReleaseSelection,
+    Provenance,
     ReleaseCandidate,
     ReleaseSearchQuery,
     SafeReleaseSnapshot,
@@ -138,7 +140,7 @@ def _seed(database: Session) -> tuple[str, str]:
         titles={"en": "Fixture"},
         year=2026,
         provenance=Provenance(
-            provider_key="manual",
+            provider_id="manual",
             external_id="00000000-0000-4000-8000-000000000001",
             locale="en",
         ),

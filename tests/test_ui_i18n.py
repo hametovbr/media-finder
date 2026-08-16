@@ -244,12 +244,15 @@ def test_unknown_code_has_a_safe_localized_fallback() -> None:
 
 def test_exception_mapping_preserves_only_known_explicit_module_codes() -> None:
     from media_finder_builtin_ui.i18n import code_for_exception
-
-    from media_finder.sdk.errors import ModuleError
+    from media_finder_sdk import ModuleError, ModuleFailureCategory
 
     assert (
         code_for_exception(
-            ModuleError(code="download_client_rejected", message="unsafe upstream prose"),
+            ModuleError(
+                category=ModuleFailureCategory.REJECTED,
+                code="download_client_rejected",
+                safe_details={"reason": "safe fixture reason"},
+            ),
             "acquisition_unavailable",
         )
         == "download_client_rejected"

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from media_finder_core.platform.database import migrate_to_head
-from media_finder_server import create_ui_app
+from ui_fixtures import create_ui_test_app
 
 
 def _csrf(text: str) -> str:
@@ -20,7 +20,7 @@ def test_redirect_result_queries_render_announced_focusable_feedback(
     database_url = f"sqlite:///{tmp_path / 'semantic.db'}"
     migrate_to_head(database_url)
     monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long test session secret")
-    app = create_ui_app(database_url, session_secret_reference="env:MEDIA_FINDER_UI_SECRET")
+    app = create_ui_test_app(database_url, session_secret_reference="env:MEDIA_FINDER_UI_SECRET")
     with TestClient(app) as client:
         root = client.get("/")
         assert '<script src="/static/ui.js" defer></script>' in root.text

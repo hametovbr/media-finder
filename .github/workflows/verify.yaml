@@ -93,7 +93,6 @@ jobs:
         run: >-
           uv run pytest
           tests/test_acquisition.py
-          tests/test_environment_runtime.py
           tests/test_api_foundation.py
           tests/test_db.py
           tests/test_domain.py
@@ -136,17 +135,15 @@ jobs:
       - name: Module contract tests
         run: >-
           uv run pytest
-          tests/test_sdk.py
-          tests/test_environment_contract.py
           tests/test_tmdb_retention.py
           tests/test_qbittorrent.py
-          tests/test_transport_hardening.py
           tests/test_control_api_acquisition.py
           tests/test_control_api_catalog.py
           tests/test_control_api_metadata.py
           tests/test_control_api_security.py
           tests/test_control_openapi.py
           tests/test_module_registry_composition.py
+          tests/test_module_runtime_transport_hardening.py
           tests/test_wheel_isolation.py
           tests/architecture
           packages/module-sdk/tests
