@@ -1,6 +1,6 @@
 [project]
 name = "media-finder-module-sdk"
-version = "0.1.0"
+version = "0.2.0"
 description = "Public module contracts for Media Finder extensions"
 requires-python = ">=3.13,<3.14"
 license = "MIT"
