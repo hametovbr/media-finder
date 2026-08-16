@@ -174,6 +174,19 @@ test("real browser-control conformance remains in the contract job", (context) =
   );
 });
 
+test("serialized module conformance remains in the contract job", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace("pnpm module-conformance:validate", "node --version"),
+  );
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /contract job must validate serialized module conformance independently/,
+  );
+});
+
 test("image smoke must prove disabled mode retains the control API", (context) => {
   const root = copyDeliveryFixture();
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));

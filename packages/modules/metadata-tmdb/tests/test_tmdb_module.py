@@ -20,14 +20,12 @@ from media_finder_metadata_tmdb.transport import TmdbEndpoint, TmdbTransport
 from media_finder_sdk import (
     Artwork,
     EnvironmentVariableSpec,
-    ExportHeader,
-    ExportWarning,
     MediaKind,
     MetadataConformanceFixture,
     MetadataIdentity,
     MetadataSearchQuery,
-    MetadataSearchResult,
     ModuleError,
+    ModuleErrorData,
     ModuleKind,
     NormalizedMetadata,
     Provenance,
@@ -38,8 +36,10 @@ from media_finder_sdk import (
     RetentionPolicy,
     RetentionSubject,
     Season,
+    SerializedMetadataProviderConformance,
     assert_metadata_registration_conforms,
     load_manifest,
+    parse_serialized_conformance_fixture,
     resolve_module_environment,
 )
 
@@ -330,62 +330,42 @@ def test_tmdb_manifest_declares_exact_secret_environment_and_public_sdk_only() -
 
 
 def test_tmdb_movie_registration_passes_public_conformance_and_closes_resources() -> None:
+    fixture_bytes = (
+        PACKAGE_ROOT / "src/media_finder_metadata_tmdb/fixtures/conformance.json"
+    ).read_bytes()
+    serialized = parse_serialized_conformance_fixture(fixture_bytes)
+    assert isinstance(serialized, SerializedMetadataProviderConformance)
+    assert TOKEN.encode() not in fixture_bytes
     clients = RecordingClientFactory()
     module = _module(clients)
-    identity = _movie_identity()
-    created = datetime(2024, 8, 31, 12, tzinfo=UTC)
-    expires = datetime(2025, 2, 28, 12, tzinfo=UTC)
+    success = serialized.success
+    failures = {failure.operation: failure.error for failure in serialized.stable_failures}
+    missing = serialized.missing_configuration
+    assert missing.applicable is True
+    with pytest.raises(ModuleError) as missing_error:
+        resolve_module_environment(module.manifest, {})
+    assert missing_error.value.category == missing.error.category
+    assert missing_error.value.code == missing.error.code
+    assert dict(missing_error.value.safe_details) == dict(missing.error.safe_details)
 
     assert_metadata_registration_conforms(
         module,
         MetadataConformanceFixture(
             environment={"TMDB_TOKEN": TOKEN, "UNDECLARED_SECRET": "must-not-be-visible"},
-            query=MetadataSearchQuery(query="Spirited Away", locale="en-US"),
-            expected_results=(
-                MetadataSearchResult(
-                    provider_id="tmdb",
-                    external_id="129",
-                    media_kind=MediaKind.MOVIE,
-                    title="Spirited Away",
-                    year=2001,
-                    locale="en-US",
-                ),
-                MetadataSearchResult(
-                    provider_id="tmdb",
-                    external_id="900",
-                    media_kind=MediaKind.SERIES,
-                    title="Fixture Series",
-                    year=2020,
-                    locale="en-US",
-                ),
-            ),
-            identity=identity,
+            query=success.query,
+            expected_results=success.results,
+            identity=success.identity,
             expected_payload=ProviderPayload(data=MOVIE_DETAILS),
-            expected_metadata=_movie_metadata(),
-            invalid_identity=identity.model_copy(update={"external_id": "../configuration"}),
-            expected_error_code="metadata_identity_invalid",
-            created_at=created,
-            now=datetime(2025, 1, 31, 12, tzinfo=UTC),
-            expected_policy=RetentionPolicy(
-                refresh_after=datetime(2025, 1, 31, 12, tzinfo=UTC),
-                expires_at=expires,
+            expected_metadata=success.normalized,
+            invalid_identity=success.identity.model_copy(
+                update={"external_id": "../configuration"}
             ),
-            expected_action=RetentionAction(kind=RetentionActionKind.REFRESH),
-            expected_warning=ExportWarning(
-                headers=(
-                    ExportHeader(
-                        name="Warning",
-                        value=(
-                            '299 Media Finder "Provider-derived metadata has a retention deadline"'
-                        ),
-                    ),
-                    ExportHeader(name="Sunset", value="Fri, 28 Feb 2025 12:00:00 GMT"),
-                    ExportHeader(
-                        name="X-Media-Finder-Metadata-Expires",
-                        value="2025-02-28T12:00:00+00:00",
-                    ),
-                )
-            ),
+            expected_error_code=failures["fetch-invalid-identity"].code,
+            created_at=success.retention.created_at,
+            now=success.retention.now,
+            expected_policy=success.retention.policy,
+            expected_action=success.retention.action,
+            expected_warning=success.retention.warning,
         ),
     )
 
@@ -399,6 +379,18 @@ def test_tmdb_movie_registration_passes_public_conformance_and_closes_resources(
     rendered_requests = repr(clients.requests)
     assert "UNDECLARED_SECRET" not in rendered_requests
     assert "must-not-be-visible" not in rendered_requests
+
+    invalid_provider = module.build(
+        resolve_module_environment(module.manifest, {"TMDB_TOKEN": TOKEN})
+    )
+    try:
+        with pytest.raises(ModuleError) as invalid_identity:
+            invalid_provider.fetch(
+                success.identity.model_copy(update={"external_id": "../configuration"})
+            )
+    finally:
+        invalid_provider.close()
+    assert ModuleErrorData.from_error(invalid_identity.value) == failures["fetch-invalid-identity"]
 
 
 def test_tmdb_series_fetch_normalizes_season_zero_specials() -> None:
@@ -484,15 +476,31 @@ def test_tmdb_typed_endpoints_reject_untrusted_paths_before_http_or_secret_use()
     assert client.is_closed
 
 
-def test_tmdb_failures_are_standardized_and_redact_secrets_and_sensitive_urls() -> None:
-    def fail(_: httpx.Request) -> httpx.Response:
+def test_tmdb_failures_are_standardized_and_redact_secrets_and_sensitive_urls(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    serialized = parse_serialized_conformance_fixture(
+        (PACKAGE_ROOT / "src/media_finder_metadata_tmdb/fixtures/conformance.json").read_bytes()
+    )
+    assert isinstance(serialized, SerializedMetadataProviderConformance)
+    failures = {failure.operation: failure.error for failure in serialized.stable_failures}
+    probes = serialized.redaction_probes
+
+    def fail(request: httpx.Request) -> httpx.Response:
+        assert request.headers["authorization"] == f"Bearer {probes.environment_value}"
         raise RuntimeError(
-            f"failed https://api.example.test/passkey/{TOKEN}/file?api_key={TOKEN}#fragment"
+            f"failed https://api.example.test/passkey/{probes.credential}/file"
+            f"?api_key={probes.environment_value}#fragment "
+            f"{probes.artifact_body} {probes.private_selection}"
         )
 
+    caplog.set_level("DEBUG")
     clients = RecordingClientFactory(fail)
     module = _module(clients)
-    environment = resolve_module_environment(module.manifest, {"TMDB_TOKEN": TOKEN})
+    environment = resolve_module_environment(
+        module.manifest,
+        {"TMDB_TOKEN": probes.environment_value},
+    )
     provider = module.build(environment)
 
     try:
@@ -503,6 +511,7 @@ def test_tmdb_failures_are_standardized_and_redact_secrets_and_sensitive_urls() 
         provider.close()
 
     error = captured.value
+    assert ModuleErrorData.from_error(error) == failures["search-unavailable"]
     rendered = f"{error!s} {error!r} {error.safe_details!r}"
     assert error.code == "metadata_provider_unavailable"
     assert TOKEN not in rendered
@@ -510,6 +519,9 @@ def test_tmdb_failures_are_standardized_and_redact_secrets_and_sensitive_urls() 
     assert "api_key" not in rendered
     assert "fragment" not in rendered
     assert "https://" not in rendered
+    safe_public = f"{rendered} {caplog.text}"
+    for probe in probes.model_dump().values():
+        assert probe not in safe_public
     assert all(client.is_closed for client in clients.clients)
 
 

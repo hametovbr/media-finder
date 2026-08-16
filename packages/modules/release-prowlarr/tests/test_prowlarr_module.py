@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import email
+import hashlib
 import logging
 import os
 import subprocess
@@ -17,18 +18,21 @@ import pytest
 from media_finder_release_prowlarr import registration
 from media_finder_release_prowlarr.transport import ProwlarrLimits
 from media_finder_sdk import (
+    ArtifactDescriptor,
     EnvironmentVariableSpec,
     MagnetArtifact,
     ModuleError,
+    ModuleErrorData,
     ModuleKind,
     PrivateReleaseSelection,
     ReleaseCandidate,
     ReleaseConformanceFixture,
     ReleaseSearchQuery,
-    SafeReleaseSnapshot,
+    SerializedReleaseProviderConformance,
     TorrentArtifact,
     assert_release_registration_conforms,
     load_manifest,
+    parse_serialized_conformance_fixture,
     resolve_module_environment,
 )
 
@@ -114,11 +118,12 @@ def _module(
     )
 
 
-def _environment() -> dict[str, str]:
+def _environment(**overrides: str) -> dict[str, str]:
     return {
         "PROWLARR_URL": BASE_URL,
         "PROWLARR_API_KEY": API_KEY,
         "UNDECLARED_SECRET": "must-not-be-visible",
+        **overrides,
     }
 
 
@@ -256,34 +261,79 @@ def test_prowlarr_manifest_declares_exact_environment_and_public_sdk_only() -> N
 
 
 def test_prowlarr_registration_passes_public_conformance_and_closes_resources() -> None:
+    fixture_bytes = (
+        PACKAGE_ROOT / "src/media_finder_release_prowlarr/fixtures/conformance.json"
+    ).read_bytes()
+    serialized = parse_serialized_conformance_fixture(fixture_bytes)
+    assert isinstance(serialized, SerializedReleaseProviderConformance)
     clients = RecordingClientFactory()
     module = _module(clients)
     expected = _expected_candidates()
     assert len(expected) == 2
-    assert expected[0].snapshot == SafeReleaseSnapshot(
-        title="Fixture.Release.2026.1080p",
-        indexer="Fixture Torrent Indexer",
-        guid="fixture-magnet-guid",
-        infohash=INFOHASH,
-        source_page_url="https://indexer.example.test/",
+    assert tuple(candidate.snapshot.model_dump(mode="json") for candidate in expected) == tuple(
+        result.snapshot.model_dump(mode="json") for result in serialized.success.results
     )
-    assert expected[1].snapshot == SafeReleaseSnapshot(
-        title="Fixture.Release.2026.Remux",
-        indexer="Fixture Torrent Indexer",
-        guid="fixture-torrent-guid",
-        source_page_url="https://indexer.example.test/",
+    provider = _module().build(resolve_module_environment(module.manifest, _environment()))
+    try:
+        candidates = provider.search(serialized.success.query)
+        resolved = tuple(provider.resolve(candidate.selection) for candidate in candidates)
+    finally:
+        provider.close()
+    descriptors = tuple(
+        ArtifactDescriptor(
+            kind=artifact.kind,
+            byte_length=len(
+                artifact.uri.encode("utf-8")
+                if isinstance(artifact, MagnetArtifact)
+                else artifact.content()
+            ),
+            sha256=hashlib.sha256(
+                artifact.uri.encode("utf-8")
+                if isinstance(artifact, MagnetArtifact)
+                else artifact.content()
+            ).hexdigest(),
+        )
+        for artifact in resolved
     )
+    assert descriptors == tuple(
+        resolved_fixture.artifact for resolved_fixture in serialized.success.resolved_artifacts
+    )
+    assert API_KEY.encode() not in fixture_bytes
+    assert DOWNLOAD_SECRET.encode() not in fixture_bytes
+    assert BASE_URL.encode() not in fixture_bytes
+    assert MAGNET.encode() not in fixture_bytes
+    assert TORRENT_BYTES not in fixture_bytes
+    assert all(candidate.selection.payload() not in fixture_bytes for candidate in expected)
+    missing = serialized.missing_configuration
+    assert missing.applicable is True
+    with pytest.raises(ModuleError) as missing_error:
+        resolve_module_environment(module.manifest, {})
+    assert missing_error.value.code == missing.error.code
+    assert missing_error.value.category == missing.error.category
+    assert dict(missing_error.value.safe_details) == dict(missing.error.safe_details)
+
+    failures = {failure.operation: failure.error for failure in serialized.stable_failures}
 
     assert_release_registration_conforms(
         module,
         ReleaseConformanceFixture(
             environment=_environment(),
-            query=ReleaseSearchQuery(query="Fixture", limit=10),
+            query=serialized.success.query,
             expected_candidates=expected,
             expected_artifact=MagnetArtifact(uri=MAGNET),
             invalid_selection=PrivateReleaseSelection.from_bytes(b"not-provider-selection"),
-            expected_error_code="release_selection_invalid",
+            expected_error_code=failures["resolve-invalid-selection"].code,
         ),
+    )
+
+    invalid_provider = module.build(resolve_module_environment(module.manifest, _environment()))
+    try:
+        with pytest.raises(ModuleError) as invalid_selection:
+            invalid_provider.resolve(PrivateReleaseSelection.from_bytes(b"not-provider-selection"))
+    finally:
+        invalid_provider.close()
+    assert (
+        ModuleErrorData.from_error(invalid_selection.value) == failures["resolve-invalid-selection"]
     )
 
     assert clients.clients
@@ -407,6 +457,12 @@ def test_prowlarr_rejects_downloads_outside_configured_origin_and_base_path(
 
 
 def test_prowlarr_enforces_response_result_and_torrent_limits() -> None:
+    serialized = parse_serialized_conformance_fixture(
+        (PACKAGE_ROOT / "src/media_finder_release_prowlarr/fixtures/conformance.json").read_bytes()
+    )
+    assert isinstance(serialized, SerializedReleaseProviderConformance)
+    failures = {failure.operation: failure.error for failure in serialized.stable_failures}
+
     result_limits = ProwlarrLimits(
         max_json_bytes=16 * 1024,
         max_search_results=1,
@@ -425,7 +481,7 @@ def test_prowlarr_enforces_response_result_and_torrent_limits() -> None:
             provider.search(ReleaseSearchQuery(query="Fixture", limit=10))
     finally:
         provider.close()
-    assert result_error.value.code == "release_result_limit_exceeded"
+    assert ModuleErrorData.from_error(result_error.value) == failures["search-result-limit"]
 
     def too_large_json(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/search"):
@@ -444,7 +500,7 @@ def test_prowlarr_enforces_response_result_and_torrent_limits() -> None:
             provider.search(ReleaseSearchQuery(query="Fixture", limit=10))
     finally:
         provider.close()
-    assert json_error.value.code == "release_response_too_large"
+    assert ModuleErrorData.from_error(json_error.value) == failures["search-response-limit"]
 
     def too_large_torrent(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/search"):
@@ -464,7 +520,7 @@ def test_prowlarr_enforces_response_result_and_torrent_limits() -> None:
             provider.resolve(candidate.selection)
     finally:
         provider.close()
-    assert torrent_error.value.code == "release_torrent_too_large"
+    assert ModuleErrorData.from_error(torrent_error.value) == failures["resolve-torrent-limit"]
 
 
 def test_prowlarr_failures_and_logs_are_secret_safe(caplog: pytest.LogCaptureFixture) -> None:
@@ -492,6 +548,76 @@ def test_prowlarr_failures_and_logs_are_secret_safe(caplog: pytest.LogCaptureFix
         assert secret not in rendered
         assert secret not in logs
     assert all(client.is_closed for client in clients.clients)
+
+
+def test_prowlarr_serialized_redaction_probes_cross_env_selection_artifact_and_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    serialized = parse_serialized_conformance_fixture(
+        (PACKAGE_ROOT / "src/media_finder_release_prowlarr/fixtures/conformance.json").read_bytes()
+    )
+    assert isinstance(serialized, SerializedReleaseProviderConformance)
+    probes = serialized.redaction_probes
+    caplog.set_level(logging.DEBUG)
+
+    def fail(request: httpx.Request) -> httpx.Response:
+        assert request.headers["x-api-key"] == probes.environment_value
+        raise RuntimeError(" ".join(probes.model_dump().values()))
+
+    failure_module = _module(RecordingClientFactory(fail))
+    failure_provider = failure_module.build(
+        resolve_module_environment(
+            failure_module.manifest,
+            _environment(PROWLARR_API_KEY=probes.environment_value),
+        )
+    )
+    try:
+        with pytest.raises(ModuleError) as upstream_error:
+            failure_provider.search(ReleaseSearchQuery(query="Fixture", limit=10))
+        with pytest.raises(ModuleError) as selection_error:
+            failure_provider.resolve(
+                PrivateReleaseSelection.from_bytes(probes.private_selection.encode())
+            )
+    finally:
+        failure_provider.close()
+
+    artifact_body = probes.artifact_body.encode()
+
+    def serve_probe_artifact(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/search"):
+            return httpx.Response(200, json=_search_payload()[1:2])
+        if request.url.path.endswith("/fixture.torrent"):
+            return httpx.Response(200, content=artifact_body)
+        return httpx.Response(200, json={"version": "2.0.0"})
+
+    artifact_module = _module(RecordingClientFactory(serve_probe_artifact))
+    artifact_provider = artifact_module.build(
+        resolve_module_environment(artifact_module.manifest, _environment())
+    )
+    try:
+        candidate = artifact_provider.search(ReleaseSearchQuery(query="Fixture", limit=10))[0]
+        artifact = artifact_provider.resolve(candidate.selection)
+    finally:
+        artifact_provider.close()
+    assert isinstance(artifact, TorrentArtifact)
+    assert artifact.content() == artifact_body
+    descriptor = ArtifactDescriptor(
+        kind="torrent",
+        byte_length=len(artifact.content()),
+        sha256=hashlib.sha256(artifact.content()).hexdigest(),
+    )
+
+    safe_public = " ".join(
+        (
+            ModuleErrorData.from_error(upstream_error.value).model_dump_json(),
+            ModuleErrorData.from_error(selection_error.value).model_dump_json(),
+            candidate.snapshot.model_dump_json(),
+            descriptor.model_dump_json(),
+            caplog.text,
+        )
+    )
+    for probe in probes.model_dump().values():
+        assert probe not in safe_public
 
 
 def test_torrent_download_url_is_redacted_from_httpx_info_logs(

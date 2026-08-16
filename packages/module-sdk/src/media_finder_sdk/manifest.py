@@ -13,12 +13,13 @@ from pydantic import Field, HttpUrl, field_validator, model_validator
 
 from .common import PublicModel
 
-_SEMVER = re.compile(
+SEMVER_PATTERN = (
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
     r"(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)"
     r"(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?"
     r"(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
 )
+_SEMVER = re.compile(SEMVER_PATTERN)
 _TRANSLATION_KEY = re.compile(r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$")
 
 
@@ -146,6 +147,7 @@ def load_manifest(path: str | Path) -> ModuleManifest:
 
 
 __all__ = [
+    "SEMVER_PATTERN",
     "AttributionSpec",
     "EnvironmentVariableSpec",
     "ModuleKind",

@@ -8,6 +8,8 @@
     "delivery:validate": "node scripts/validate-delivery.mjs",
     "delivery:test": "node --test scripts/validate-delivery.test.mjs",
     "docs:check": "python scripts/check_documentation_language.py",
+    "module-conformance:test": "node --test scripts/validate-module-conformance.test.mjs",
+    "module-conformance:validate": "node scripts/validate-module-conformance.mjs",
     "py:format": "uv run ruff format --check .",
     "py:lint": "uv run ruff check .",
     "py:type": "uv run mypy",
@@ -17,8 +19,11 @@
   },
   "devDependencies": {
     "@fission-ai/openspec": "1.9.0",
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1",
     "axe-core": "4.11.0",
     "htmx.org": "2.0.10",
+    "smol-toml": "1.3.1",
     "yaml": "2.9.0"
   }
 }

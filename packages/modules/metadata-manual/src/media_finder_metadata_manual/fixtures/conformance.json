@@ -1,20 +1,151 @@
 {
-  "schema_version": "1",
-  "external_id": "47e26ca2-f393-4a00-b33a-902d41d49714",
-  "kind": "series",
-  "locale": "en",
-  "titles": {
-    "en": "Local Animation"
+  "capabilities": [
+    "fetch",
+    "metadata-edit",
+    "normalize",
+    "retention",
+    "search"
+  ],
+  "contract_version": "1",
+  "environment": [],
+  "manifest_sha256": "c7f7bd6624cf63c3c8bb03a48f97d0ec4fdec04efa1c16dd8b02fd381bedd646",
+  "missing_configuration": {
+    "applicable": false
   },
-  "seasons": [
+  "module_id": "manual",
+  "module_kind": "metadata-provider",
+  "module_version": "0.1.0",
+  "redaction_markers": [
+    "artifact-body",
+    "environment-values",
+    "private-selection"
+  ],
+  "redaction_probes": {
+    "artifact_body": "mf-redaction-probe-artifact-body",
+    "credential": "mf-redaction-probe-credential",
+    "environment_value": "mf-redaction-probe-environment-value",
+    "private_selection": "mf-redaction-probe-private-selection"
+  },
+  "schema_version": "1",
+  "sdk_compatibility": ">=1,<2",
+  "stable_failures": [
     {
-      "number": 0,
-      "episodes": [
-        {
-          "number": 1,
-          "title": "Special"
-        }
-      ]
+      "error": {
+        "category": "invalid-identity",
+        "code": "manual_import_invalid",
+        "safe_details": {}
+      },
+      "operation": "fetch-invalid-identity"
+    },
+    {
+      "error": {
+        "category": "invalid-identity",
+        "code": "manual_import_invalid",
+        "safe_details": {}
+      },
+      "operation": "import-invalid-document"
     }
-  ]
+  ],
+  "success": {
+    "editor": {
+      "imported_identity": {
+        "external_id": "47e26ca2-f393-4a00-b33a-902d41d49714",
+        "locale": "en",
+        "media_kind": "series",
+        "provider_id": "manual"
+      },
+      "merged_episode_count": 2
+    },
+    "identity": {
+      "external_id": "47e26ca2-f393-4a00-b33a-902d41d49714",
+      "locale": "en",
+      "media_kind": "series",
+      "provider_id": "manual"
+    },
+    "normalized": {
+      "artwork": [],
+      "completeness": 1,
+      "countries": [],
+      "genres": [
+        "Animation"
+      ],
+      "kind": "series",
+      "original_title": null,
+      "people": [],
+      "plot": "A locally cataloged series.",
+      "provenance": {
+        "external_id": "47e26ca2-f393-4a00-b33a-902d41d49714",
+        "fetched_at": null,
+        "locale": "en",
+        "provider_id": "manual",
+        "source_label": "manual"
+      },
+      "provider_ids": {
+        "local": "animation-1"
+      },
+      "ratings": [],
+      "release_date": null,
+      "runtime_minutes": null,
+      "schema_version": "1",
+      "seasons": [
+        {
+          "episodes": [
+            {
+              "air_date": "2025-01-01",
+              "number": 1,
+              "ordering": null,
+              "plot": null,
+              "provider_ids": {},
+              "runtime_minutes": null,
+              "title": "Existing Special"
+            }
+          ],
+          "number": 0,
+          "plot": null,
+          "provider_ids": {},
+          "title": "Specials"
+        }
+      ],
+      "structural_quality": 1,
+      "studios": [],
+      "tags": [],
+      "titles": {
+        "en": "Local Animation",
+        "ru": "Local Animation RU"
+      },
+      "year": null
+    },
+    "query": {
+      "limit": 50,
+      "locale": "en",
+      "media_kinds": [
+        "movie",
+        "series"
+      ],
+      "query": "Local"
+    },
+    "results": [
+      {
+        "external_id": "47e26ca2-f393-4a00-b33a-902d41d49714",
+        "locale": "en",
+        "media_kind": "series",
+        "provider_id": "manual",
+        "title": "Local Animation",
+        "year": null
+      }
+    ],
+    "retention": {
+      "action": {
+        "kind": "none",
+        "mandatory": false
+      },
+      "created_at": "2026-01-01T00:00:00Z",
+      "now": "2026-01-01T00:00:00Z",
+      "policy": {
+        "expires_at": null,
+        "refresh_after": null
+      },
+      "warning": null
+    }
+  }
 }

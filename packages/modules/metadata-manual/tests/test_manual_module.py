@@ -9,7 +9,7 @@ import os
 import subprocess
 import sys
 import zipfile
-from datetime import UTC, date, datetime
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -23,20 +23,18 @@ from media_finder_sdk import (
     MetadataEditResult,
     MetadataIdentity,
     MetadataImportDocument,
-    MetadataSearchQuery,
-    MetadataSearchResult,
     ModuleError,
+    ModuleErrorData,
     ModuleKind,
     NormalizedMetadata,
     Provenance,
     ProviderPayload,
-    RetentionAction,
-    RetentionActionKind,
-    RetentionPolicy,
     Season,
+    SerializedMetadataProviderConformance,
     assert_metadata_editor_registration_conforms,
     assert_metadata_registration_conforms,
     load_manifest,
+    parse_serialized_conformance_fixture,
     resolve_module_environment,
 )
 
@@ -214,37 +212,34 @@ def test_manual_manifest_is_value_free_and_package_uses_only_public_sdk() -> Non
 
 
 def test_manual_provider_and_editor_pass_public_conformance() -> None:
+    serialized = parse_serialized_conformance_fixture(
+        (PACKAGE_ROOT / "src/media_finder_metadata_manual/fixtures/conformance.json").read_bytes()
+    )
+    assert isinstance(serialized, SerializedMetadataProviderConformance)
     document = _document()
     raw = ProviderPayload(data=document)
     identity = _identity()
     normalized = _normalized()
     module = registration(fixtures={(MediaKind.SERIES, IDENTITY, "en"): raw})
-    created = datetime(2026, 1, 1, tzinfo=UTC)
+    success = serialized.success
+    failures = {failure.operation: failure.error for failure in serialized.stable_failures}
 
     assert_metadata_registration_conforms(
         module,
         MetadataConformanceFixture(
             environment={},
-            query=MetadataSearchQuery(query="Local", locale="en"),
-            expected_results=(
-                MetadataSearchResult(
-                    provider_id="manual",
-                    external_id=IDENTITY,
-                    media_kind=MediaKind.SERIES,
-                    title="Local Animation",
-                    locale="en",
-                ),
-            ),
-            identity=identity,
+            query=success.query,
+            expected_results=success.results,
+            identity=success.identity,
             expected_payload=raw,
-            expected_metadata=normalized,
-            invalid_identity=identity.model_copy(update={"external_id": "missing"}),
-            expected_error_code="manual_import_invalid",
-            created_at=created,
-            now=created,
-            expected_policy=RetentionPolicy(),
-            expected_action=RetentionAction(kind=RetentionActionKind.NONE),
-            expected_warning=None,
+            expected_metadata=success.normalized,
+            invalid_identity=success.identity.model_copy(update={"external_id": "missing"}),
+            expected_error_code=failures["fetch-invalid-identity"].code,
+            created_at=success.retention.created_at,
+            now=success.retention.now,
+            expected_policy=success.retention.policy,
+            expected_action=success.retention.action,
+            expected_warning=success.retention.warning,
         ),
     )
 
@@ -264,7 +259,7 @@ def test_manual_provider_and_editor_pass_public_conformance() -> None:
             invalid_document=MetadataImportDocument.from_bytes(
                 b'{"schema_version":"1","external_id":"invalid"}'
             ),
-            expected_error_code="manual_import_invalid",
+            expected_error_code=failures["import-invalid-document"].code,
             current=normalized,
             episode_table=csv_document,
             expected_merge=MetadataEditResult(
@@ -276,6 +271,28 @@ def test_manual_provider_and_editor_pass_public_conformance() -> None:
             ),
         ),
     )
+    assert serialized.missing_configuration.applicable is False
+    assert success.editor is not None
+    assert success.editor.imported_identity == identity
+    assert success.editor.merged_episode_count == sum(
+        len(season.episodes) for season in _normalized(merged=True).seasons
+    )
+
+    provider = module.build(resolve_module_environment(module.manifest, {}))
+    try:
+        with pytest.raises(ModuleError) as invalid_identity:
+            provider.fetch(success.identity.model_copy(update={"external_id": "missing"}))
+    finally:
+        provider.close()
+    assert ModuleErrorData.from_error(invalid_identity.value) == failures["fetch-invalid-identity"]
+
+    assert module.editor is not None
+    editor = module.editor(resolve_module_environment(module.manifest, {}))
+    with pytest.raises(ModuleError) as invalid_import:
+        editor.import_document(
+            MetadataImportDocument.from_bytes(b'{"schema_version":"1","external_id":"invalid"}')
+        )
+    assert ModuleErrorData.from_error(invalid_import.value) == failures["import-invalid-document"]
 
 
 def test_invalid_episode_table_is_safe_and_does_not_mutate_current_metadata() -> None:
@@ -292,3 +309,51 @@ def test_invalid_episode_table_is_safe_and_does_not_mutate_current_metadata() ->
 
     assert raised.value.code == "manual_import_invalid"
     assert current == _normalized()
+
+
+def test_manual_serialized_redaction_probes_flow_through_identity_and_import_failures() -> None:
+    serialized = parse_serialized_conformance_fixture(
+        (PACKAGE_ROOT / "src/media_finder_metadata_manual/fixtures/conformance.json").read_bytes()
+    )
+    assert isinstance(serialized, SerializedMetadataProviderConformance)
+    probes = serialized.redaction_probes
+    module = registration()
+    environment = resolve_module_environment(module.manifest, {})
+    provider = module.build(environment)
+    probe_identity = serialized.success.identity.model_copy(
+        update={"external_id": probes.private_selection}
+    )
+    try:
+        with pytest.raises(ModuleError) as identity_error:
+            provider.fetch(probe_identity)
+    finally:
+        provider.close()
+
+    assert module.editor is not None
+    editor = module.editor(environment)
+    probe_import = MetadataImportDocument.from_bytes(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "external_id": probes.credential,
+                "titles": {"en": probes.environment_value},
+                "probe": probes.artifact_body,
+            }
+        ).encode()
+    )
+    with pytest.raises(ModuleError) as import_error:
+        try:
+            editor.import_document(probe_import)
+        finally:
+            editor.close()
+
+    safe_public = " ".join(
+        (
+            ModuleErrorData.from_error(identity_error.value).model_dump_json(),
+            ModuleErrorData.from_error(import_error.value).model_dump_json(),
+            str(identity_error.value),
+            str(import_error.value),
+        )
+    )
+    for probe in probes.model_dump().values():
+        assert probe not in safe_public

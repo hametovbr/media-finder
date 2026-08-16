@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import email
+import hashlib
 import logging
 import os
 import subprocess
@@ -18,18 +19,21 @@ import httpx
 import pytest
 from media_finder_download_qbittorrent import registration
 from media_finder_sdk import (
+    ArtifactDescriptor,
     CorrelationResult,
     DownloadClientConformanceFixture,
     DownloadDestination,
     EnvironmentVariableSpec,
     MagnetArtifact,
     ModuleError,
+    ModuleErrorData,
     ModuleFailureCategory,
     ModuleKind,
-    SubmissionResult,
+    SerializedDownloadClientConformance,
     TorrentArtifact,
     assert_download_registration_conforms,
     load_manifest,
+    parse_serialized_conformance_fixture,
     resolve_module_environment,
 )
 
@@ -249,34 +253,71 @@ def test_qbittorrent_manifest_declares_exact_environment_and_public_sdk_only() -
 
 
 def test_qbittorrent_registration_conforms_and_uses_confined_web_api() -> None:
+    fixture_bytes = (
+        PACKAGE_ROOT / "src/media_finder_download_qbittorrent/fixtures/conformance.json"
+    ).read_bytes()
+    serialized = parse_serialized_conformance_fixture(fixture_bytes)
+    assert isinstance(serialized, SerializedDownloadClientConformance)
     clients = RecordingClientFactory()
     module = _module(clients)
+    artifacts = (
+        MagnetArtifact(uri=MAGNET),
+        TorrentArtifact.from_bytes(TORRENT_BYTES),
+    )
+    descriptors = tuple(
+        ArtifactDescriptor(
+            kind=artifact.kind,
+            byte_length=len(
+                artifact.uri.encode("utf-8")
+                if isinstance(artifact, MagnetArtifact)
+                else artifact.content()
+            ),
+            sha256=hashlib.sha256(
+                artifact.uri.encode("utf-8")
+                if isinstance(artifact, MagnetArtifact)
+                else artifact.content()
+            ).hexdigest(),
+        )
+        for artifact in artifacts
+    )
+    assert descriptors == serialized.success.artifacts
+    assert USERNAME.encode() not in fixture_bytes
+    assert PASSWORD.encode() not in fixture_bytes
+    assert BASE_URL.encode() not in fixture_bytes
+    assert MAGNET.encode() not in fixture_bytes
+    assert TORRENT_BYTES not in fixture_bytes
+    missing = serialized.missing_configuration
+    assert missing.applicable is True
+    with pytest.raises(ModuleError) as missing_error:
+        resolve_module_environment(module.manifest, {})
+    assert missing_error.value.code == missing.error.code
+    assert missing_error.value.category == missing.error.category
+    assert dict(missing_error.value.safe_details) == dict(missing.error.safe_details)
+    failures = {failure.operation: failure.error for failure in serialized.stable_failures}
     assert_download_registration_conforms(
         module,
         DownloadClientConformanceFixture(
             environment=_environment(),
-            expected_destinations=(
-                DownloadDestination(key="anime", label="anime"),
-                DownloadDestination(key="manual-radarr", label="manual-radarr"),
-            ),
-            artifacts=(
-                MagnetArtifact(uri=MAGNET),
-                TorrentArtifact.from_bytes(TORRENT_BYTES),
-            ),
-            destination="anime",
+            expected_destinations=serialized.success.destinations,
+            artifacts=artifacts,
+            destination=serialized.success.destination,
             invalid_destination="removed",
-            correlation=CORRELATION,
-            expected_submission=SubmissionResult(
-                accepted=True,
-                correlation=CORRELATION,
-            ),
-            expected_correlation=CorrelationResult(
-                found=True,
-                correlation=CORRELATION,
-                external_task_id=INFOHASH,
-            ),
-            expected_error_code="download_destination_unavailable",
+            correlation=serialized.success.correlation,
+            expected_submission=serialized.success.submission,
+            expected_correlation=serialized.success.lookup,
+            expected_error_code=failures["submit-invalid-destination"].code,
         ),
+    )
+
+    invalid_client = _client(RecordingClientFactory())
+    try:
+        with pytest.raises(ModuleError) as invalid_destination:
+            invalid_client.submit(MagnetArtifact(uri=MAGNET), "removed", CORRELATION)
+    finally:
+        invalid_client.close()
+    assert (
+        ModuleErrorData.from_error(invalid_destination.value)
+        == failures["submit-invalid-destination"]
     )
 
     assert clients.clients and all(client.is_closed for client in clients.clients)
@@ -439,6 +480,14 @@ def test_qbittorrent_sessions_are_isolated_and_lifecycle_close_is_idempotent() -
 
 
 def test_qbittorrent_timeout_and_lookup_failure_remain_ambiguous_without_retry() -> None:
+    serialized = parse_serialized_conformance_fixture(
+        (
+            PACKAGE_ROOT / "src/media_finder_download_qbittorrent/fixtures/conformance.json"
+        ).read_bytes()
+    )
+    assert isinstance(serialized, SerializedDownloadClientConformance)
+    failures = {failure.operation: failure.error for failure in serialized.stable_failures}
+
     add_calls = 0
     lookup_calls = 0
 
@@ -467,10 +516,8 @@ def test_qbittorrent_timeout_and_lookup_failure_remain_ambiguous_without_retry()
     finally:
         client.close()
 
-    assert submit_timeout.value.category is ModuleFailureCategory.TIMEOUT
-    assert submit_timeout.value.code == "submission_timeout"
-    assert lookup_timeout.value.category is ModuleFailureCategory.INCONCLUSIVE
-    assert lookup_timeout.value.code == "correlation_lookup_inconclusive"
+    assert ModuleErrorData.from_error(submit_timeout.value) == failures["submit-timeout"]
+    assert ModuleErrorData.from_error(lookup_timeout.value) == failures["lookup-inconclusive"]
     assert add_calls == 1
     assert lookup_calls == 1
     rendered = "".join(
@@ -514,3 +561,63 @@ def test_qbittorrent_failures_and_logs_never_disclose_credentials_or_artifacts(
     )
     for secret in (USERNAME, PASSWORD, MAGNET, repr(TORRENT_BYTES)):
         assert secret not in rendered
+
+
+def test_qbittorrent_serialized_redaction_probes_cross_credentials_artifact_and_correlation(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    serialized = parse_serialized_conformance_fixture(
+        (
+            PACKAGE_ROOT / "src/media_finder_download_qbittorrent/fixtures/conformance.json"
+        ).read_bytes()
+    )
+    assert isinstance(serialized, SerializedDownloadClientConformance)
+    probes = serialized.redaction_probes
+    correlation = f"mf-acq-{probes.private_selection}"
+    artifact = MagnetArtifact(uri=f"magnet:?xt=urn:btih:{INFOHASH}&dn={probes.artifact_body}")
+    caplog.set_level(logging.DEBUG)
+
+    def fail_after_private_inputs(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/auth/login"):
+            credentials = parse_qs(request.content.decode())
+            assert credentials == {
+                "username": [probes.environment_value],
+                "password": [probes.credential],
+            }
+            return httpx.Response(200, text="Ok.")
+        if request.url.path.endswith("/torrents/categories"):
+            return httpx.Response(200, json={"anime": {"savePath": "/downloads/anime"}})
+        if request.url.path.endswith("/torrents/add"):
+            submission = request.content.decode()
+            assert probes.artifact_body in submission
+            assert correlation in submission
+            raise RuntimeError(" ".join(probes.model_dump().values()))
+        return httpx.Response(404)
+
+    clients = RecordingClientFactory(fail_after_private_inputs)
+    module = _module(clients)
+    client = module.build(
+        resolve_module_environment(
+            module.manifest,
+            _environment(
+                QBITTORRENT_USERNAME=probes.environment_value,
+                QBITTORRENT_PASSWORD=probes.credential,
+            ),
+        )
+    )
+    try:
+        with pytest.raises(ModuleError) as captured:
+            client.submit(artifact, "anime", correlation)
+    finally:
+        client.close()
+
+    safe_public = " ".join(
+        (
+            ModuleErrorData.from_error(captured.value).model_dump_json(),
+            str(captured.value),
+            repr(captured.value),
+            caplog.text,
+        )
+    )
+    for probe in probes.model_dump().values():
+        assert probe not in safe_public

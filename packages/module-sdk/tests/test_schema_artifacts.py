@@ -10,6 +10,7 @@ from media_finder_sdk import generate_schema_artifacts
 ROOT = Path(__file__).parents[3]
 SCHEMA_ROOT = ROOT / "schemas" / "module-sdk" / "v1"
 EXPECTED = {
+    "conformance.schema.json",
     "download.schema.json",
     "error.schema.json",
     "metadata.schema.json",
@@ -74,3 +75,55 @@ def test_schemas_preserve_semantic_module_boundaries() -> None:
     release_definitions = schemas["release.schema.json"]["$defs"]
     assert release_definitions["PrivateReleaseSelection"]["writeOnly"] is True
     assert release_definitions["TorrentArtifact"]["maxLength"] > 0
+
+
+def test_conformance_schema_is_discriminated_and_never_serializes_private_values() -> None:
+    schema = json.loads(generate_schema_artifacts()["conformance.schema.json"])
+
+    assert schema["discriminator"] == {
+        "mapping": {
+            "download-client": "#/$defs/SerializedDownloadClientConformance",
+            "metadata-provider": "#/$defs/SerializedMetadataProviderConformance",
+            "release-provider": "#/$defs/SerializedReleaseProviderConformance",
+        },
+        "propertyName": "module_kind",
+    }
+    definitions = schema["$defs"]
+    assert {
+        "ArtifactDescriptor",
+        "SerializedDownloadClientConformance",
+        "SerializedMetadataProviderConformance",
+        "SerializedReleaseProviderConformance",
+    } <= set(definitions)
+    artifact = definitions["ArtifactDescriptor"]
+    assert set(artifact["properties"]) == {"byte_length", "kind", "sha256"}
+    assert artifact["allOf"] == [
+        {
+            "if": {"properties": {"kind": {"const": "magnet"}}, "required": ["kind"]},
+            "then": {"properties": {"byte_length": {"maximum": 8192}}},
+        },
+        {
+            "if": {"properties": {"kind": {"const": "torrent"}}, "required": ["kind"]},
+            "then": {"properties": {"byte_length": {"maximum": 20 * 1024 * 1024}}},
+        },
+    ]
+    snapshot = definitions["SerializedSafeReleaseSnapshot"]
+    assert snapshot["properties"]["guid"]["anyOf"][0] == {
+        "maxLength": 255,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9._:-]+$",
+        "type": "string",
+    }
+
+    schema_without_probe_declaration = dict(schema)
+    schema_without_probe_declaration["$defs"] = dict(schema["$defs"])
+    schema_without_probe_declaration["$defs"].pop("RedactionProbeSet")
+    rendered = json.dumps(schema_without_probe_declaration, sort_keys=True).casefold()
+    for forbidden in (
+        "environment_values",
+        "private_selection",
+        "artifact_body",
+        "torrent_bytes",
+        "magnet_uri",
+    ):
+        assert forbidden not in rendered

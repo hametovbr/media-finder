@@ -311,6 +311,12 @@ function validateVerification(root, verify, verifyText, failures) {
     contractCommands.includes("tests/test_control_conformance_real.py"),
     ".github/workflows/verify.yaml: contract job must run real browser-control conformance",
   );
+  requireValue(
+    failures,
+    contractCommands.includes("pnpm module-conformance:test") &&
+      contractCommands.includes("pnpm module-conformance:validate"),
+    ".github/workflows/verify.yaml: contract job must validate serialized module conformance independently",
+  );
   const testsPath = path.join(root, "tests");
   if (fs.existsSync(testsPath)) {
     for (const testFile of fs.readdirSync(testsPath).filter((name) => /^test_.*\.py$/.test(name))) {

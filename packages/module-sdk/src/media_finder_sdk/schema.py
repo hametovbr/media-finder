@@ -11,6 +11,7 @@ from types import MappingProxyType
 from .common import PublicModel
 from .errors import ModuleErrorData
 from .manifest import ModuleManifest
+from .serialized_conformance import SERIALIZED_CONFORMANCE_ADAPTER
 from .types import (
     CorrelationResult,
     DownloadDestination,
@@ -147,6 +148,25 @@ def _restore_provider_payload_input_shape(schema: dict[str, object]) -> None:
     }
 
 
+def _add_artifact_kind_bounds(schema: dict[str, object]) -> None:
+    definitions = schema.get("$defs")
+    if not isinstance(definitions, dict):
+        raise ValueError("conformance_schema_definitions_missing")
+    artifact = definitions.get("ArtifactDescriptor")
+    if not isinstance(artifact, dict):
+        raise ValueError("artifact_descriptor_schema_missing")
+    artifact["allOf"] = [
+        {
+            "if": {"properties": {"kind": {"const": "magnet"}}, "required": ["kind"]},
+            "then": {"properties": {"byte_length": {"maximum": 8192}}},
+        },
+        {
+            "if": {"properties": {"kind": {"const": "torrent"}}, "required": ["kind"]},
+            "then": {"properties": {"byte_length": {"maximum": 20 * 1024 * 1024}}},
+        },
+    ]
+
+
 def _schemas() -> dict[str, dict[str, object]]:
     manifest = _root_schema(
         ModuleManifest,
@@ -180,7 +200,15 @@ def _schemas() -> dict[str, dict[str, object]]:
     _add_private_metadata_definitions(metadata)
     _restore_provider_payload_input_shape(metadata)
 
+    conformance = SERIALIZED_CONFORMANCE_ADAPTER.json_schema(mode="serialization")
+    conformance["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+    conformance["$id"] = f"{SCHEMA_BASE_ID}/conformance.schema.json"
+    conformance["title"] = "Media Finder Serialized Module Conformance v1"
+    conformance["type"] = "object"
+    _add_artifact_kind_bounds(conformance)
+
     return {
+        "conformance.schema.json": conformance,
         "download.schema.json": download,
         "error.schema.json": _root_schema(
             ModuleErrorData,

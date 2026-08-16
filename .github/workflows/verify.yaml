@@ -128,7 +128,20 @@ jobs:
         with:
           version: "0.12.5"
           enable-cache: true
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11.19.0
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: uv sync --frozen --all-groups
+      - name: Serialized module conformance
+        run: |
+          pnpm module-conformance:test
+          pnpm module-conformance:validate
       - name: Module contract tests
         run: >-
           uv run pytest
