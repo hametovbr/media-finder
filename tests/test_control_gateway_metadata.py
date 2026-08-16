@@ -2,33 +2,25 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
+from catalog_fixtures import CatalogFixture as CatalogService
+from catalog_fixtures import RevisionInput
+from gateway_fixtures import create_gateway
 from media_finder_control import ControlFailure, Locale
 from media_finder_control.models import MetadataSearchRequest, MetadataSelectionRequest
+from media_finder_core.catalog.persistence import (
+    MediaItemRecord as MediaItem,
+)
+from media_finder_core.catalog.persistence import (
+    MetadataRevisionRecord as MetadataRevision,
+)
+from media_finder_sdk import MediaKind, NormalizedMetadata, Provenance
+from media_finder_server.control_gateway import BackendControlGateway
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, sessionmaker
-
-from media_finder.control_gateway import BackendControlGateway
-from media_finder.domain import CatalogService, RevisionInput
-from media_finder.ephemeral import EphemeralCache
-from media_finder.integration_runtime import RuntimeResolver
-from media_finder.models import MediaItem, MetadataRevision
-from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
+from sqlalchemy.orm import Session
 
 
 def _gateway(database: Session, fake_provider) -> BackendControlGateway:
-    sessions = sessionmaker(bind=database.get_bind(), expire_on_commit=False)
-    runtime = RuntimeResolver(
-        factory=None,
-        providers={fake_provider.manifest.key: fake_provider},
-        prowlarr=None,
-        client_loader=None,
-    )
-    return BackendControlGateway(
-        sessions=sessions,
-        cursor_secret=b"cursor-secret-for-tests",
-        runtime=runtime,
-        metadata_selections=EphemeralCache(),
-    )
+    return create_gateway(database, metadata_provider=fake_provider)
 
 
 def _add_item(
@@ -49,7 +41,7 @@ def _add_item(
                 titles={"en": title},
                 year=year,
                 provenance=Provenance(
-                    provider_key=provider,
+                    provider_id=provider,
                     external_id=external_id,
                     locale="en",
                     fetched_at=datetime(2025, 1, 1, tzinfo=UTC),
@@ -76,7 +68,7 @@ def test_metadata_search_uses_requested_locale_and_selection_is_one_use(
             request=MetadataSelectionRequest(),
             locale=Locale.RU,
         )
-        assert saved.item.provider_key == fake_provider.manifest.key
+        assert saved.item.provider_key == fake_provider.manifest.module_id
         assert saved.item.metadata.titles == {"ru": "Fixture"}
         assert saved.created is True
 
@@ -97,7 +89,7 @@ def test_exact_duplicate_returns_existing_without_new_revision(
 ) -> None:
     existing = _add_item(
         database,
-        provider=fake_provider.manifest.key,
+        provider=fake_provider.manifest.module_id,
         external_id="1",
         title="Fixture",
     )
@@ -146,7 +138,7 @@ def test_cross_provider_similarity_requires_new_confirmation_token(
         assert (
             database.scalar(
                 select(func.count(MediaItem.id)).where(
-                    MediaItem.provider_key == fake_provider.manifest.key
+                    MediaItem.provider_key == fake_provider.manifest.module_id
                 )
             )
             == 0
@@ -157,7 +149,7 @@ def test_cross_provider_similarity_requires_new_confirmation_token(
             request=MetadataSelectionRequest(confirm_similarity=True),
             locale=Locale.EN,
         )
-        assert saved.item.provider_key == fake_provider.manifest.key
+        assert saved.item.provider_key == fake_provider.manifest.module_id
         assert (
             database.scalar(
                 select(func.count(MetadataRevision.id)).where(

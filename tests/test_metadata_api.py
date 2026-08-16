@@ -1,13 +1,15 @@
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
+from catalog_fixtures import CatalogFixture as CatalogService
+from catalog_fixtures import RevisionInput
 from fastapi.testclient import TestClient
-
-from media_finder.api import create_app
-from media_finder.db import create_database, migrate_to_head, session_factory
-from media_finder.domain import CatalogService, RevisionInput
-from media_finder.models import Acquisition, MetadataRevision
-from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance, RetentionPolicy
+from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
+from media_finder_core.catalog.persistence import SqlAlchemyCatalogRepository
+from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
+from media_finder_sdk import MediaKind, NormalizedMetadata, Provenance, RetentionPolicy
+from processor_fixtures import create_processor_test_app as create_app
 
 
 def _headers() -> dict[str, str]:
@@ -31,7 +33,7 @@ def _metadata(
         countries=("Japan",),
         studios=("Studio Ghibli",),
         provenance=Provenance(
-            provider_key=provider,
+            provider_id=provider,
             external_id=external_id,
             locale="en-US",
             source_label="Fixture",
@@ -54,6 +56,12 @@ def test_metadata_endpoints_return_current_and_pinned_validated_snapshots(
         pinned = item.current_revision
         assert pinned is not None
         acquisition = Acquisition(
+            id=(acquisition_identity := uuid4()),
+            correlation=f"mf-acq-{acquisition_identity}",
+            release_provider_id="fixture-release",
+            release_provider_version="1.0.0",
+            download_client_module_id="fixture-download",
+            download_client_module_version="1.0.0",
             media_item_id=item.id,
             metadata_revision_id=pinned.id,
             idempotency_key="metadata-pin",
@@ -66,9 +74,7 @@ def test_metadata_endpoints_return_current_and_pinned_validated_snapshots(
         item_id, acquisition_id = item.id, str(acquisition.id)
     engine.dispose()
 
-    client = TestClient(
-        create_app(url, integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN")
-    )
+    client = TestClient(create_app(url, integration_token="integration-secret"))
     current = client.get(f"/api/v1/media-items/{item_id}/metadata", headers=_headers())
     pinned_response = client.get(
         f"/api/v1/acquisitions/{acquisition_id}/metadata", headers=_headers()
@@ -80,6 +86,8 @@ def test_metadata_endpoints_return_current_and_pinned_validated_snapshots(
     for payload in (current.json(), pinned_response.json()):
         assert payload["schema_version"] == "1"
         assert payload["provenance"]["locale"] == "en-US"
+        assert payload["provenance"]["provider_key"] == "manual"
+        assert "provider_id" not in payload["provenance"]
         assert payload["completeness"] == 0.95
         assert payload["structural_quality"] == 1.0
         assert "raw_payload" not in payload
@@ -104,6 +112,12 @@ def test_expiry_is_enforced_at_boundary_before_and_after_purge(tmp_path: Path, m
             datetime(2025, 1, 1, tzinfo=UTC),
         )
         acquisition = Acquisition(
+            id=(acquisition_identity := uuid4()),
+            correlation=f"mf-acq-{acquisition_identity}",
+            release_provider_id="fixture-release",
+            release_provider_version="1.0.0",
+            download_client_module_id="fixture-download",
+            download_client_module_version="1.0.0",
             media_item_id=item.id,
             metadata_revision_id=revision.id,
             idempotency_key="expired-pin",
@@ -118,7 +132,7 @@ def test_expiry_is_enforced_at_boundary_before_and_after_purge(tmp_path: Path, m
     client = TestClient(
         create_app(
             url,
-            integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN",
+            integration_token="integration-secret",
             clock=lambda: expiry,
         )
     )
@@ -133,12 +147,7 @@ def test_expiry_is_enforced_at_boundary_before_and_after_purge(tmp_path: Path, m
 
     engine = create_database(url)
     with session_factory(engine)() as session:
-        revision = session.get(MetadataRevision, revision_id)
-        assert revision is not None
-        session.info["retention_purge"] = True
-        revision.raw_payload = None
-        revision.normalized_payload = None
-        revision.effective_payload = None
+        SqlAlchemyCatalogRepository(session).purge_revision(revision_id, expiry)
         session.commit()
     engine.dispose()
 
@@ -167,6 +176,12 @@ def test_naming_and_nfo_expiry_at_boundary_and_after_purge_for_current_and_pinne
             datetime(2025, 1, 1, tzinfo=UTC),
         )
         acquisition = Acquisition(
+            id=(acquisition_identity := uuid4()),
+            correlation=f"mf-acq-{acquisition_identity}",
+            release_provider_id="fixture-release",
+            release_provider_version="1.0.0",
+            download_client_module_id="fixture-download",
+            download_client_module_version="1.0.0",
             media_item_id=item.id,
             metadata_revision_id=revision.id,
             idempotency_key="export-expiry",
@@ -180,7 +195,7 @@ def test_naming_and_nfo_expiry_at_boundary_and_after_purge_for_current_and_pinne
     client = TestClient(
         create_app(
             url,
-            integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN",
+            integration_token="integration-secret",
             clock=lambda: expiry,
         )
     )
@@ -198,12 +213,7 @@ def test_naming_and_nfo_expiry_at_boundary_and_after_purge_for_current_and_pinne
 
     engine = create_database(url)
     with session_factory(engine)() as session:
-        revision = session.get(MetadataRevision, revision_id)
-        assert revision is not None
-        session.info["retention_purge"] = True
-        revision.raw_payload = None
-        revision.normalized_payload = None
-        revision.effective_payload = None
+        SqlAlchemyCatalogRepository(session).purge_revision(revision_id, expiry)
         session.commit()
     engine.dispose()
 

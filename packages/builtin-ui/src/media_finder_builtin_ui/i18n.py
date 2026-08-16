@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import gettext
-import json
 from functools import cache
 from pathlib import Path
 
@@ -116,27 +115,3 @@ def media_kind_label(kind: str, locale: str) -> str:
 
 def acquisition_status_label(status: str, locale: str) -> str:
     return _translation(locale).gettext(_STATUSES.get(status, status))
-
-
-@cache
-def _module_catalog(module_key: str, locale: str) -> dict[str, str]:
-    path = Path(__file__).with_name("module_translations") / module_key / f"{locale}.json"
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return (
-        payload
-        if isinstance(payload, dict)
-        and all(isinstance(key, str) and isinstance(value, str) for key, value in payload.items())
-        else {}
-    )
-
-
-def module_translation(module_key: str, key: str, locale: str) -> str:
-    """Resolve a packaged module translation, falling back to its English asset then key."""
-
-    selected = "ru" if locale == "ru" else "en"
-    return _module_catalog(module_key, selected).get(key) or _module_catalog(module_key, "en").get(
-        key, key
-    )

@@ -2,6 +2,7 @@ import asyncio
 from uuid import uuid4
 
 import pytest
+from gateway_fixtures import create_gateway
 from media_finder_control import ControlFailure, Locale
 from media_finder_control.manual import (
     ArtworkDocument,
@@ -11,31 +12,14 @@ from media_finder_control.manual import (
     SeasonDocument,
 )
 from media_finder_control.models import EpisodeImportRequest, ManualImportRequest
+from media_finder_core.catalog.persistence import MetadataRevisionRecord as MetadataRevision
+from media_finder_server.control_gateway import BackendControlGateway
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, sessionmaker
-
-from media_finder.control_gateway import BackendControlGateway
-from media_finder.ephemeral import EphemeralCache
-from media_finder.integration_runtime import RuntimeResolver
-from media_finder.models import MetadataRevision
-from media_finder.modules.manual import ManualProvider
+from sqlalchemy.orm import Session
 
 
 def _gateway(database: Session) -> BackendControlGateway:
-    sessions = sessionmaker(bind=database.get_bind(), expire_on_commit=False)
-    provider = ManualProvider()
-    runtime = RuntimeResolver(
-        factory=None,
-        providers={"manual": provider},
-        prowlarr=None,
-        client_loader=None,
-    )
-    return BackendControlGateway(
-        sessions=sessions,
-        cursor_secret=b"cursor-secret-for-tests",
-        runtime=runtime,
-        manual_drafts=EphemeralCache(),
-    )
+    return create_gateway(database)
 
 
 def _rich_document(identity: str | None = None, title: str = "Manual Series") -> ManualDocumentV1:

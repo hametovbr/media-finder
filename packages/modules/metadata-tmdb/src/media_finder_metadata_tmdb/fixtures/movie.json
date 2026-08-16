@@ -1,0 +1,14 @@
+{
+  "id": 129,
+  "title": "Spirited Away",
+  "original_title": "Sen to Chihiro no kamikakushi",
+  "overview": "A journey through a spirit world.",
+  "release_date": "2001-07-20",
+  "runtime": 125,
+  "vote_average": 8.5,
+  "genres": [{"name": "Animation"}, {"name": "Fantasy"}],
+  "production_countries": [{"name": "Japan"}],
+  "production_companies": [{"name": "Studio Ghibli"}],
+  "poster_path": "/spirited-poster.jpg",
+  "backdrop_path": "/spirited-backdrop.jpg"
+}

@@ -11,38 +11,43 @@ from uuid import uuid4
 import httpx
 import pytest
 import uvicorn
+from acquisition_fakes import StaticAcquisitionModules
+from catalog_fixtures import CatalogFixture as CatalogService
+from catalog_fixtures import RevisionInput
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, Response
-from media_finder_builtin_ui import create_builtin_ui
-from media_finder_builtin_ui.fake import FakeBrowserSecurity, FakeControlGateway
-from playwright.sync_api import Browser, Page, Playwright, sync_playwright
-from pydantic import BaseModel
-from sqlalchemy import func, select
-
-from media_finder.control_api import create_control_app
-from media_finder.control_security import BackendBrowserSecurity
-from media_finder.db import migrate_to_head, session_factory
-from media_finder.domain import CatalogService, RevisionInput
-from media_finder.models import Acquisition, DownloadClientInstance, MediaItem
-from media_finder.modules.registry import FIRST_PARTY_MODULES
-from media_finder.prowlarr import ProwlarrAdapter, SearchResultCache
-from media_finder.sdk.types import (
-    Attribution,
+from gateway_fixtures import create_gateway
+from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
+from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
+from media_finder_core.catalog.persistence import MediaItemRecord as MediaItem
+from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
+from media_finder_sdk import (
+    AttributionSpec,
     CorrelationResult,
+    DownloadArtifact,
     DownloadDestination,
+    MagnetArtifact,
     MediaKind,
+    MetadataIdentity,
+    MetadataSearchQuery,
     MetadataSearchResult,
     ModuleKind,
     ModuleManifest,
     NormalizedMetadata,
+    PrivateReleaseSelection,
     Provenance,
-    RetentionAction,
-    RetentionActionKind,
-    RetentionPolicy,
+    ProviderPayload,
+    ReleaseCandidate,
+    ReleaseSearchQuery,
+    SafeReleaseSnapshot,
     SubmissionResult,
 )
-from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
-from media_finder.ui import create_ui_app
+from media_finder_server import create_application
+from media_finder_server.control_api import create_control_app
+from media_finder_server.control_security import BackendBrowserSecurity
+from playwright.sync_api import Browser, Page, Playwright, sync_playwright
+from sqlalchemy import func, select
+from ui_fixtures import create_ui_test_app
 
 
 def _port() -> int:
@@ -51,104 +56,110 @@ def _port() -> int:
         return int(listener.getsockname()[1])
 
 
-class EmptyConfig(BaseModel):
-    pass
-
-
 class BrowserProvider:
-    config_model = EmptyConfig
-
     def __init__(self, key: str) -> None:
         self.manifest = ModuleManifest(
-            key=key,
-            version="1.0.0",
+            module_id=key,
+            module_kind=ModuleKind.METADATA_PROVIDER,
+            module_version="1.0.0",
+            sdk_compatibility=">=1,<2",
             contract_version="1",
             name_key=f"module.{key}.name",
-            capabilities=frozenset({"movie"}),
+            capabilities=frozenset({"search", "fetch", "normalize"}),
+            translation_keys=frozenset({f"module.{key}.name", f"module.{key}.notice"}),
+            attribution=AttributionSpec(notice_key=f"module.{key}.notice"),
         )
 
-    def validate_config(self) -> None:
+    def validate(self) -> None:
         return None
 
-    def search(self, query: str, locale: str) -> list[MetadataSearchResult]:
-        return [
+    def search(self, query: MetadataSearchQuery) -> tuple[MetadataSearchResult, ...]:
+        return (
             MetadataSearchResult(
-                provider_key=self.manifest.key,
-                external_id=f"{self.manifest.key}-shared",
-                kind=MediaKind.MOVIE,
+                provider_id=self.manifest.module_id,
+                external_id=f"{self.manifest.module_id}-shared",
+                media_kind=MediaKind.MOVIE,
                 title="Shared Title",
                 year=2024,
-                locale=locale,
-            )
-        ]
-
-    def fetch(self, kind: str, external_id: str, locale: str) -> dict[str, object]:
-        return {"title": "Shared Title", "year": 2024}
-
-    def normalize(self, payload, kind: str, external_id: str, locale: str) -> NormalizedMetadata:
-        return NormalizedMetadata(
-            kind=MediaKind.MOVIE,
-            titles={locale: "Shared Title"},
-            year=2024,
-            provenance=Provenance(
-                provider_key=self.manifest.key, external_id=external_id, locale=locale
+                locale=query.locale,
             ),
         )
 
-    def attribution(self) -> Attribution:
-        return Attribution(
-            provider_key=self.manifest.key,
-            notice=f"Fixture data from {self.manifest.key}",
+    def fetch(self, identity: MetadataIdentity) -> ProviderPayload:
+        del identity
+        return ProviderPayload(data={"title": "Shared Title", "year": 2024})
+
+    def normalize(
+        self,
+        payload: ProviderPayload,
+        identity: MetadataIdentity,
+    ) -> NormalizedMetadata:
+        del payload
+        return NormalizedMetadata(
+            kind=identity.media_kind,
+            titles={identity.locale: "Shared Title"},
+            year=2024,
+            provenance=Provenance(
+                provider_id=self.manifest.module_id,
+                external_id=identity.external_id,
+                locale=identity.locale,
+            ),
         )
 
-    def retention_for(self, created_at: datetime) -> RetentionPolicy:
-        return RetentionPolicy()
-
-    def plan_retention(self, policy, now: datetime) -> RetentionAction:
-        return RetentionAction(kind=RetentionActionKind.NONE)
-
-    def export_warning(self, policy, now: datetime):
+    def close(self) -> None:
         return None
 
 
-class BrowserProwlarrTransport:
-    def search(self, query: str, filters: dict[str, str]) -> list[dict[str, object]]:
-        return [
-            {
-                "protocol": "torrent",
-                "title": f"{query}.Release",
-                "indexer": "Browser Indexer",
-                "magnetUrl": "magnet:?xt=urn:btih:0123456789012345678901234567890123456789",
-                "guid": "browser-release",
-            }
-        ]
+class BrowserReleaseProvider:
+    def validate(self) -> None:
+        return None
 
-    def fetch_torrent(self, url: str) -> bytes:
-        raise AssertionError("the browser fixture uses a magnet")
+    def search(self, query: ReleaseSearchQuery) -> tuple[ReleaseCandidate, ...]:
+        return (
+            ReleaseCandidate(
+                snapshot=SafeReleaseSnapshot(
+                    title=f"{query.query}.Release",
+                    indexer="Browser Indexer",
+                    guid="browser-release",
+                ),
+                selection=PrivateReleaseSelection.from_bytes(b"browser-release"),
+            ),
+        )
+
+    def resolve(self, selection: PrivateReleaseSelection) -> MagnetArtifact:
+        assert selection.payload() == b"browser-release"
+        return MagnetArtifact(uri="magnet:?xt=urn:btih:0123456789012345678901234567890123456789")
+
+    def close(self) -> None:
+        return None
 
 
 class BrowserClient:
     manifest = ModuleManifest(
-        key="browser-client",
-        version="1.0.0",
+        module_id="browser-client",
+        module_kind=ModuleKind.DOWNLOAD_CLIENT,
+        module_version="1.0.0",
+        sdk_compatibility=">=1,<2",
         contract_version="1",
         name_key="browser.client",
-        kind=ModuleKind.DOWNLOAD_CLIENT,
-        capabilities=frozenset({"magnet", "correlation"}),
+        capabilities=frozenset({"destinations", "submit", "correlation", "magnet"}),
+        translation_keys=frozenset({"browser.client"}),
     )
-    config_model = EmptyConfig
 
     def __init__(self, destination: str) -> None:
         self.destination = destination
         self.tasks: dict[str, str] = {}
 
-    def validate_config(self) -> None:
+    def validate(self) -> None:
         return None
 
-    def list_destinations(self) -> list[DownloadDestination]:
-        return [DownloadDestination(key=self.destination, label=self.destination.upper())]
+    def list_destinations(self) -> tuple[DownloadDestination, ...]:
+        return (DownloadDestination(key=self.destination, label=self.destination.upper()),)
 
-    def submit(self, artifact, destination: str, correlation: str) -> SubmissionResult:
+    def submit(
+        self, artifact: DownloadArtifact, destination: str, correlation: str
+    ) -> SubmissionResult:
+        del artifact
         self.tasks[correlation] = destination
         return SubmissionResult(
             accepted=True, external_task_id="browser-task", correlation=correlation
@@ -161,6 +172,9 @@ class BrowserClient:
             external_task_id="reconciled-task",
             conclusive=True,
         )
+
+    def close(self) -> None:
+        return None
 
 
 @dataclass(frozen=True)
@@ -199,19 +213,28 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long browser test secret")
     clients = {"qBittorrent": BrowserClient("second")}
 
-    def load_client(instance: DownloadClientInstance) -> BrowserClient:
-        return clients.setdefault(instance.name, BrowserClient(instance.name.casefold()))
-
-    app = create_ui_app(
+    app = create_ui_test_app(
         database_url,
         session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
+        environment={
+            "PROWLARR_URL": "https://prowlarr.browser.test",
+            "PROWLARR_API_KEY": "browser-prowlarr-secret",
+            "QBITTORRENT_URL": "https://qbittorrent.browser.test",
+            "QBITTORRENT_USERNAME": "browser-user",
+            "QBITTORRENT_PASSWORD": "browser-password",
+        },
         providers={
             "provider-a": BrowserProvider("provider-a"),
             "provider-b": BrowserProvider("provider-b"),
-            "manual": FIRST_PARTY_MODULES.retention_providers()["manual"],
         },
-        prowlarr=ProwlarrAdapter(BrowserProwlarrTransport(), SearchResultCache()),
-        client_loader=load_client,
+        acquisition=StaticAcquisitionModules(
+            releases=ReleaseSelectionService(
+                provider=BrowserReleaseProvider(), cache=ReleaseSelectionCache()
+            ),
+            download_client=clients["qBittorrent"],
+            release_id="prowlarr",
+            download_id="qbittorrent",
+        ),
     )
     app.state.browser_clients = clients
 
@@ -221,8 +244,6 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     sessions = session_factory(app.state.engine)
     with sessions() as session:
-        system = session.get(DownloadClientInstance, SYSTEM_QBITTORRENT_ID)
-        assert system is not None
         item = MediaItem(provider_key="manual", external_id=str(uuid4()), kind="movie")
         session.add(item)
         session.flush()
@@ -230,13 +251,18 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             kind=MediaKind.MOVIE,
             titles={"en": "Pending Movie", "ru": "Ожидающий фильм"},
             year=2024,
-            provenance=Provenance(provider_key="manual", external_id=item.external_id, locale="en"),
+            provenance=Provenance(provider_id="manual", external_id=item.external_id, locale="en"),
         )
         revision = CatalogService(session).add_revision(item, RevisionInput(normalized=metadata))
         pending = Acquisition(
+            id=(pending_id := uuid4()),
+            correlation=f"mf-acq-{pending_id}",
+            release_provider_id="fixture-release",
+            release_provider_version="1.0.0",
+            download_client_module_id="qbittorrent",
+            download_client_module_version="9.8.7",
             media_item_id=item.id,
             metadata_revision_id=revision.id,
-            download_client_instance_id=system.id,
             idempotency_key="pending-browser",
             naming_profile="jellyfin-v1",
             status="pending",
@@ -287,9 +313,20 @@ def default_runtime_browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     def factory() -> httpx.Client:
         return httpx.Client(transport=httpx.MockTransport(handler))
 
-    rebuilt = create_ui_app(
-        database_url,
-        session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
+    rebuilt = create_application(
+        environment={
+            "MEDIA_FINDER_DATABASE_URL": database_url,
+            "MEDIA_FINDER_UI_SECRET": "a sufficiently long browser test secret",
+            "MEDIA_FINDER_INTEGRATION_TOKEN": "browser-integration-token",
+            "MEDIA_FINDER_SECURE_COOKIE": "false",
+            "MEDIA_FINDER_UI_MODE": "builtin",
+            "TMDB_TOKEN": "tmdb",
+            "PROWLARR_URL": "https://prowlarr.example.test",
+            "PROWLARR_API_KEY": "prowlarr",
+            "QBITTORRENT_URL": "https://qb.example.test",
+            "QBITTORRENT_USERNAME": "user",
+            "QBITTORRENT_PASSWORD": "password",
+        },
         http_client_factory=factory,
     )
     port = _port()
@@ -329,10 +366,15 @@ def unavailable_runtime_browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyP
             return httpx.Response(200, text="Ok.")
         return httpx.Response(200, json={})
 
-    app = create_ui_app(
-        database_url,
-        session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
-        environment=environment,
+    app = create_application(
+        environment={
+            "MEDIA_FINDER_DATABASE_URL": database_url,
+            "MEDIA_FINDER_UI_SECRET": "a sufficiently long browser test secret",
+            "MEDIA_FINDER_INTEGRATION_TOKEN": "browser-integration-token",
+            "MEDIA_FINDER_SECURE_COOKIE": "false",
+            "MEDIA_FINDER_UI_MODE": "builtin",
+            **environment,
+        },
         http_client_factory=lambda: httpx.Client(transport=httpx.MockTransport(handler)),
     )
     app.state.test_environment_values = tuple(environment.values())
@@ -351,30 +393,26 @@ def unavailable_runtime_browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 @pytest.fixture
-def fake_gateway_browser_site():
-    app = create_builtin_ui(
-        gateway=FakeControlGateway(),
-        security=FakeBrowserSecurity(),
+def external_ui_browser_site(tmp_path: Path):
+    database_url = f"sqlite:///{tmp_path / 'external-ui.db'}"
+    engine = create_database(database_url)
+    migrate_to_head(database_url)
+    sessions = session_factory(engine)
+    releases = ReleaseSelectionService(
+        provider=BrowserReleaseProvider(),
+        cache=ReleaseSelectionCache(),
     )
-    port = _port()
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 10
-    while not server.started and time.monotonic() < deadline:
-        time.sleep(0.02)
-    if not server.started:
-        raise RuntimeError("fake gateway browser server did not start")
-    yield BrowserSite(f"http://127.0.0.1:{port}", app, "")
-    server.should_exit = True
-    thread.join(timeout=10)
-
-
-@pytest.fixture
-def external_ui_browser_site():
+    client = BrowserClient("external")
+    with sessions() as session:
+        gateway = create_gateway(
+            session,
+            metadata_provider=BrowserProvider("external-provider"),
+            release_selections=releases,
+            download_client=client,
+        )
     frontend = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     control = create_control_app(
-        gateway=FakeControlGateway(),
+        gateway=gateway,
         security=BackendBrowserSecurity(secret=b"external-ui-session-secret-at-least-32"),
     )
 
@@ -383,40 +421,55 @@ def external_ui_browser_site():
         return """<!doctype html><html lang="en"><body><main id="state">starting</main>
         <script>
         (async () => {
-          const session = await fetch('/api/control/v1/session').then(r => r.json());
+          const control = async (path, options) => {
+            const response = await fetch(path, options);
+            if (!response.ok) {
+              throw new Error('control request failed: ' + response.status + ' ' + path);
+            }
+            return response.json();
+          };
+          const session = await control('/api/control/v1/session');
           const headers = {'Content-Type': 'application/json',
                            'X-CSRF-Token': session.csrf_token};
-          const catalog = await fetch('/api/control/v1/media-items').then(r => r.json());
-          const search = await fetch('/api/control/v1/metadata-searches', {
+          const initialCatalog = await control('/api/control/v1/media-items');
+          const search = await control('/api/control/v1/metadata-searches', {
             method: 'POST', headers, body: JSON.stringify({query: 'Example', locale: 'en'})
-          }).then(r => r.json());
-          await fetch('/api/control/v1/metadata-selections/' + search[0].token, {
+          });
+          const selected = await control('/api/control/v1/metadata-selections/' +
+            search[0].token, {
             method: 'POST', headers, body: JSON.stringify({})
           });
-          await fetch('/api/control/v1/manual-imports', {
+          const manual = await control('/api/control/v1/manual-imports', {
             method: 'POST', headers, body: JSON.stringify({document: {
               schema_version: '1', kind: 'movie', locale: 'en',
               titles: {en: 'External Manual'}
             }})
           });
-          const releases = await fetch('/api/control/v1/media-items/movie-1/release-searches', {
+          const catalog = await control('/api/control/v1/media-items');
+          const manualListed = catalog.items.some(item => item.id === manual.id);
+          const releases = await control('/api/control/v1/media-items/' + selected.id +
+            '/release-searches', {
             method: 'POST', headers, body: JSON.stringify({query: 'Example'})
-          }).then(r => r.json());
-          const destinations = await fetch(
+          });
+          const destinations = await control(
             '/api/control/v1/download-destinations'
-          ).then(r => r.json());
-          const acquisition = await fetch('/api/control/v1/acquisitions', {
-            method: 'POST', headers, body: JSON.stringify({media_item_id: 'movie-1',
+          );
+          const acquisition = await control('/api/control/v1/acquisitions', {
+            method: 'POST', headers, body: JSON.stringify({media_item_id: selected.id,
               release_token: releases[0].token, destination: destinations[0].key,
               idempotency_key: 'external-ui-attempt'})
-          }).then(r => r.json());
-          const reconciled = await fetch(
+          });
+          const reconciled = await control(
             '/api/control/v1/acquisitions/' + acquisition.id + '/reconcile',
             {method: 'POST', headers, body: JSON.stringify({})}
-          ).then(r => r.json());
+          );
           document.querySelector('#state').textContent =
-              catalog.items[0].title + '|' + reconciled.status;
-        })().catch(error => document.querySelector('#state').textContent = 'error:' + error);
+              'catalog:' + initialCatalog.items.length + '->' + catalog.items.length +
+              '|manual:' + manual.metadata.titles.en + '|manual-listed:' + manualListed +
+              '|metadata:' + selected.metadata.titles.en +
+              '|acquisition:' + reconciled.status;
+        })().catch(error => document.querySelector('#state').textContent =
+            'error:' + error.message);
         </script></body></html>"""
 
     frontend.mount("/api/control", control)
@@ -434,6 +487,9 @@ def external_ui_browser_site():
     yield BrowserSite(f"http://127.0.0.1:{port}", frontend, "")
     server.should_exit = True
     thread.join(timeout=10)
+    gateway._test_release_selections.close()  # type: ignore[attr-defined]
+    gateway._test_runtime.close()  # type: ignore[attr-defined]
+    engine.dispose()
 
 
 def _strict_page(browser: Browser, *, locale: str = "en-US") -> tuple[Page, list[str]]:
@@ -474,36 +530,47 @@ def _csrf(page: Page) -> str:
     return page.locator('input[name="csrf"]').first.get_attribute("value") or ""
 
 
-def test_isolated_builtin_ui_browser_uses_only_fake_ports(
-    browser: Browser,
-    fake_gateway_browser_site: BrowserSite,
-) -> None:
-    page, failures = _strict_page(browser, locale="ru-RU")
-    page.goto(fake_gateway_browser_site.url)
-    assert page.get_by_text("Пример фильма").is_visible()
-    page.keyboard.press("Tab")
-    assert page.evaluate("document.activeElement.classList.contains('skip-link')")
-    _axe(page, fake_gateway_browser_site)
-    page.get_by_role("link", name="Добавить тайтл").click()
-    page.get_by_test_id("add-mode-manual").click()
-    assert page.get_by_test_id("manual-structured-form").is_visible()
-    _axe(page, fake_gateway_browser_site)
-    assert failures == []
-    page.context.close()
-
-
 def test_minimal_same_origin_external_ui_uses_only_control_api(
     browser: Browser,
     external_ui_browser_site: BrowserSite,
 ) -> None:
     page, failures = _strict_page(browser)
     page.goto(external_ui_browser_site.url)
-    page.locator("#state").filter(has_text="Example Movie|submitted").wait_for()
+    page.locator("#state").filter(
+        has_text=(
+            "catalog:0->2|manual:External Manual|manual-listed:true|"
+            "metadata:Shared Title|acquisition:submitted"
+        )
+    ).wait_for()
     assert failures == []
     assert page.evaluate(
         "performance.getEntriesByType('resource').every(r => !r.name.includes('/api/v1'))"
     )
     page.context.close()
+
+
+def test_minimal_same_origin_external_ui_stops_on_non_ok_control_response(
+    browser: Browser,
+    external_ui_browser_site: BrowserSite,
+) -> None:
+    context = browser.new_context()
+    context.add_init_script(
+        """
+        const nativeFetch = window.fetch.bind(window);
+        window.fetch = (resource, options) => {
+          if (String(resource).endsWith('/api/control/v1/media-items')) {
+            return Promise.resolve(new Response(JSON.stringify({items: []}), {
+              status: 503, headers: {'Content-Type': 'application/json'}
+            }));
+          }
+          return nativeFetch(resource, options);
+        };
+        """
+    )
+    page = context.new_page()
+    page.goto(external_ui_browser_site.url)
+    page.locator("#state").filter(has_text="error:control request failed: 503").wait_for()
+    context.close()
 
 
 def test_keyboard_structured_manual_edit_specials_and_announced_completion(
@@ -788,7 +855,7 @@ def test_metadata_locale_poster_placeholder_and_read_only_settings_browser(
     assert page.locator('[data-environment-variable="QBITTORRENT_PASSWORD"]').is_visible()
     page.get_by_test_id("locale-switcher").select_option("ru")
     page.wait_for_load_state("networkidle")
-    assert page.locator('[data-environment-variable="TMDB_TOKEN"]').is_visible()
+    assert page.locator('[data-environment-variable="PROWLARR_URL"]').is_visible()
     _axe(page, browser_site)
     assert failures == []
     page.context.close()

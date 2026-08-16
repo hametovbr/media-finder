@@ -1,0 +1,5 @@
+{
+  "module.prowlarr.name": "Prowlarr",
+  "module.prowlarr.environment.url": "Prowlarr base URL",
+  "module.prowlarr.environment.api_key": "Prowlarr API key"
+}

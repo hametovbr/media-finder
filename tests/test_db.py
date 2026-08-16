@@ -2,9 +2,13 @@ from pathlib import Path
 
 import pytest
 from alembic.config import Config
+from media_finder_core.platform.database import (
+    _alembic_config,
+    create_database,
+    migrate_to_head,
+    migration_state,
+)
 from sqlalchemy import inspect, text
-
-from media_finder.db import _alembic_config, create_database, migrate_to_head, migration_state
 
 
 def test_fresh_migration_and_sqlite_safety(tmp_path: Path) -> None:
@@ -15,17 +19,77 @@ def test_fresh_migration_and_sqlite_safety(tmp_path: Path) -> None:
         assert connection.execute(text("PRAGMA journal_mode")).scalar_one().lower() == "wal"
         assert connection.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
         tables = set(inspect(connection).get_table_names())
-    assert {
+    assert tables == {
+        "alembic_version",
         "collections",
         "media_items",
         "metadata_revisions",
         "acquisitions",
-        "download_client_instances",
-        "app_settings",
-    } <= tables
+        "maintenance_execution_state",
+    }
     assert migration_state(engine).ready is True
     assert isinstance(Config("alembic.ini"), Config)
     engine.dispose()
+
+
+def test_old_pre_release_revision_requires_disposable_data_reset(tmp_path: Path) -> None:
+    url = f"sqlite:///{tmp_path / 'legacy.db'}"
+    engine = create_database(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(64))"))
+            connection.execute(
+                text(
+                    "INSERT INTO alembic_version (version_num) "
+                    "VALUES ('0004_acquisition_module_snapshots')"
+                )
+            )
+
+        with pytest.raises(
+            RuntimeError,
+            match="unsupported_database_revision_recreate_disposable_data",
+        ) as failure:
+            migrate_to_head(url)
+
+        assert str(failure.value) == "unsupported_database_revision_recreate_disposable_data"
+        assert "0004_acquisition_module_snapshots" not in str(failure.value)
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "legacy_table_ddl",
+    [
+        "CREATE TABLE app_settings (key VARCHAR(200) PRIMARY KEY)",
+        "CREATE TABLE collections (id VARCHAR(36) PRIMARY KEY)",
+    ],
+    ids=("legacy-only-table", "overlapping-clean-table"),
+)
+def test_unstamped_nonempty_database_is_rejected_without_partial_migration(
+    tmp_path: Path,
+    legacy_table_ddl: str,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'unstamped-legacy.db'}"
+    engine = create_database(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(64))"))
+            connection.execute(text(legacy_table_ddl))
+        before = set(inspect(engine).get_table_names())
+        assert migration_state(engine).ready is False
+
+        with pytest.raises(
+            RuntimeError,
+            match="unsupported_database_revision_recreate_disposable_data",
+        ):
+            migrate_to_head(url)
+
+        assert set(inspect(engine).get_table_names()) == before
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT version_num FROM alembic_version")).all() == []
+        assert migration_state(engine).ready is False
+    finally:
+        engine.dispose()
 
 
 def test_alembic_config_uses_valid_runtime_working_directory(

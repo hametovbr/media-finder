@@ -4,13 +4,19 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from catalog_fixtures import CatalogFixture as CatalogService
+from catalog_fixtures import RevisionInput
 from fastapi.testclient import TestClient
-
-from media_finder.db import migrate_to_head, session_factory
-from media_finder.domain import CatalogService, RevisionInput
-from media_finder.models import Acquisition, Collection, MediaItem
-from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
-from media_finder.ui import create_ui_app
+from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
+from media_finder_core.catalog.persistence import (
+    CollectionRecord as Collection,
+)
+from media_finder_core.catalog.persistence import (
+    MediaItemRecord as MediaItem,
+)
+from media_finder_core.platform.database import migrate_to_head, session_factory
+from media_finder_sdk import MediaKind, NormalizedMetadata, Provenance
+from ui_fixtures import create_ui_test_app
 
 
 def _csrf(response_text: str) -> str:
@@ -24,7 +30,7 @@ def catalog_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     database_url = f"sqlite:///{tmp_path / 'catalog.db'}"
     migrate_to_head(database_url)
     monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long test session secret")
-    app = create_ui_app(
+    app = create_ui_test_app(
         database_url,
         session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
     )
@@ -44,10 +50,16 @@ def catalog_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             kind=MediaKind.SERIES,
             titles={"en": "Handmade Series", "ru": "Ручной сериал"},
             year=1996,
-            provenance=Provenance(provider_key="manual", external_id=item.external_id, locale="en"),
+            provenance=Provenance(provider_id="manual", external_id=item.external_id, locale="en"),
         )
         revision = CatalogService(session).add_revision(item, RevisionInput(normalized=normalized))
         older = Acquisition(
+            id=(older_id := uuid4()),
+            correlation=f"mf-acq-{older_id}",
+            release_provider_id="fixture-release",
+            release_provider_version="1.0.0",
+            download_client_module_id="fixture-download",
+            download_client_module_version="1.0.0",
             media_item_id=item.id,
             metadata_revision_id=revision.id,
             idempotency_key="old",
@@ -57,6 +69,12 @@ def catalog_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             created_at=datetime.now(UTC) - timedelta(hours=1),
         )
         latest = Acquisition(
+            id=(latest_id := uuid4()),
+            correlation=f"mf-acq-{latest_id}",
+            release_provider_id="fixture-release",
+            release_provider_version="1.0.0",
+            download_client_module_id="fixture-download",
+            download_client_module_version="1.0.0",
             media_item_id=item.id,
             metadata_revision_id=revision.id,
             idempotency_key="new",

@@ -1,0 +1,722 @@
+{
+  "$defs": {
+    "Artwork": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        },
+        "url": {
+          "format": "uri",
+          "maxLength": 2083,
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "url"
+      ],
+      "title": "Artwork",
+      "type": "object"
+    },
+    "Episode": {
+      "additionalProperties": false,
+      "properties": {
+        "air_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Air Date"
+        },
+        "number": {
+          "minimum": 1,
+          "title": "Number",
+          "type": "integer"
+        },
+        "ordering": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ordering"
+        },
+        "plot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plot"
+        },
+        "provider_ids": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Provider Ids",
+          "type": "object"
+        },
+        "runtime_minutes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime Minutes"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "title"
+      ],
+      "title": "Episode",
+      "type": "object"
+    },
+    "EpisodeTableDocument": {
+      "contentEncoding": "base64",
+      "description": "Bounded provider-owned episode table; never exposed to browsers.",
+      "maxLength": 1398104,
+      "minLength": 4,
+      "type": "string",
+      "writeOnly": true
+    },
+    "JsonScalar": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "JsonValue": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonScalar"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "MediaKind": {
+      "enum": [
+        "movie",
+        "series"
+      ],
+      "title": "MediaKind",
+      "type": "string"
+    },
+    "MetadataEditResult": {
+      "additionalProperties": false,
+      "description": "Validated provider identity, raw envelope, and normalized edit result.",
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/MetadataIdentity"
+        },
+        "metadata": {
+          "$ref": "#/$defs/NormalizedMetadata"
+        },
+        "raw_payload": {
+          "$ref": "#/$defs/ProviderPayload"
+        }
+      },
+      "required": [
+        "identity",
+        "raw_payload",
+        "metadata"
+      ],
+      "title": "MetadataEditResult",
+      "type": "object"
+    },
+    "MetadataIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "external_id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "External Id",
+          "type": "string"
+        },
+        "locale": {
+          "pattern": "^[a-z]{2}(?:-[A-Z]{2})?$",
+          "title": "Locale",
+          "type": "string"
+        },
+        "media_kind": {
+          "$ref": "#/$defs/MediaKind"
+        },
+        "provider_id": {
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+          "title": "Provider Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider_id",
+        "external_id",
+        "media_kind",
+        "locale"
+      ],
+      "title": "MetadataIdentity",
+      "type": "object"
+    },
+    "MetadataImportDocument": {
+      "contentEncoding": "base64",
+      "description": "Bounded provider-owned import document; never exposed to browsers.",
+      "maxLength": 1398104,
+      "minLength": 4,
+      "type": "string",
+      "writeOnly": true
+    },
+    "MetadataSearchQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 50,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "locale": {
+          "pattern": "^[a-z]{2}(?:-[A-Z]{2})?$",
+          "title": "Locale",
+          "type": "string"
+        },
+        "media_kinds": {
+          "default": [
+            "movie",
+            "series"
+          ],
+          "items": {
+            "$ref": "#/$defs/MediaKind"
+          },
+          "title": "Media Kinds",
+          "type": "array"
+        },
+        "query": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query",
+        "locale"
+      ],
+      "title": "MetadataSearchQuery",
+      "type": "object"
+    },
+    "MetadataSearchResult": {
+      "additionalProperties": false,
+      "properties": {
+        "external_id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "External Id",
+          "type": "string"
+        },
+        "locale": {
+          "title": "Locale",
+          "type": "string"
+        },
+        "media_kind": {
+          "$ref": "#/$defs/MediaKind"
+        },
+        "provider_id": {
+          "title": "Provider Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "year": {
+          "anyOf": [
+            {
+              "maximum": 3000,
+              "minimum": 1800,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Year"
+        }
+      },
+      "required": [
+        "provider_id",
+        "external_id",
+        "media_kind",
+        "title",
+        "locale"
+      ],
+      "title": "MetadataSearchResult",
+      "type": "object"
+    },
+    "NormalizedMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "artwork": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Artwork"
+          },
+          "title": "Artwork",
+          "type": "array"
+        },
+        "completeness": {
+          "default": 0.0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Completeness",
+          "type": "number"
+        },
+        "countries": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Countries",
+          "type": "array"
+        },
+        "genres": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Genres",
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/MediaKind"
+        },
+        "original_title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Original Title"
+        },
+        "people": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Person"
+          },
+          "title": "People",
+          "type": "array"
+        },
+        "plot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plot"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "provider_ids": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Provider Ids",
+          "type": "object"
+        },
+        "ratings": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Rating"
+          },
+          "title": "Ratings",
+          "type": "array"
+        },
+        "release_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Release Date"
+        },
+        "runtime_minutes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime Minutes"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "seasons": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Season"
+          },
+          "title": "Seasons",
+          "type": "array"
+        },
+        "structural_quality": {
+          "default": 0.0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Structural Quality",
+          "type": "number"
+        },
+        "studios": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Studios",
+          "type": "array"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "titles": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Titles",
+          "type": "object"
+        },
+        "year": {
+          "anyOf": [
+            {
+              "maximum": 3000,
+              "minimum": 1800,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Year"
+        }
+      },
+      "required": [
+        "kind",
+        "titles",
+        "provenance"
+      ],
+      "title": "NormalizedMetadata",
+      "type": "object"
+    },
+    "Person": {
+      "additionalProperties": false,
+      "properties": {
+        "character": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Character"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "role"
+      ],
+      "title": "Person",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "external_id": {
+          "title": "External Id",
+          "type": "string"
+        },
+        "fetched_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fetched At"
+        },
+        "locale": {
+          "title": "Locale",
+          "type": "string"
+        },
+        "provider_id": {
+          "title": "Provider Id",
+          "type": "string"
+        },
+        "source_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Label"
+        }
+      },
+      "required": [
+        "provider_id",
+        "external_id",
+        "locale"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "ProviderPayload": {
+      "additionalProperties": false,
+      "description": "Provider-private JSON payload crossing only the module/core boundary.",
+      "properties": {
+        "data": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Data",
+          "type": "object",
+          "x-media-finder-max-canonical-json-bytes": 2097152,
+          "x-media-finder-max-depth": 32,
+          "x-media-finder-max-nodes": 100000
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "title": "ProviderPayload",
+      "type": "object"
+    },
+    "Rating": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "votes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Votes"
+        }
+      },
+      "required": [
+        "source",
+        "value"
+      ],
+      "title": "Rating",
+      "type": "object"
+    },
+    "Season": {
+      "additionalProperties": false,
+      "properties": {
+        "episodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Episode"
+          },
+          "title": "Episodes",
+          "type": "array"
+        },
+        "number": {
+          "minimum": 0,
+          "title": "Number",
+          "type": "integer"
+        },
+        "plot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plot"
+        },
+        "provider_ids": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Provider Ids",
+          "type": "object"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        }
+      },
+      "required": [
+        "number"
+      ],
+      "title": "Season",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.media-finder.dev/module-sdk/v1/metadata.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "edit_result": {
+      "$ref": "#/$defs/MetadataEditResult"
+    },
+    "identity": {
+      "$ref": "#/$defs/MetadataIdentity"
+    },
+    "normalized_metadata": {
+      "$ref": "#/$defs/NormalizedMetadata"
+    },
+    "provider_payload": {
+      "$ref": "#/$defs/ProviderPayload"
+    },
+    "search_query": {
+      "$ref": "#/$defs/MetadataSearchQuery"
+    },
+    "search_result": {
+      "$ref": "#/$defs/MetadataSearchResult"
+    }
+  },
+  "required": [
+    "identity",
+    "search_query",
+    "search_result",
+    "provider_payload",
+    "normalized_metadata",
+    "edit_result"
+  ],
+  "title": "Media Finder Metadata Provider Contract v1",
+  "type": "object"
+}

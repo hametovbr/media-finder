@@ -12,7 +12,7 @@ Include the affected revision, impact, reproduction steps, and any suggested mit
 
 ## Deployment boundary
 
-Media Finder has no user database and trusts authentication performed by an external reverse proxy. Keep the service bound to localhost until that authentication is configured. Supply secrets only through environment variables and use `env:VARIABLE_NAME` references in stored configuration.
+Media Finder has no user database and trusts authentication performed by an external reverse proxy. Keep the service bound to localhost until that authentication is configured. Supply integration configuration only through the exact environment variables declared by each module manifest. Neither resolved values nor environment-variable references are stored.
 
 Never attach real `.torrent` files, magnet URIs, Prowlarr download URLs, qBittorrent credentials, integration tokens, or database contents to public reports.
 

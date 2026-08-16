@@ -2,15 +2,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-
-from media_finder.api import APIError, create_app
-from media_finder.db import migrate_to_head
+from media_finder_core.platform.database import migrate_to_head
+from media_finder_server.processor_api import APIError
+from processor_fixtures import create_processor_test_app as create_app
 
 
 def test_health_is_public_and_readiness_requires_alembic_head(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("MEDIA_FINDER_INTEGRATION_TOKEN", "correct horse")
     database_url = f"sqlite:///{tmp_path / 'health.db'}"
-    app = create_app(database_url, integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN")
+    app = create_app(database_url, integration_token="correct horse")
     with TestClient(app) as client:
         assert client.get("/health/live").json() == {"status": "live"}
         unavailable = client.get("/health/ready")
@@ -29,7 +29,7 @@ def test_api_auth_uses_constant_time_comparison_and_safe_error_envelope(
     monkeypatch.setenv("MEDIA_FINDER_INTEGRATION_TOKEN", "correct horse")
     database_url = f"sqlite:///{tmp_path / 'auth.db'}"
     migrate_to_head(database_url)
-    app = create_app(database_url, integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN")
+    app = create_app(database_url, integration_token="correct horse")
     with TestClient(app) as client:
         missing = client.get("/api/v1/media-items/not-present/metadata")
         assert missing.status_code == 401
@@ -44,7 +44,8 @@ def test_api_auth_uses_constant_time_comparison_and_safe_error_envelope(
         assert "correct horse" not in missing.text
 
         with patch(
-            "media_finder.api.hmac.compare_digest", wraps=__import__("hmac").compare_digest
+            "media_finder_server.processor_api.hmac.compare_digest",
+            wraps=__import__("hmac").compare_digest,
         ) as compared:
             denied = client.get(
                 "/api/v1/media-items/not-present/metadata",
@@ -61,7 +62,7 @@ def test_request_id_is_propagated_and_validation_details_are_allowlisted(
     monkeypatch.setenv("MEDIA_FINDER_INTEGRATION_TOKEN", "token")
     database_url = f"sqlite:///{tmp_path / 'request-id.db'}"
     migrate_to_head(database_url)
-    app = create_app(database_url, integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN")
+    app = create_app(database_url, integration_token="token")
     with TestClient(app) as client:
         headers = {"Authorization": "Bearer token", "X-Request-ID": "support-123"}
 
@@ -86,7 +87,7 @@ def test_not_found_conflict_and_internal_errors_share_safe_envelope(
     monkeypatch.setenv("MEDIA_FINDER_INTEGRATION_TOKEN", "token")
     database_url = f"sqlite:///{tmp_path / 'errors.db'}"
     migrate_to_head(database_url)
-    app = create_app(database_url, integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN")
+    app = create_app(database_url, integration_token="token")
 
     @app.get("/test/conflict")
     def conflict() -> None:
@@ -117,7 +118,7 @@ def test_framework_404_and_405_use_stable_request_id_envelopes(tmp_path: Path, m
     monkeypatch.setenv("MEDIA_FINDER_INTEGRATION_TOKEN", "token")
     database_url = f"sqlite:///{tmp_path / 'framework-errors.db'}"
     migrate_to_head(database_url)
-    app = create_app(database_url, integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN")
+    app = create_app(database_url, integration_token="token")
     with TestClient(app) as client:
         headers = {"Authorization": "Bearer token", "X-Request-ID": "framework-123"}
 

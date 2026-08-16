@@ -4,9 +4,8 @@ import json
 from pathlib import Path
 
 from media_finder_builtin_ui.fake import FakeControlGateway
-
-from media_finder.control_api import create_control_app
-from media_finder.control_security import BackendBrowserSecurity
+from media_finder_server.control_api import create_control_app
+from media_finder_server.control_security import BackendBrowserSecurity
 
 
 def main() -> None:

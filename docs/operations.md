@@ -46,18 +46,28 @@ When deploying from a Git-backed stack in an orchestrator such as Komodo, keep `
 | `MEDIA_FINDER_PORT` | Compose only | `8080` | Local host port in the example |
 | `MEDIA_FINDER_IMAGE_TAG` | Compose only | `latest` | GHCR tag; pin `vX.Y.Z` for production |
 
-First-party integrations have one fixed environment contract:
+The checked-in first-party `module.toml` manifests are the source of truth for
+module environment contracts. Delivery validation keeps this table and the
+marked Compose block synchronized with those statically selected manifests:
 
-| Integration | Variable | Required for that integration | Secret |
-| --- | --- | --- | --- |
-| TMDB | `TMDB_TOKEN` | Yes | Yes |
-| Prowlarr | `PROWLARR_URL` | Yes | No |
-| Prowlarr | `PROWLARR_API_KEY` | Yes | Yes |
-| qBittorrent | `QBITTORRENT_URL` | Yes | No |
-| qBittorrent | `QBITTORRENT_USERNAME` | Yes | Yes |
-| qBittorrent | `QBITTORRENT_PASSWORD` | Yes | Yes |
+<!-- BEGIN FIRST-PARTY MODULE ENVIRONMENT -->
+| Module ID | Kind | Variable | Required for module | Secret |
+| --- | --- | --- | --- | --- |
+| `manual` | `metadata-provider` | Configuration-free | — | — |
+| `tmdb` | `metadata-provider` | `TMDB_TOKEN` | Yes | Yes |
+| `prowlarr` | `release-provider` | `PROWLARR_URL` | Yes | No |
+| `prowlarr` | `release-provider` | `PROWLARR_API_KEY` | Yes | Yes |
+| `qbittorrent` | `download-client` | `QBITTORRENT_URL` | Yes | No |
+| `qbittorrent` | `download-client` | `QBITTORRENT_USERNAME` | Yes | Yes |
+| `qbittorrent` | `download-client` | `QBITTORRENT_PASSWORD` | Yes | Yes |
+<!-- END FIRST-PARTY MODULE ENVIRONMENT -->
 
-Manual-only catalog use needs none of these integration variables. To enable an integration, set every variable in its row group before recreating the container. Empty values are treated as missing. The Settings page reports only exact variable names, required/secret classifications, and safe states; it cannot edit environment configuration and never displays values.
+Manual is explicitly configuration-free. To enable any other module, set every
+variable in its row group before recreating the container. Empty values are
+treated as missing. The Settings page reports only exact variable names,
+required/secret classifications, and safe states; it cannot edit environment
+configuration and never displays values. Neither resolved values nor their
+environment-variable names are persisted as integration configuration.
 
 For example:
 
@@ -147,7 +157,23 @@ Store the archive outside the Docker host and verify that it can be listed with 
 
 ## Upgrade
 
-The environment-only integration migration creates one stable system-owned qBittorrent identity, archives prior client-instance rows, and clears their stored configuration payloads while preserving Acquisition history. Before upgrading from a release with writable integration Settings, verify all six required integration variables in the deployment and rotate any credential that may previously have been stored literally. This migration is intentionally breaking for multiple qBittorrent instances.
+### Pre-release modular schema reset
+
+The modular-core release replaces the development database schema instead of
+upgrading data created by earlier pre-release images. Media Finder has no
+supported persistent deployment or user data before this boundary. Stop and do
+not install this release if you need to preserve an existing catalog or
+Acquisition history; that case requires a separately specified migration.
+
+For a disposable test deployment, remove or move aside the existing `/data`
+volume and let the new image create an empty database. Never point the modular
+image at an older Alembic revision and never restore a pre-reset database into
+it. Startup rejects that state with
+`unsupported_database_revision_recreate_disposable_data`; it does not attempt
+an in-place conversion. Keep any moved volume until the new deployment has
+been verified.
+
+### Normal release procedure
 
 1. Record the currently deployed immutable image tag.
 2. Back up `/data` using the procedure above.
@@ -162,13 +188,16 @@ docker compose -f compose.example.yaml ps
 curl --fail http://127.0.0.1:${MEDIA_FINDER_PORT:-8080}/health/ready
 ```
 
-If migrations fail, the web server will not start. Do not bypass the entrypoint or run the new application against the old schema.
+If migrations fail, the web server will not start. Do not bypass the entrypoint
+or run the new application against an unsupported schema.
 
 ## Rollback
 
 Rollback means restoring both the previous immutable image and the pre-upgrade `/data` snapshot. Merely changing the image tag is unsafe after a schema migration.
 
-An older image expects persisted integration settings that the environment-only migration clears. Therefore rollback from this migration always requires the pre-upgrade `/data` backup as well as the earlier image; environment variables alone are not a compatible downgrade path.
+Rollback across the modular schema reset requires the earlier image together
+with its matching pre-reset `/data` volume. Environment variables or an image
+tag alone cannot convert either schema direction.
 
 1. Stop the service.
 2. Verify the exact volume or bind-mount target before changing any files.

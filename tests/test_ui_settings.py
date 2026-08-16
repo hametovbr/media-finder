@@ -3,11 +3,9 @@ from pathlib import Path
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
-
-from media_finder.db import migrate_to_head, session_factory
-from media_finder.models import AppSetting, DownloadClientInstance
-from media_finder.ui import create_ui_app
+from media_finder_core.platform.database import migrate_to_head
+from media_finder_server import create_application
+from sqlalchemy import inspect
 
 
 @pytest.fixture
@@ -18,12 +16,27 @@ def settings_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     return url
 
 
-def test_settings_lists_exact_missing_environment_without_values(settings_url: str) -> None:
-    app = create_ui_app(
-        settings_url,
-        session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
-        environment={},
+def _application(
+    database_url: str,
+    *,
+    module_environment: dict[str, str],
+    http_client_factory=httpx.Client,
+):
+    return create_application(
+        environment={
+            "MEDIA_FINDER_DATABASE_URL": database_url,
+            "MEDIA_FINDER_UI_SECRET": "a sufficiently long test session secret",
+            "MEDIA_FINDER_INTEGRATION_TOKEN": "settings-integration-token",
+            "MEDIA_FINDER_SECURE_COOKIE": "false",
+            "MEDIA_FINDER_UI_MODE": "builtin",
+            **module_environment,
+        },
+        http_client_factory=http_client_factory,
     )
+
+
+def test_settings_lists_exact_missing_environment_without_values(settings_url: str) -> None:
+    app = _application(settings_url, module_environment={})
 
     with TestClient(app) as client:
         page = client.get("/settings")
@@ -70,10 +83,9 @@ def test_settings_distinguishes_ready_from_unavailable_without_disclosure(
             return httpx.Response(200, json={})
         return httpx.Response(404)
 
-    app = create_ui_app(
+    app = _application(
         settings_url,
-        session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
-        environment=environment,
+        module_environment=environment,
         http_client_factory=lambda: httpx.Client(transport=httpx.MockTransport(handler)),
     )
     with TestClient(app) as client:
@@ -99,17 +111,11 @@ def test_settings_distinguishes_ready_from_unavailable_without_disclosure(
     ],
 )
 def test_legacy_integration_mutation_routes_are_absent(settings_url: str, path: str) -> None:
-    app = create_ui_app(
-        settings_url,
-        session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
-        environment={},
-    )
+    app = _application(settings_url, module_environment={})
     with TestClient(app) as client:
         response = client.post(path)
+        tables = set(inspect(app.state.engine).get_table_names())
 
     assert response.status_code in {404, 405}
-    sessions = session_factory(app.state.engine)
-    with sessions() as database:
-        assert list(database.scalars(select(AppSetting))) == []
-        clients = list(database.scalars(select(DownloadClientInstance)))
-    assert len(clients) == 1 and clients[0].system_owned
+    assert "app_settings" not in tables
+    assert "download_client_instances" not in tables

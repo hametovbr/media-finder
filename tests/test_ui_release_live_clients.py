@@ -1,17 +1,27 @@
 import json
 import re
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
+from acquisition_fakes import StaticAcquisitionModules
 from fastapi.testclient import TestClient
+from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
+from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
+from media_finder_core.catalog.persistence import MediaItemRecord as MediaItem
+from media_finder_core.platform.database import migrate_to_head, session_factory
+from media_finder_sdk import (
+    CorrelationResult,
+    DownloadDestination,
+    MagnetArtifact,
+    PrivateReleaseSelection,
+    ReleaseCandidate,
+    ReleaseSearchQuery,
+    SafeReleaseSnapshot,
+    SubmissionResult,
+)
 from sqlalchemy import select
-
-from media_finder.db import migrate_to_head, session_factory
-from media_finder.models import Acquisition, MediaItem
-from media_finder.prowlarr import ProwlarrAdapter, SearchResultCache
-from media_finder.sdk.types import CorrelationResult, DownloadDestination, SubmissionResult
-from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
-from media_finder.ui import create_ui_app
+from ui_fixtures import create_ui_test_app
 
 
 def _csrf(text: str) -> str:
@@ -26,25 +36,33 @@ def _value(text: str, test_id: str) -> str:
     return match.group(1)
 
 
-class FakeProwlarrTransport:
-    def search(self, query: str, filters: dict[str, str]) -> list[dict[str, object]]:
-        return [
-            {
-                "protocol": "torrent",
-                "title": query,
-                "indexer": "Fixture Indexer",
-                "magnetUrl": "magnet:?xt=urn:btih:0123456789012345678901234567890123456789",
-            }
-        ]
+class FakeReleaseProvider:
+    def validate(self) -> None:
+        return None
 
-    def fetch_torrent(self, url: str) -> bytes:
-        raise AssertionError("magnet result must not fetch torrent bytes")
+    def search(self, query: ReleaseSearchQuery) -> tuple[ReleaseCandidate, ...]:
+        return (
+            ReleaseCandidate(
+                snapshot=SafeReleaseSnapshot(title=query.query, indexer="Fixture Indexer"),
+                selection=PrivateReleaseSelection.from_bytes(b"fixture-release"),
+            ),
+        )
+
+    def resolve(self, selection: PrivateReleaseSelection) -> MagnetArtifact:
+        assert selection.payload() == b"fixture-release"
+        return MagnetArtifact(uri="magnet:?xt=urn:btih:0123456789012345678901234567890123456789")
+
+    def close(self) -> None:
+        return None
 
 
 class MutableClient:
     def __init__(self) -> None:
         self.destinations = [DownloadDestination(key="movies", label="MOVIES")]
         self.tasks: dict[str, str] = {}
+
+    def validate(self) -> None:
+        return None
 
     def list_destinations(self) -> list[DownloadDestination]:
         return list(self.destinations)
@@ -60,6 +78,9 @@ class MutableClient:
             external_task_id="task" if correlation in self.tasks else None,
         )
 
+    def close(self) -> None:
+        return None
+
 
 @pytest.fixture
 def release_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -67,11 +88,17 @@ def release_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     migrate_to_head(database_url)
     monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long test session secret")
     qbittorrent = MutableClient()
-    app = create_ui_app(
+    app = create_ui_test_app(
         database_url,
         session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
-        prowlarr=ProwlarrAdapter(FakeProwlarrTransport(), SearchResultCache()),
-        client_loader=lambda _: qbittorrent,
+        acquisition=StaticAcquisitionModules(
+            releases=ReleaseSelectionService(
+                provider=FakeReleaseProvider(), cache=ReleaseSelectionCache()
+            ),
+            download_client=qbittorrent,
+            release_id="prowlarr",
+            download_id="qbittorrent",
+        ),
     )
     app.state.fake_client = qbittorrent
     return app
@@ -152,7 +179,7 @@ def test_destination_drift_returns_current_choices_and_keeps_release_token_reusa
     with sessions() as database:
         attempts = list(database.scalars(select(Acquisition)))
     assert len(attempts) == 1
-    assert attempts[0].download_client_instance_id == SYSTEM_QBITTORRENT_ID
+    assert attempts[0].download_client_module_id == "qbittorrent"
 
 
 def test_legacy_client_destination_route_is_absent_and_errors_remain_safe(release_app) -> None:
@@ -176,7 +203,7 @@ def test_legacy_client_destination_route_is_absent_and_errors_remain_safe(releas
     assert 'data-error-code="acquisition_not_found"' in missing.text
 
 
-def test_pending_system_reconcile_does_not_require_prowlarr(release_app) -> None:
+def test_pending_system_reconcile_does_not_require_release_provider(release_app) -> None:
     with TestClient(release_app) as client:
         csrf = _csrf(client.get("/").text)
         item_id, _ = _create_item_and_release(client, csrf)
@@ -185,9 +212,14 @@ def test_pending_system_reconcile_does_not_require_prowlarr(release_app) -> None
             item = database.get(MediaItem, item_id)
             assert item is not None and item.current_revision_id is not None
             acquisition = Acquisition(
+                id=(acquisition_id := uuid4()),
+                correlation=f"mf-acq-{acquisition_id}",
+                release_provider_id="fixture-release",
+                release_provider_version="1.0.0",
+                download_client_module_id="qbittorrent",
+                download_client_module_version="0.1.0",
                 media_item_id=item.id,
                 metadata_revision_id=item.current_revision_id,
-                download_client_instance_id=SYSTEM_QBITTORRENT_ID,
                 idempotency_key="reconcile-without-prowlarr",
                 naming_profile="jellyfin-v1",
                 status="pending",
@@ -198,8 +230,6 @@ def test_pending_system_reconcile_does_not_require_prowlarr(release_app) -> None
             acquisition_identity = acquisition.id
         correlation = f"mf-acq-{acquisition_identity}"
         release_app.state.fake_client.tasks[correlation] = "movies"
-        release_app.state.runtime._prowlarr = None
-
         reconciled = client.post(
             f"/ui/acquisitions/{acquisition_identity}/reconcile",
             data={"csrf": csrf},

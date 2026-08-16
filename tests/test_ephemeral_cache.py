@@ -1,8 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
-from media_finder.ephemeral import EphemeralCache, EphemeralTokenExpired
+from media_finder_core.platform import EphemeralCache, EphemeralTokenExpired
 
 
 def test_cache_tokens_are_opaque_bounded_and_expire_with_fake_clock() -> None:

@@ -1,0 +1,161 @@
+{
+  "$defs": {
+    "CorrelationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "conclusive": {
+          "default": true,
+          "title": "Conclusive",
+          "type": "boolean"
+        },
+        "correlation": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation",
+          "type": "string"
+        },
+        "external_task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "External Task Id"
+        },
+        "found": {
+          "title": "Found",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "found",
+        "correlation"
+      ],
+      "title": "CorrelationResult",
+      "type": "object"
+    },
+    "DownloadDestination": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "label"
+      ],
+      "title": "DownloadDestination",
+      "type": "object"
+    },
+    "MagnetArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "magnet",
+          "default": "magnet",
+          "title": "Kind",
+          "type": "string"
+        },
+        "uri": {
+          "maxLength": 8192,
+          "pattern": "^magnet:\\?",
+          "title": "Uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uri"
+      ],
+      "title": "MagnetArtifact",
+      "type": "object"
+    },
+    "PrivateReleaseSelection": {
+      "contentEncoding": "base64",
+      "description": "Provider-private bounded selection; never exposed to browsers.",
+      "maxLength": 87384,
+      "minLength": 4,
+      "type": "string",
+      "writeOnly": true
+    },
+    "SubmissionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "correlation": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation",
+          "type": "string"
+        },
+        "external_task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "External Task Id"
+        }
+      },
+      "required": [
+        "accepted",
+        "correlation"
+      ],
+      "title": "SubmissionResult",
+      "type": "object"
+    },
+    "TorrentArtifact": {
+      "contentEncoding": "base64",
+      "description": "Bounded in-memory torrent bytes; never persisted or exposed.",
+      "maxLength": 27962028,
+      "minLength": 4,
+      "type": "string",
+      "writeOnly": true
+    }
+  },
+  "$id": "https://schemas.media-finder.dev/module-sdk/v1/download.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "correlation": {
+      "$ref": "#/$defs/CorrelationResult"
+    },
+    "destination": {
+      "$ref": "#/$defs/DownloadDestination"
+    },
+    "magnet_artifact": {
+      "$ref": "#/$defs/MagnetArtifact"
+    },
+    "submission": {
+      "$ref": "#/$defs/SubmissionResult"
+    }
+  },
+  "required": [
+    "destination",
+    "magnet_artifact",
+    "submission",
+    "correlation"
+  ],
+  "title": "Media Finder Download Client Contract v1",
+  "type": "object"
+}

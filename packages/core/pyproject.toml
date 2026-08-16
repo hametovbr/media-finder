@@ -1,0 +1,26 @@
+[project]
+name = "media-finder-core"
+version = "0.1.0"
+description = "Domain and application core for Media Finder"
+requires-python = ">=3.13,<3.14"
+license = "MIT"
+dependencies = [
+  "alembic>=1.16,<2",
+  "media-finder-control-contracts",
+  "media-finder-module-sdk",
+  "pydantic>=2.11,<3",
+  "pydantic-settings>=2.10,<3",
+  "python-dateutil>=2.9,<3",
+  "sqlalchemy>=2.0,<3",
+]
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/media_finder_core"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"../../alembic.ini" = "media_finder_core/_migration_resources/alembic.ini"
+"../../alembic" = "media_finder_core/_migration_resources/alembic"

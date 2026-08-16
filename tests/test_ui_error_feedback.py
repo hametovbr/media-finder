@@ -2,14 +2,15 @@
 import json
 import re
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
+from media_finder_core.catalog.persistence import MediaItemRecord as MediaItem
+from media_finder_core.platform.database import migrate_to_head, session_factory
 from sqlalchemy import select
-
-from media_finder.db import migrate_to_head, session_factory
-from media_finder.models import Acquisition, DownloadClientInstance, MediaItem
-from media_finder.ui import create_ui_app
+from ui_fixtures import create_ui_test_app
 
 
 def _csrf(text: str) -> str:
@@ -23,7 +24,7 @@ def feedback_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     database_url = f"sqlite:///{tmp_path / 'feedback.db'}"
     migrate_to_head(database_url)
     monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long test session secret")
-    return create_ui_app(database_url, session_secret_reference="env:MEDIA_FINDER_UI_SECRET")
+    return create_ui_test_app(database_url, session_secret_reference="env:MEDIA_FINDER_UI_SECRET")
 
 
 def test_same_stable_error_code_has_localized_message_and_csrf_is_localized(
@@ -75,14 +76,16 @@ def test_failed_acquisition_fragment_localizes_status_and_failure_code(feedback_
     with sessions() as database:
         item = database.scalar(select(MediaItem).where(MediaItem.id == item_id))
         assert item is not None and item.current_revision_id is not None
-        instance = DownloadClientInstance(name="failure", module_key="fixture", config_payload={})
-        database.add(instance)
-        database.flush()
         database.add(
             Acquisition(
+                id=(acquisition_id := uuid4()),
+                correlation=f"mf-acq-{acquisition_id}",
+                release_provider_id="fixture-release",
+                release_provider_version="1.0.0",
+                download_client_module_id="fixture-download",
+                download_client_module_version="1.0.0",
                 media_item_id=item.id,
                 metadata_revision_id=item.current_revision_id,
-                download_client_instance_id=instance.id,
                 idempotency_key="failed-feedback",
                 naming_profile="jellyfin-v1",
                 status="failed",

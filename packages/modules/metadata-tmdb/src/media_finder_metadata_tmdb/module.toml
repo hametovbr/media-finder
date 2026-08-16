@@ -1,0 +1,18 @@
+module_id = "tmdb"
+module_kind = "metadata-provider"
+module_version = "0.1.0"
+sdk_compatibility = ">=1,<2"
+contract_version = "1"
+name_key = "module.tmdb.name"
+capabilities = ["search", "fetch", "normalize", "retention", "export-warning"]
+translation_keys = ["module.tmdb.name", "module.tmdb.notice", "module.tmdb.environment.token"]
+
+[attribution]
+notice_key = "module.tmdb.notice"
+url = "https://www.themoviedb.org/"
+
+[[environment]]
+name = "TMDB_TOKEN"
+required = true
+secret = true
+description_key = "module.tmdb.environment.token"

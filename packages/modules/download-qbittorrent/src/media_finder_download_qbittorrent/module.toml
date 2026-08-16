@@ -1,0 +1,31 @@
+module_id = "qbittorrent"
+module_kind = "download-client"
+module_version = "0.1.0"
+sdk_compatibility = ">=1,<2"
+contract_version = "1"
+name_key = "module.qbittorrent.name"
+capabilities = ["destinations", "submit", "correlation", "magnet", "torrent"]
+translation_keys = [
+  "module.qbittorrent.name",
+  "module.qbittorrent.environment.url",
+  "module.qbittorrent.environment.username",
+  "module.qbittorrent.environment.password",
+]
+
+[[environment]]
+name = "QBITTORRENT_URL"
+required = true
+secret = false
+description_key = "module.qbittorrent.environment.url"
+
+[[environment]]
+name = "QBITTORRENT_USERNAME"
+required = true
+secret = true
+description_key = "module.qbittorrent.environment.username"
+
+[[environment]]
+name = "QBITTORRENT_PASSWORD"
+required = true
+secret = true
+description_key = "module.qbittorrent.environment.password"

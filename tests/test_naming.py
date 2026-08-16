@@ -1,14 +1,18 @@
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
+from catalog_fixtures import CatalogFixture as CatalogService
 from fastapi.testclient import TestClient
+from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
+from media_finder_core.exports import EntityType, render_naming
+from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
+from media_finder_sdk import Episode, MediaKind, NormalizedMetadata, Provenance, Season
+from processor_fixtures import create_processor_test_app as create_app
 
-from media_finder.api import create_app
-from media_finder.db import create_database, migrate_to_head, session_factory
-from media_finder.domain import CatalogService
-from media_finder.models import Acquisition
-from media_finder.naming import EntityType, render_naming
-from media_finder.sdk.types import Episode, MediaKind, NormalizedMetadata, Provenance, Season
+
+def _legacy(metadata: NormalizedMetadata) -> NormalizedMetadata:
+    return metadata
 
 
 def _series(title: str = "Мой: сериал / ../ CON") -> NormalizedMetadata:
@@ -32,7 +36,7 @@ def _series(title: str = "Мой: сериал / ../ CON") -> NormalizedMetadata
                 ),
             ),
         ),
-        provenance=Provenance(provider_key="manual", external_id="series", locale="ru-RU"),
+        provenance=Provenance(provider_id="manual", external_id="series", locale="ru-RU"),
         completeness=1,
         structural_quality=1,
     )
@@ -70,7 +74,7 @@ def test_movie_special_and_portable_sanitation() -> None:
         kind=MediaKind.MOVIE,
         titles={"en-US": "CON"},
         year=2001,
-        provenance=Provenance(provider_key="manual", external_id="movie", locale="en-US"),
+        provenance=Provenance(provider_id="manual", external_id="movie", locale="en-US"),
     )
     movie_name = render_naming(movie, entity_type=EntityType.MOVIE)
     special = render_naming(
@@ -134,7 +138,7 @@ def test_windows_device_names_remain_reserved_with_suffixes(title: str, expected
     movie = NormalizedMetadata(
         kind=MediaKind.MOVIE,
         titles={"en-US": title},
-        provenance=Provenance(provider_key="manual", external_id=title, locale="en-US"),
+        provenance=Provenance(provider_id="manual", external_id=title, locale="en-US"),
     )
 
     result = render_naming(movie, entity_type=EntityType.MOVIE)
@@ -151,10 +155,16 @@ def test_current_and_pinned_naming_endpoints_use_the_fixed_profile(
     migrate_to_head(url)
     engine = create_database(url)
     with session_factory(engine)() as session:
-        item = CatalogService(session).create_manual_item(_series("Волшебный сериал"))
+        item = CatalogService(session).create_manual_item(_legacy(_series("Волшебный сериал")))
         revision = item.current_revision
         assert revision is not None
         acquisition = Acquisition(
+            id=(acquisition_identity := uuid4()),
+            correlation=f"mf-acq-{acquisition_identity}",
+            release_provider_id="fixture-release",
+            release_provider_version="1.0.0",
+            download_client_module_id="fixture-download",
+            download_client_module_version="1.0.0",
             media_item_id=item.id,
             metadata_revision_id=revision.id,
             idempotency_key="naming-api",
@@ -165,9 +175,7 @@ def test_current_and_pinned_naming_endpoints_use_the_fixed_profile(
         session.commit()
         item_id, acquisition_id = item.id, str(acquisition.id)
     engine.dispose()
-    client = TestClient(
-        create_app(url, integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN")
-    )
+    client = TestClient(create_app(url, integration_token="integration-secret"))
     headers = {"Authorization": "Bearer integration-secret"}
     params = {
         "entity_type": "episode",

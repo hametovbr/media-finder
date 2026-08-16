@@ -1,48 +1,32 @@
-[project]
-name = "media-finder"
-version = "0.1.0"
-description = "A self-hosted media catalog and acquisition control plane"
-readme = "README.md"
-requires-python = ">=3.13,<3.14"
-license = "MIT"
-dependencies = [
-  "alembic>=1.16,<2",
-  "babel>=2.17,<3",
-  "fastapi>=0.116,<1",
-  "httpx>=0.28,<1",
-  "jinja2>=3.1,<4",
-  "media-finder-builtin-ui",
-  "media-finder-control-contracts",
-  "pydantic>=2.11,<3",
-  "pydantic-settings>=2.10,<3",
-  "python-dateutil>=2.9,<3",
-  "sqlalchemy>=2.0,<3",
-  "uvicorn>=0.35,<1",
-]
-
 [dependency-groups]
 dev = [
+  "babel>=2.17,<3",
+  "hatchling==1.32.0",
+  "httpx>=0.28,<1",
+  "media-finder",
   "mypy>=1.17,<2",
   "playwright>=1.55,<2",
   "pytest>=9.0.3,<10",
   "pytest-cov>=6.2,<7",
   "ruff>=0.12,<1",
   "types-python-dateutil>=2.9,<3",
+  "uv==0.12.5",
 ]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/media_finder"]
-
 [tool.uv.workspace]
-members = ["packages/*"]
+members = ["apps/*", "packages/*", "packages/modules/*"]
+exclude = ["packages/modules"]
 
 [tool.uv.sources]
+media-finder = { workspace = true }
+media-finder-core = { workspace = true }
+media-finder-module-sdk = { workspace = true }
 media-finder-control-contracts = { workspace = true }
 media-finder-builtin-ui = { workspace = true }
+media-finder-metadata-manual = { workspace = true }
+media-finder-metadata-tmdb = { workspace = true }
+media-finder-release-prowlarr = { workspace = true }
+media-finder-download-qbittorrent = { workspace = true }
 
 [tool.ruff]
 target-version = "py313"
@@ -54,13 +38,40 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.13"
 strict = true
-packages = ["media_finder", "media_finder_control", "media_finder_builtin_ui"]
-mypy_path = ["src", "packages/control-contracts/src", "packages/builtin-ui/src"]
+packages = [
+  "media_finder_server",
+  "media_finder_core",
+  "media_finder_sdk",
+  "media_finder_control",
+  "media_finder_builtin_ui",
+  "media_finder_metadata_manual",
+  "media_finder_metadata_tmdb",
+  "media_finder_release_prowlarr",
+  "media_finder_download_qbittorrent",
+]
+mypy_path = [
+  "apps/server/src",
+  "packages/core/src",
+  "packages/module-sdk/src",
+  "packages/control-contracts/src",
+  "packages/builtin-ui/src",
+  "packages/modules/metadata-manual/src",
+  "packages/modules/metadata-tmdb/src",
+  "packages/modules/release-prowlarr/src",
+  "packages/modules/download-qbittorrent/src",
+]
 
 [tool.pytest.ini_options]
-addopts = "--strict-config --strict-markers --cov=media_finder --cov-report=term-missing"
-testpaths = ["tests"]
-pythonpath = ["src", "packages/control-contracts/src", "packages/builtin-ui/src"]
+addopts = "--strict-config --strict-markers --cov=media_finder_server --cov=media_finder_core --cov-branch --cov-report=term-missing"
+testpaths = [
+  "tests",
+  "packages/module-sdk/tests",
+  "packages/modules/metadata-manual/tests",
+  "packages/modules/metadata-tmdb/tests",
+  "packages/modules/release-prowlarr/tests",
+  "packages/modules/download-qbittorrent/tests",
+]
+pythonpath = []
 # Starlette 1.x still falls back to httpx while its test client migrates to the
 # separately distributed httpx2 package. Keep that single import-time boundary
 # tolerated while promoting every other warning to an error.

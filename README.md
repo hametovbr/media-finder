@@ -43,6 +43,10 @@ pnpm delivery:validate
 
 Use the generated OpenSpec skills in `.agents/skills/` and follow [AGENTS.md](AGENTS.md). See [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change. The interactive low-fidelity [wireframe](docs/design/wireframe.html) records the intended MVP navigation without serving as production UI code.
 
+For implementation boundaries and extension work, see the
+[architecture guide](docs/architecture.md) and
+[module-authoring guide](docs/module-authoring.md).
+
 ## License
 
 Media Finder is available under the [MIT License](LICENSE).

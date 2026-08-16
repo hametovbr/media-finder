@@ -244,12 +244,15 @@ def test_unknown_code_has_a_safe_localized_fallback() -> None:
 
 def test_exception_mapping_preserves_only_known_explicit_module_codes() -> None:
     from media_finder_builtin_ui.i18n import code_for_exception
-
-    from media_finder.sdk.errors import ModuleError
+    from media_finder_sdk import ModuleError, ModuleFailureCategory
 
     assert (
         code_for_exception(
-            ModuleError(code="download_client_rejected", message="unsafe upstream prose"),
+            ModuleError(
+                category=ModuleFailureCategory.REJECTED,
+                code="download_client_rejected",
+                safe_details={"reason": "safe fixture reason"},
+            ),
             "acquisition_unavailable",
         )
         == "download_client_rejected"
@@ -275,14 +278,3 @@ def test_kind_and_acquisition_status_are_localized(
     assert media_kind_label(kind, "en") == kind.title()
     assert media_kind_label(kind, "ru") == russian_kind
     assert acquisition_status_label(status, "ru") == russian_status
-
-
-def test_module_translation_assets_resolve_keys_with_locale_fallback() -> None:
-    from media_finder_builtin_ui.i18n import module_translation
-
-    assert module_translation("tmdb", "module.tmdb.settings.base_url", "ru") == "Базовый адрес API"
-    assert module_translation("qbittorrent", "module.qbittorrent.password_ref", "ru") == (
-        "Ссылка на переменную среды с паролем"
-    )
-    assert module_translation("manual", "module.manual.name", "en") == "Manual"
-    assert module_translation("manual", "missing.key", "ru") == "missing.key"

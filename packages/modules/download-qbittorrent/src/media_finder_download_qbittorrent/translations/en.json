@@ -1,0 +1,6 @@
+{
+  "module.qbittorrent.name": "qBittorrent",
+  "module.qbittorrent.environment.url": "qBittorrent base URL",
+  "module.qbittorrent.environment.username": "qBittorrent username",
+  "module.qbittorrent.environment.password": "qBittorrent password"
+}

@@ -1,5 +1,0 @@
-{
-  "base_url": "http://qbittorrent:8080",
-  "password_ref": "env:QB_PASSWORD",
-  "username_ref": "env:QB_USERNAME"
-}

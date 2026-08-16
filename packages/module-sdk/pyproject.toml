@@ -1,0 +1,20 @@
+[project]
+name = "media-finder-module-sdk"
+version = "0.1.0"
+description = "Public module contracts for Media Finder extensions"
+requires-python = ">=3.13,<3.14"
+license = "MIT"
+dependencies = [
+  "packaging>=24,<26",
+  "pydantic>=2.11,<3",
+]
+
+[project.scripts]
+media-finder-sdk-schema = "media_finder_sdk.schema:main"
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/media_finder_sdk"]

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { parse as parseToml } from "smol-toml";
 import YAML from "yaml";
 
 function requireValue(failures, condition, message) {
@@ -35,6 +36,97 @@ function needs(job, dependency) {
 
 function normalizedExpression(value) {
   return String(value ?? "").replaceAll(/\s+/g, " ").trim();
+}
+
+const VERIFICATION_JOBS = [
+  "documentation",
+  "python",
+  "unit",
+  "integration",
+  "contract",
+  "browser",
+  "image",
+];
+
+const WORKSPACE_DISTRIBUTIONS = [
+  "media-finder",
+  "media-finder-core",
+  "media-finder-module-sdk",
+  "media-finder-control-contracts",
+  "media-finder-builtin-ui",
+  "media-finder-metadata-manual",
+  "media-finder-metadata-tmdb",
+  "media-finder-release-prowlarr",
+  "media-finder-download-qbittorrent",
+];
+
+const FIRST_PARTY_MODULE_MANIFESTS = [
+  "packages/modules/metadata-manual/src/media_finder_metadata_manual/module.toml",
+  "packages/modules/metadata-tmdb/src/media_finder_metadata_tmdb/module.toml",
+  "packages/modules/release-prowlarr/src/media_finder_release_prowlarr/module.toml",
+  "packages/modules/download-qbittorrent/src/media_finder_download_qbittorrent/module.toml",
+];
+const COMPOSE_MODULE_ENVIRONMENT_BEGIN = "# BEGIN FIRST-PARTY MODULE ENVIRONMENT";
+const COMPOSE_MODULE_ENVIRONMENT_END = "# END FIRST-PARTY MODULE ENVIRONMENT";
+const DOCS_MODULE_ENVIRONMENT_BEGIN = "<!-- BEGIN FIRST-PARTY MODULE ENVIRONMENT -->";
+const DOCS_MODULE_ENVIRONMENT_END = "<!-- END FIRST-PARTY MODULE ENVIRONMENT -->";
+
+function stepByName(job, name) {
+  return (job?.steps ?? []).find((step) => step.name === name);
+}
+
+function pytestInvocations(command) {
+  const normalized = String(command ?? "").replaceAll(/\s+/g, " ").trim();
+  return normalized
+    .split(/\s*(?:&&|\|\||;)\s*/)
+    .map((segment) =>
+      segment.match(/^(?:uv run )?(?:(?:python|python3) -m )?pytest\b(?<arguments>.*)$/),
+    )
+    .filter(Boolean)
+    .map((match) => String(match.groups?.arguments ?? ""));
+}
+
+function runsPytest(step, requiredPaths) {
+  return pytestInvocations(step?.run).some((invocationArguments) =>
+    requiredPaths.every((required) => invocationArguments.includes(required)),
+  );
+}
+
+function runsShellCommand(step, expected) {
+  return String(step?.run ?? "")
+    .split(/\s*(?:\r?\n|&&|\|\||;)\s*/)
+    .some((command) => command.trim() === expected);
+}
+
+function testPathsFromCommands(verify) {
+  const paths = new Set();
+  for (const job of Object.values(verify.jobs ?? {})) {
+    for (const step of job.steps ?? []) {
+      for (const arguments_ of pytestInvocations(step.run)) {
+        for (const match of arguments_.matchAll(/\b(?:tests|packages)\/[A-Za-z0-9_./-]+/g)) {
+          const candidate = match[0].replace(/[.,:;]+$/, "");
+          if (candidate.includes("/tests") || candidate.startsWith("tests/")) {
+            paths.add(candidate);
+          }
+        }
+      }
+    }
+  }
+  return paths;
+}
+
+function recursivelyListTests(root) {
+  const files = [];
+  function visit(directory) {
+    if (!fs.existsSync(directory)) return;
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) visit(target);
+      else if (/^test_.*\.py$/.test(entry.name)) files.push(target);
+    }
+  }
+  visit(path.join(root, "tests"));
+  return files;
 }
 
 function validateActionPins(workflows, failures) {
@@ -73,8 +165,66 @@ function validateActionPins(workflows, failures) {
   }
 }
 
+function firstPartyModuleManifests(root, failures) {
+  const manifests = [];
+  for (const relativePath of FIRST_PARTY_MODULE_MANIFESTS) {
+    const content = readText(root, relativePath, failures);
+    if (!content) continue;
+    try {
+      manifests.push(parseToml(content));
+    } catch (error) {
+      failures.push(`${relativePath}: invalid TOML (${error.message})`);
+    }
+  }
+  return manifests;
+}
+
+function manifestEnvironmentNames(manifests) {
+  return manifests.flatMap((manifest) =>
+    (Array.isArray(manifest.environment) ? manifest.environment : []).map((declaration) =>
+      String(declaration.name),
+    ),
+  );
+}
+
+function markedBlock(content, begin, end) {
+  const start = content.indexOf(begin);
+  if (start === -1) return undefined;
+  const finish = content.indexOf(end, start + begin.length);
+  if (finish === -1) return undefined;
+  return content.slice(start, finish + end.length).replaceAll("\r\n", "\n").trim();
+}
+
+function expectedModuleEnvironmentDocumentation(manifests) {
+  const rows = [];
+  for (const manifest of manifests) {
+    const declarations = Array.isArray(manifest.environment) ? manifest.environment : [];
+    if (declarations.length === 0) {
+      rows.push(
+        `| \`${manifest.module_id}\` | \`${manifest.module_kind}\` | Configuration-free | — | — |`,
+      );
+      continue;
+    }
+    for (const declaration of declarations) {
+      rows.push(
+        `| \`${manifest.module_id}\` | \`${manifest.module_kind}\` | \`${declaration.name}\` | ${declaration.required === true ? "Yes" : "No"} | ${declaration.secret === true ? "Yes" : "No"} |`,
+      );
+    }
+  }
+  return [
+    DOCS_MODULE_ENVIRONMENT_BEGIN,
+    "| Module ID | Kind | Variable | Required for module | Secret |",
+    "| --- | --- | --- | --- | --- |",
+    ...rows,
+    DOCS_MODULE_ENVIRONMENT_END,
+  ].join("\n");
+}
+
 function validateCompose(root, failures) {
+  const manifests = firstPartyModuleManifests(root, failures);
+  const integrationVariables = manifestEnvironmentNames(manifests);
   const compose = loadYaml(root, "compose.example.yaml", failures);
+  const composeText = readText(root, "compose.example.yaml", failures);
   const services = compose.services ?? {};
   const serviceNames = Object.keys(services);
   requireValue(
@@ -89,14 +239,6 @@ function validateCompose(root, failures) {
     typeof service.image === "string" && service.image.startsWith("ghcr.io/"),
     "compose.example.yaml: service must use a GHCR image",
   );
-  const integrationVariables = [
-    "TMDB_TOKEN",
-    "PROWLARR_URL",
-    "PROWLARR_API_KEY",
-    "QBITTORRENT_URL",
-    "QBITTORRENT_USERNAME",
-    "QBITTORRENT_PASSWORD",
-  ];
   for (const name of integrationVariables) {
     requireValue(
       failures,
@@ -104,6 +246,19 @@ function validateCompose(root, failures) {
       `compose.example.yaml: exact integration variable ${name} is required`,
     );
   }
+  const composeEnvironmentBlock = markedBlock(
+    composeText,
+    COMPOSE_MODULE_ENVIRONMENT_BEGIN,
+    COMPOSE_MODULE_ENVIRONMENT_END,
+  );
+  const markedVariableNames = [...(composeEnvironmentBlock ?? "").matchAll(/^\s*([A-Z][A-Z0-9_]+):/gm)].map(
+    (match) => match[1],
+  );
+  requireValue(
+    failures,
+    JSON.stringify(markedVariableNames) === JSON.stringify(integrationVariables),
+    `compose.example.yaml: first-party module environment block must match manifests (expected: ${integrationVariables.join(", ")})`,
+  );
   requireValue(
     failures,
     Object.hasOwn(environment, "MEDIA_FINDER_UI_MODE") &&
@@ -117,16 +272,19 @@ function validateCompose(root, failures) {
       `compose.example.yaml: obsolete integration variable ${obsolete} is forbidden`,
     );
   }
-  const operatorDocumentation = ["README.md", "docs/operations.md"]
-    .map((file) => readText(root, file, failures))
-    .join("\n");
-  for (const name of integrationVariables) {
-    requireValue(
-      failures,
-      operatorDocumentation.includes(name),
-      `operator documentation: exact integration variable ${name} is required`,
-    );
-  }
+  const operationsDocumentation = readText(root, "docs/operations.md", failures);
+  const operatorDocumentation = [readText(root, "README.md", failures), operationsDocumentation].join(
+    "\n",
+  );
+  requireValue(
+    failures,
+    markedBlock(
+      operationsDocumentation,
+      DOCS_MODULE_ENVIRONMENT_BEGIN,
+      DOCS_MODULE_ENVIRONMENT_END,
+    ) === expectedModuleEnvironmentDocumentation(manifests),
+    "docs/operations.md: module environment documentation must match first-party manifests",
+  );
   requireValue(
     failures,
     !operatorDocumentation.includes("Store the corresponding `env:VARIABLE_NAME` reference"),
@@ -160,46 +318,113 @@ function validateCompose(root, failures) {
       `compose.example.yaml: forbidden media mount ${target}`,
     );
   }
-  const composeText = readText(root, "compose.example.yaml", failures).toLowerCase();
+  const normalizedComposeText = composeText.toLowerCase();
   for (const forbidden of ["traefik", "tinyauth", "hametov.uk"]) {
     requireValue(
       failures,
-      !composeText.includes(forbidden),
+      !normalizedComposeText.includes(forbidden),
       `compose.example.yaml: forbidden private assumption ${forbidden}`,
     );
   }
 }
 
+function dockerStages(dockerfile) {
+  const stages = [];
+  let currentStage;
+  const lines = dockerfile.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^\s*(?:#|$)/.test(line)) continue;
+    const match = line.match(/^\s*(?<keyword>[A-Z]+)\s+(?<command>.*)$/);
+    if (!match) continue;
+    let command = match.groups.command;
+    while (/\\\s*$/.test(command) && index + 1 < lines.length) {
+      command = command.replace(/\\\s*$/, " ");
+      index += 1;
+      command += lines[index].trim();
+    }
+    if (match.groups.keyword === "FROM") {
+      const stageName = command.match(/\s+AS\s+(?<name>[A-Za-z][A-Za-z0-9_-]*)$/i)?.groups.name;
+      currentStage = { name: stageName, command, instructions: [] };
+      stages.push(currentStage);
+    } else if (currentStage) {
+      currentStage.instructions.push({ keyword: match.groups.keyword, command });
+    }
+  }
+  return stages;
+}
+
 function validateImage(root, verify, verifyText, failures) {
   const dockerfile = readText(root, "Dockerfile", failures);
+  const stages = dockerStages(dockerfile);
+  const runtimeStage = stages.at(-1);
+  const runtimeVenvCopy = runtimeStage?.instructions.find(
+    (instruction) =>
+      instruction.keyword === "COPY" &&
+      /^--from=(?<source>[A-Za-z][A-Za-z0-9_-]*)\s+\/opt\/venv\s+\/opt\/venv$/.test(
+        instruction.command,
+      ),
+  );
+  const sourceStageName = runtimeVenvCopy?.command.match(/^--from=(?<source>[A-Za-z][A-Za-z0-9_-]*)/)?.groups
+    .source;
+  const builderStage = stages.find((stage) => stage.name === sourceStageName);
+  const builderRun = builderStage?.instructions.find(
+    (instruction) =>
+      instruction.keyword === "RUN" && instruction.command.includes("mkdir /wheels"),
+  )?.command;
   requireValue(
     failures,
-    (dockerfile.match(/^FROM /gm) ?? []).length >= 2,
+    stages.length >= 2,
     "Dockerfile: multi-stage build required",
   );
   requireValue(
     failures,
-    /^USER 10001:10001$/m.test(dockerfile),
+    runtimeStage?.instructions.some(
+      (instruction) => instruction.keyword === "USER" && instruction.command === "10001:10001",
+    ),
     "Dockerfile: runtime must use UID/GID 10001",
   );
   requireValue(
     failures,
-    /ENTRYPOINT \["python", "-m", "media_finder\.runtime"\]/.test(dockerfile),
+    runtimeStage?.instructions.some(
+      (instruction) =>
+        instruction.keyword === "ENTRYPOINT" &&
+        instruction.command === '["python", "-m", "media_finder_server"]',
+    ),
     "Dockerfile: runtime entrypoint must gate startup",
   );
   requireValue(
     failures,
-    dockerfile.includes("uv sync --frozen --no-dev --no-editable"),
-    "Dockerfile: workspace packages must be installed non-editably for the runtime stage",
+    /for distribution in\s+media-finder\s+media-finder-core\s+media-finder-module-sdk\s+media-finder-control-contracts\s+media-finder-builtin-ui\s+media-finder-metadata-manual\s+media-finder-metadata-tmdb\s+media-finder-release-prowlarr\s+media-finder-download-qbittorrent\s+; do\s+uv build --wheel --package "\$distribution" --out-dir \/wheels/.test(
+      builderRun,
+    ),
+    "Dockerfile: production image must build every workspace package as wheels",
   );
-  for (const packageName of ["media_finder", "media_finder_builtin_ui", "media_finder_control"]) {
-    requireValue(
-      failures,
-      dockerfile.includes("uv sync --frozen --no-dev") &&
-        readText(root, "scripts/smoke-container.sh", failures).includes(packageName),
-      `Dockerfile: production image must install and smoke ${packageName}`,
-    );
-  }
+  requireValue(
+    failures,
+    builderRun?.includes("uv venv --python /usr/local/bin/python /opt/venv") &&
+      builderRun.includes("uv export --locked --package media-finder") &&
+      builderRun.includes("--no-emit-project") &&
+      builderRun.includes("--no-emit-workspace") &&
+      !builderRun.includes("--no-hashes") &&
+      builderRun.includes(
+        "uv pip install --python /opt/venv/bin/python --require-hashes -r /tmp/runtime-requirements.txt",
+      ) &&
+      builderRun.includes("uv pip install --python /opt/venv/bin/python --no-deps /wheels/*.whl") &&
+      sourceStageName === "builder" &&
+      runtimeVenvCopy?.command === "--from=builder /opt/venv /opt/venv" &&
+      !builderStage?.instructions.some(
+        (instruction) => instruction.keyword === "RUN" && instruction.command.includes("uv sync --frozen"),
+      ),
+    "Dockerfile: production image must install every workspace wheel into a fresh runtime venv",
+  );
+  requireValue(
+    failures,
+    builderRun?.includes("uv export --locked --package media-finder") &&
+      !builderRun.includes("--no-hashes") &&
+      builderRun.includes("--require-hashes -r /tmp/runtime-requirements.txt"),
+    "Dockerfile: production image must install locked requirements with hashes",
+  );
 
   const imageJob = verify.jobs?.image;
   const smokeStep = (imageJob?.steps ?? []).find(
@@ -210,7 +435,13 @@ function validateImage(root, verify, verifyText, failures) {
     smokeStep?.run === "bash scripts/smoke-container.sh",
     ".github/workflows/verify.yaml: image job must run the production smoke script",
   );
+  readText(root, "scripts/verify-image.py", failures);
   const smoke = readText(root, "scripts/smoke-container.sh", failures);
+  requireValue(
+    failures,
+    smoke.includes('docker exec -i "$container_name" python -I - < scripts/verify-image.py'),
+    "scripts/smoke-container.sh: image smoke must execute scripts/verify-image.py",
+  );
   const expectations = [
     ["UI root", /assert_response\s+"UI root"\s+"\$base_url\/"\s+"200"\s+"<!doctype html>"/],
     [
@@ -251,20 +482,6 @@ function validateImage(root, verify, verifyText, failures) {
       /docker exec "\$container_name" id -g/.test(smoke),
     "scripts/smoke-container.sh: image smoke test must validate UID and GID",
   );
-  const pythonSteps = verify.jobs?.python?.steps ?? [];
-  const wheelStep = pythonSteps.find((step) => step.name === "Build independent workspace wheels");
-  const wheelCommand = String(wheelStep?.run ?? "");
-  for (const packageName of [
-    "media-finder-control-contracts",
-    "media-finder-builtin-ui",
-    "media-finder",
-  ]) {
-    requireValue(
-      failures,
-      wheelCommand.includes(`--package ${packageName}`),
-      `.github/workflows/verify.yaml: wheel build is missing ${packageName}`,
-    );
-  }
   requireValue(
     failures,
     verifyText.includes("packages/builtin-ui/src/media_finder_builtin_ui/static"),
@@ -278,23 +495,168 @@ function validateVerification(root, verify, verifyText, failures) {
     Object.hasOwn(verify.on ?? {}, "workflow_call"),
     ".github/workflows/verify.yaml: reusable verification must use workflow_call",
   );
-  for (const job of ["documentation", "python", "unit", "integration", "contract", "browser", "image"]) {
+  requireValue(
+    failures,
+    verify.env?.UV_CACHE_DIR === "${{ github.workspace }}/.tools/uv-cache",
+    ".github/workflows/verify.yaml: repository-local uv cache must be seeded for offline isolation runners",
+  );
+  requireValue(
+    failures,
+    JSON.stringify(Object.keys(verify.jobs ?? {}).sort()) ===
+      JSON.stringify([...VERIFICATION_JOBS].sort()),
+    ".github/workflows/verify.yaml: exactly the seven protected job identifiers are required",
+  );
+  for (const job of VERIFICATION_JOBS) {
     requireValue(
       failures,
       Boolean(verify.jobs?.[job]),
       `.github/workflows/verify.yaml: missing ${job} job`,
     );
   }
-  const testsPath = path.join(root, "tests");
-  if (fs.existsSync(testsPath)) {
-    for (const testFile of fs.readdirSync(testsPath).filter((name) => /^test_.*\.py$/.test(name))) {
-      requireValue(
-        failures,
-        verifyText.includes(`tests/${testFile}`),
-        `.github/workflows/verify.yaml: ${testFile} is absent from the categorized test jobs`,
-      );
-    }
+  const unitCommands = (verify.jobs?.unit?.steps ?? []).map((step) => step.run ?? "").join("\n");
+  const browserCommands = (verify.jobs?.browser?.steps ?? [])
+    .map((step) => step.run ?? "")
+    .join("\n");
+  requireValue(
+    failures,
+    unitCommands
+      .split("\n")
+      .some(
+        (line) =>
+          line.trim() === "uv run python packages/builtin-ui/tests/run_isolated.py unit",
+      ),
+    ".github/workflows/verify.yaml: unit job must run the wheel-only built-in UI suite",
+  );
+  requireValue(
+    failures,
+    browserCommands
+      .split("\n")
+      .some(
+        (line) =>
+          line.trim() === "uv run python packages/builtin-ui/tests/run_isolated.py browser",
+      ),
+    ".github/workflows/verify.yaml: browser job must run the wheel-only built-in UI suite",
+  );
+  requireValue(
+    failures,
+    (verify.jobs?.contract?.steps ?? []).some((step) =>
+      runsPytest(step, ["tests/test_control_conformance_real.py"]),
+    ),
+    ".github/workflows/verify.yaml: contract job must run real browser-control conformance",
+  );
+  requireValue(
+    failures,
+    (verify.jobs?.unit?.steps ?? []).some((step) =>
+      runsPytest(step, ["tests/test_verify_image.py"]),
+    ),
+    ".github/workflows/verify.yaml: unit job must execute tests/test_verify_image.py",
+  );
+  requireValue(
+    failures,
+    (verify.jobs?.contract?.steps ?? []).some(
+      (step) =>
+        runsShellCommand(step, "pnpm module-conformance:test") &&
+        runsShellCommand(step, "pnpm module-conformance:validate"),
+    ),
+    ".github/workflows/verify.yaml: contract job must validate serialized module conformance independently",
+  );
+
+  const wheelCommand = String(
+    stepByName(verify.jobs?.python, "Build independent workspace wheels")?.run ?? "",
+  );
+  for (const distribution of WORKSPACE_DISTRIBUTIONS) {
+    requireValue(
+      failures,
+      new RegExp(`^\\s*uv build .*--package ${distribution}(?:\\s|$)`, "m").test(wheelCommand),
+      `.github/workflows/verify.yaml: wheel build is missing ${distribution}`,
+    );
   }
+
+  const listedTestPaths = testPathsFromCommands(verify);
+  for (const requiredSuite of ["tests/core", "tests/server", "tests/characterization"]) {
+    requireValue(
+      failures,
+      listedTestPaths.has(requiredSuite),
+      `.github/workflows/verify.yaml: required pytest suite ${requiredSuite} is missing`,
+    );
+  }
+  for (const listedPath of listedTestPaths) {
+    requireValue(
+      failures,
+      fs.existsSync(path.join(root, listedPath)),
+      `.github/workflows/verify.yaml: listed pytest path does not exist: ${listedPath}`,
+    );
+  }
+  for (const testFile of recursivelyListTests(root)) {
+    const relative = path.relative(root, testFile).replaceAll(path.sep, "/");
+    const covered = [...listedTestPaths].some(
+      (listedPath) => relative === listedPath || relative.startsWith(`${listedPath}/`),
+    );
+    requireValue(
+      failures,
+      covered,
+      `.github/workflows/verify.yaml: ${relative} is absent from the categorized test jobs`,
+    );
+  }
+
+  const requiredPytestSteps = [
+    [
+      "Metadata provider conformance",
+      [
+        "packages/modules/metadata-manual/tests",
+        "packages/modules/metadata-tmdb/tests",
+      ],
+    ],
+    ["Release provider conformance", ["packages/modules/release-prowlarr/tests"]],
+    ["Download client conformance", ["packages/modules/download-qbittorrent/tests"]],
+    [
+      "Manifest and SDK schema drift",
+      [
+        "packages/module-sdk/tests/test_manifest.py",
+        "packages/module-sdk/tests/test_schema_artifacts.py",
+      ],
+    ],
+    [
+      "Control and processor OpenAPI drift",
+      ["tests/test_control_openapi.py", "tests/test_processor_openapi.py"],
+    ],
+  ];
+  for (const [name, requiredPaths] of requiredPytestSteps) {
+    requireValue(
+      failures,
+      runsPytest(stepByName(verify.jobs?.contract, name), requiredPaths),
+      `.github/workflows/verify.yaml: ${name.toLowerCase()} is required with its exact checks`,
+    );
+  }
+  const serialized = stepByName(verify.jobs?.contract, "Serialized module fixture drift");
+  requireValue(
+    failures,
+    runsShellCommand(serialized, "pnpm module-conformance:test") &&
+      runsShellCommand(serialized, "pnpm module-conformance:validate"),
+    ".github/workflows/verify.yaml: serialized module fixture drift is required with its exact checks",
+  );
+  const schemaDrift = stepByName(verify.jobs?.contract, "Clean migration and schema drift");
+  requireValue(
+    failures,
+    runsShellCommand(schemaDrift, "uv run python scripts/check_schema_drift.py") &&
+      runsPytest(schemaDrift, [
+        "tests/test_db.py",
+        "tests/architecture/test_clean_core_schema.py",
+      ]),
+    ".github/workflows/verify.yaml: clean migration and schema drift is required with its exact checks",
+  );
+
+  const isolatedUiRunner = readText(
+    root,
+    "packages/builtin-ui/tests/run_isolated.py",
+    failures,
+  );
+  requireValue(
+    failures,
+    isolatedUiRunner.includes('sorted(TESTS.rglob("test_*.py"))') &&
+      isolatedUiRunner.includes('path.name.startswith("test_browser")'),
+    "packages/builtin-ui/tests/run_isolated.py: UI isolation runner must discover test files recursively",
+  );
 }
 
 function validatePublishWorkflows(ci, release, failures) {

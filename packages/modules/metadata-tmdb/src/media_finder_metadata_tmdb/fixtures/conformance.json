@@ -1,0 +1,188 @@
+{
+  "capabilities": [
+    "export-warning",
+    "fetch",
+    "normalize",
+    "retention",
+    "search"
+  ],
+  "contract_version": "1",
+  "environment": [
+    {
+      "description_key": "module.tmdb.environment.token",
+      "name": "TMDB_TOKEN",
+      "required": true,
+      "secret": true
+    }
+  ],
+  "manifest_sha256": "5b92b3282a544398733c44d9da4296de3a9615300382f3efb0e2543b3a71f3be",
+  "missing_configuration": {
+    "applicable": true,
+    "error": {
+      "category": "configuration",
+      "code": "module_environment_missing",
+      "safe_details": {
+        "missing_names": [
+          "TMDB_TOKEN"
+        ]
+      }
+    },
+    "omitted": [
+      "TMDB_TOKEN"
+    ]
+  },
+  "module_id": "tmdb",
+  "module_kind": "metadata-provider",
+  "module_version": "0.1.0",
+  "redaction_markers": [
+    "artifact-body",
+    "environment-values",
+    "private-selection"
+  ],
+  "redaction_probes": {
+    "artifact_body": "mf-redaction-probe-artifact-body",
+    "credential": "mf-redaction-probe-credential",
+    "environment_value": "mf-redaction-probe-environment-value",
+    "private_selection": "mf-redaction-probe-private-selection"
+  },
+  "schema_version": "1",
+  "sdk_compatibility": ">=1,<2",
+  "stable_failures": [
+    {
+      "error": {
+        "category": "invalid-identity",
+        "code": "metadata_identity_invalid",
+        "safe_details": {}
+      },
+      "operation": "fetch-invalid-identity"
+    },
+    {
+      "error": {
+        "category": "unavailable",
+        "code": "metadata_provider_unavailable",
+        "safe_details": {}
+      },
+      "operation": "search-unavailable"
+    }
+  ],
+  "success": {
+    "editor": null,
+    "identity": {
+      "external_id": "129",
+      "locale": "en-US",
+      "media_kind": "movie",
+      "provider_id": "tmdb"
+    },
+    "normalized": {
+      "artwork": [
+        {
+          "kind": "poster",
+          "language": "en-US",
+          "url": "https://image.tmdb.org/t/p/original/spirited-poster.jpg"
+        },
+        {
+          "kind": "backdrop",
+          "language": "en-US",
+          "url": "https://image.tmdb.org/t/p/original/spirited-backdrop.jpg"
+        }
+      ],
+      "completeness": 1,
+      "countries": [
+        "Japan"
+      ],
+      "genres": [
+        "Animation",
+        "Fantasy"
+      ],
+      "kind": "movie",
+      "original_title": "Sen to Chihiro no kamikakushi",
+      "people": [],
+      "plot": "A journey through a spirit world.",
+      "provenance": {
+        "external_id": "129",
+        "fetched_at": "2026-01-02T03:04:05Z",
+        "locale": "en-US",
+        "provider_id": "tmdb",
+        "source_label": "TMDB"
+      },
+      "provider_ids": {
+        "tmdb": "129"
+      },
+      "ratings": [
+        {
+          "source": "tmdb",
+          "value": 8.5,
+          "votes": null
+        }
+      ],
+      "release_date": "2001-07-20",
+      "runtime_minutes": 125,
+      "schema_version": "1",
+      "seasons": [],
+      "structural_quality": 1,
+      "studios": [
+        "Studio Ghibli"
+      ],
+      "tags": [],
+      "titles": {
+        "en-US": "Spirited Away"
+      },
+      "year": 2001
+    },
+    "query": {
+      "limit": 50,
+      "locale": "en-US",
+      "media_kinds": [
+        "movie",
+        "series"
+      ],
+      "query": "Spirited Away"
+    },
+    "results": [
+      {
+        "external_id": "129",
+        "locale": "en-US",
+        "media_kind": "movie",
+        "provider_id": "tmdb",
+        "title": "Spirited Away",
+        "year": 2001
+      },
+      {
+        "external_id": "900",
+        "locale": "en-US",
+        "media_kind": "series",
+        "provider_id": "tmdb",
+        "title": "Fixture Series",
+        "year": 2020
+      }
+    ],
+    "retention": {
+      "action": {
+        "kind": "refresh",
+        "mandatory": false
+      },
+      "created_at": "2024-08-31T12:00:00Z",
+      "now": "2025-01-31T12:00:00Z",
+      "policy": {
+        "expires_at": "2025-02-28T12:00:00Z",
+        "refresh_after": "2025-01-31T12:00:00Z"
+      },
+      "warning": {
+        "headers": [
+          {
+            "name": "Warning",
+            "value": "299 Media Finder \"Provider-derived metadata has a retention deadline\""
+          },
+          {
+            "name": "Sunset",
+            "value": "Fri, 28 Feb 2025 12:00:00 GMT"
+          },
+          {
+            "name": "X-Media-Finder-Metadata-Expires",
+            "value": "2025-02-28T12:00:00+00:00"
+          }
+        ]
+      }
+    }
+  }
+}

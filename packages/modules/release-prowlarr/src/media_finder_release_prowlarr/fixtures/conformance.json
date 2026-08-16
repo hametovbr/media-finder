@@ -1,0 +1,138 @@
+{
+  "capabilities": [
+    "magnet",
+    "resolve",
+    "search",
+    "torrent"
+  ],
+  "contract_version": "1",
+  "environment": [
+    {
+      "description_key": "module.prowlarr.environment.url",
+      "name": "PROWLARR_URL",
+      "required": true,
+      "secret": false
+    },
+    {
+      "description_key": "module.prowlarr.environment.api_key",
+      "name": "PROWLARR_API_KEY",
+      "required": true,
+      "secret": true
+    }
+  ],
+  "manifest_sha256": "06371a9286105583108c1043b4f7ebc4f5dd831e24bbcec0c3007c0720578db2",
+  "missing_configuration": {
+    "applicable": true,
+    "error": {
+      "category": "configuration",
+      "code": "module_environment_missing",
+      "safe_details": {
+        "missing_names": [
+          "PROWLARR_URL",
+          "PROWLARR_API_KEY"
+        ]
+      }
+    },
+    "omitted": [
+      "PROWLARR_API_KEY",
+      "PROWLARR_URL"
+    ]
+  },
+  "module_id": "prowlarr",
+  "module_kind": "release-provider",
+  "module_version": "0.1.0",
+  "redaction_markers": [
+    "artifact-body",
+    "environment-values",
+    "private-selection"
+  ],
+  "redaction_probes": {
+    "artifact_body": "mf-redaction-probe-artifact-body",
+    "credential": "mf-redaction-probe-credential",
+    "environment_value": "mf-redaction-probe-environment-value",
+    "private_selection": "mf-redaction-probe-private-selection"
+  },
+  "schema_version": "1",
+  "sdk_compatibility": ">=1,<2",
+  "stable_failures": [
+    {
+      "error": {
+        "category": "invalid-request",
+        "code": "release_selection_invalid",
+        "safe_details": {}
+      },
+      "operation": "resolve-invalid-selection"
+    },
+    {
+      "error": {
+        "category": "limit-exceeded",
+        "code": "release_torrent_too_large",
+        "safe_details": {}
+      },
+      "operation": "resolve-torrent-limit"
+    },
+    {
+      "error": {
+        "category": "limit-exceeded",
+        "code": "release_response_too_large",
+        "safe_details": {}
+      },
+      "operation": "search-response-limit"
+    },
+    {
+      "error": {
+        "category": "limit-exceeded",
+        "code": "release_result_limit_exceeded",
+        "safe_details": {}
+      },
+      "operation": "search-result-limit"
+    }
+  ],
+  "success": {
+    "query": {
+      "filters": [],
+      "limit": 10,
+      "query": "Fixture"
+    },
+    "resolved_artifacts": [
+      {
+        "artifact": {
+          "byte_length": 79,
+          "kind": "magnet",
+          "sha256": "8310435e3966378ae19b4f631d0358eae43594a1ea865f2ab98fd62ea7bb999e"
+        },
+        "selection_ref": "fixture-magnet"
+      },
+      {
+        "artifact": {
+          "byte_length": 51,
+          "kind": "torrent",
+          "sha256": "780abf8426c5e43f98049fe456848dcb8eb06a51484f1d916686a64bdff32806"
+        },
+        "selection_ref": "fixture-torrent"
+      }
+    ],
+    "results": [
+      {
+        "selection_ref": "fixture-magnet",
+        "snapshot": {
+          "guid": "fixture-magnet-guid",
+          "indexer": "Fixture Torrent Indexer",
+          "infohash": "0123456789abcdef0123456789abcdef01234567",
+          "source_page_url": "https://indexer.example.test/",
+          "title": "Fixture.Release.2026.1080p"
+        }
+      },
+      {
+        "selection_ref": "fixture-torrent",
+        "snapshot": {
+          "guid": "fixture-torrent-guid",
+          "indexer": "Fixture Torrent Indexer",
+          "infohash": null,
+          "source_page_url": "https://indexer.example.test/",
+          "title": "Fixture.Release.2026.Remux"
+        }
+      }
+    ]
+  }
+}

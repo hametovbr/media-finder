@@ -1,39 +1,58 @@
 import asyncio
+from uuid import UUID, uuid4
 
 import pytest
+from catalog_fixtures import CatalogFixture as CatalogService
+from catalog_fixtures import RevisionInput
+from gateway_fixtures import create_gateway
 from media_finder_control import ControlFailure
 from media_finder_control.models import AcquisitionSubmissionRequest, ReleaseSearchRequest
-from sqlalchemy.orm import Session, sessionmaker
+from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
+from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
+from media_finder_sdk import (
+    MagnetArtifact,
+    MediaKind,
+    NormalizedMetadata,
+    PrivateReleaseSelection,
+    Provenance,
+    ReleaseCandidate,
+    ReleaseSearchFilter,
+    ReleaseSearchQuery,
+    SafeReleaseSnapshot,
+)
+from media_finder_server.control_gateway import BackendControlGateway
+from sqlalchemy.orm import Session
 
-from media_finder.control_gateway import BackendControlGateway
-from media_finder.domain import CatalogService, RevisionInput
-from media_finder.integration_runtime import RuntimeResolver
-from media_finder.models import Acquisition, DownloadClientInstance
-from media_finder.prowlarr import ProwlarrAdapter, SearchResultCache
-from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
-from media_finder.system_clients import SYSTEM_QBITTORRENT_ID, ensure_system_qbittorrent
+
+class FixtureReleaseProvider:
+    def validate(self) -> None:
+        return None
+
+    def search(self, query: ReleaseSearchQuery) -> tuple[ReleaseCandidate, ...]:
+        assert query == ReleaseSearchQuery(
+            query="Example",
+            filters=(ReleaseSearchFilter(key="indexer-ids", values=("1", "2")),),
+        )
+        return (
+            ReleaseCandidate(
+                snapshot=SafeReleaseSnapshot(
+                    title="Example.Release.1080p",
+                    indexer="Fixture",
+                ),
+                selection=PrivateReleaseSelection.from_bytes(b"fixture-release"),
+            ),
+        )
+
+    def resolve(self, selection: PrivateReleaseSelection) -> MagnetArtifact:
+        assert selection.payload() == b"fixture-release"
+        return MagnetArtifact(uri="magnet:?xt=urn:btih:abc")
+
+    def close(self) -> None:
+        return None
 
 
-class TorrentSearchTransport:
-    def search(self, query: str, filters: dict[str, str]) -> list[dict[str, object]]:
-        assert query == "Example"
-        assert filters == {"indexerIds": "1,2"}
-        return [
-            {
-                "protocol": "torrent",
-                "title": "Example.Release.1080p",
-                "indexer": "Fixture",
-                "magnetUrl": "magnet:?xt=urn:btih:abc",
-            },
-            {
-                "protocol": "usenet",
-                "title": "Ignored",
-                "downloadUrl": "https://example.test/ignored",
-            },
-        ]
-
-    def fetch_torrent(self, url: str) -> bytes:
-        raise AssertionError(url)
+def _release_selection() -> ReleaseSelectionService:
+    return ReleaseSelectionService(provider=FixtureReleaseProvider(), cache=ReleaseSelectionCache())
 
 
 def _item(database: Session):
@@ -45,7 +64,7 @@ def _item(database: Session):
             NormalizedMetadata(
                 kind=MediaKind.MOVIE,
                 titles={"en": "Example"},
-                provenance=Provenance(provider_key="manual", external_id="item-1", locale="en"),
+                provenance=Provenance(provider_id="manual", external_id="item-1", locale="en"),
             )
         ),
     )
@@ -55,20 +74,15 @@ def _item(database: Session):
 def _gateway(
     database: Session,
     *,
-    prowlarr: ProwlarrAdapter | None,
+    releases: ReleaseSelectionService | None,
     client,
+    download_id: str = "fixture-download",
 ) -> BackendControlGateway:
-    sessions = sessionmaker(bind=database.get_bind(), expire_on_commit=False)
-    runtime = RuntimeResolver(
-        factory=None,
-        providers={},
-        prowlarr=prowlarr,
-        client_loader=lambda instance: client,
-    )
-    return BackendControlGateway(
-        sessions=sessions,
-        cursor_secret=b"cursor-secret-for-tests",
-        runtime=runtime,
+    return create_gateway(
+        database,
+        release_selections=releases,
+        download_client=client,
+        download_id=download_id,
     )
 
 
@@ -76,9 +90,8 @@ def test_release_search_destinations_and_idempotent_submission(
     database: Session, fake_client
 ) -> None:
     item = _item(database)
-    ensure_system_qbittorrent(database)
-    prowlarr = ProwlarrAdapter(TorrentSearchTransport(), SearchResultCache())
-    gateway = _gateway(database, prowlarr=prowlarr, client=fake_client)
+    releases = _release_selection()
+    gateway = _gateway(database, releases=releases, client=fake_client)
 
     async def scenario() -> None:
         results = await gateway.search_releases(
@@ -103,13 +116,46 @@ def test_release_search_destinations_and_idempotent_submission(
     asyncio.run(scenario())
 
 
+def test_new_submission_persists_selected_manifest_version_and_duplicate_reuses_it(
+    database: Session, fake_client
+) -> None:
+    item = _item(database)
+    releases = _release_selection()
+    gateway = _gateway(database, releases=releases, client=fake_client)
+
+    async def scenario() -> None:
+        result = (
+            await gateway.search_releases(
+                item_id=item.id,
+                request=ReleaseSearchRequest(query="Example", indexer_ids=(1, 2)),
+            )
+        )[0]
+        request = AcquisitionSubmissionRequest(
+            media_item_id=item.id,
+            release_token=result.token,
+            destination="fixture",
+            idempotency_key="version-required",
+        )
+        first = await gateway.submit_acquisition(request=request)
+        duplicate = await gateway.submit_acquisition(request=request)
+        assert duplicate.id == first.id
+        assert (
+            database.query(Acquisition)
+            .filter_by(id=UUID(first.id))
+            .one()
+            .download_client_module_version
+            == "9.8.7"
+        )
+
+    asyncio.run(scenario())
+
+
 def test_stale_destination_returns_current_values_without_consuming_release(
     database: Session, fake_client
 ) -> None:
     item = _item(database)
-    ensure_system_qbittorrent(database)
-    prowlarr = ProwlarrAdapter(TorrentSearchTransport(), SearchResultCache())
-    gateway = _gateway(database, prowlarr=prowlarr, client=fake_client)
+    releases = _release_selection()
+    gateway = _gateway(database, releases=releases, client=fake_client)
 
     async def scenario() -> None:
         result = (
@@ -144,13 +190,19 @@ def test_stale_destination_returns_current_values_without_consuming_release(
     asyncio.run(scenario())
 
 
-def test_pending_reconcile_does_not_require_prowlarr(database: Session, fake_client) -> None:
+def test_pending_reconcile_does_not_require_release_provider(
+    database: Session, fake_client
+) -> None:
     item = _item(database)
-    instance = ensure_system_qbittorrent(database)
     acquisition = Acquisition(
+        id=(acquisition_id := uuid4()),
+        correlation=f"mf-acq-{acquisition_id}",
+        release_provider_id="fixture-release",
+        release_provider_version="1.0.0",
+        download_client_module_id="fixture-download",
+        download_client_module_version="8.0.0",
         media_item_id=item.id,
         metadata_revision_id=item.current_revision_id,
-        download_client_instance_id=SYSTEM_QBITTORRENT_ID,
         idempotency_key="pending-1",
         naming_profile="jellyfin-v1",
         status="pending",
@@ -161,8 +213,44 @@ def test_pending_reconcile_does_not_require_prowlarr(database: Session, fake_cli
     database.commit()
     correlation = f"mf-acq-{acquisition.id}"
     fake_client.tasks[correlation] = "fixture"
-    assert database.get(DownloadClientInstance, instance.id) is not None
-    gateway = _gateway(database, prowlarr=None, client=fake_client)
+    gateway = _gateway(database, releases=None, client=fake_client)
 
     reconciled = asyncio.run(gateway.reconcile_acquisition(acquisition_id=str(acquisition.id)))
     assert reconciled.status == "submitted"
+
+
+def test_reconcile_rejects_a_different_selected_module_and_keeps_pending(
+    database: Session, fake_client
+) -> None:
+    item = _item(database)
+    acquisition = Acquisition(
+        id=(acquisition_id := uuid4()),
+        correlation=f"mf-acq-{acquisition_id}",
+        release_provider_id="fixture-release",
+        release_provider_version="1.0.0",
+        download_client_module_id="original-download",
+        download_client_module_version="1.0.0",
+        media_item_id=item.id,
+        metadata_revision_id=item.current_revision_id,
+        idempotency_key="pending-module-replacement",
+        naming_profile="jellyfin-v1",
+        status="pending",
+        destination="fixture",
+        release_title="Example.Release.1080p",
+    )
+    database.add(acquisition)
+    database.commit()
+    gateway = _gateway(
+        database,
+        releases=None,
+        client=fake_client,
+        download_id="replacement-download",
+    )
+
+    with pytest.raises(ControlFailure) as rejected:
+        asyncio.run(gateway.reconcile_acquisition(acquisition_id=str(acquisition.id)))
+
+    assert rejected.value.error.code == "download_client_module_mismatch"
+    database.refresh(acquisition)
+    assert acquisition.status == "pending"
+    assert fake_client.tasks == {}

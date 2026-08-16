@@ -2,26 +2,17 @@ import asyncio
 import inspect
 
 import pytest
+from catalog_fixtures import CatalogFixture as CatalogService
+from catalog_fixtures import RevisionInput
+from gateway_fixtures import create_gateway
 from media_finder_control import ControlFailure, ControlGateway, Locale, PageRequest
-from sqlalchemy.orm import Session, sessionmaker
-
-from media_finder.control_gateway import BackendControlGateway
-from media_finder.domain import CatalogService, RevisionInput
-from media_finder.integration_runtime import RuntimeResolver
-from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
+from media_finder_sdk import MediaKind, NormalizedMetadata, Provenance
+from media_finder_server.control_gateway import BackendControlGateway
+from sqlalchemy.orm import Session
 
 
 def _gateway(database: Session) -> BackendControlGateway:
-    return BackendControlGateway(
-        sessions=sessionmaker(bind=database.get_bind(), expire_on_commit=False),
-        cursor_secret=b"cursor-secret-for-tests",
-        runtime=RuntimeResolver(
-            factory=None,
-            providers={},
-            prowlarr=None,
-            client_loader=None,
-        ),
-    )
+    return create_gateway(database)
 
 
 def test_real_gateway_implements_every_public_async_operation(database: Session) -> None:
@@ -45,7 +36,7 @@ def test_collection_and_item_operations_share_stable_gateway_failures(database: 
             NormalizedMetadata(
                 kind=MediaKind.MOVIE,
                 titles={"en": "Example"},
-                provenance=Provenance(provider_key="manual", external_id="item-1", locale="en"),
+                provenance=Provenance(provider_id="manual", external_id="item-1", locale="en"),
             )
         ),
     )

@@ -1,0 +1,150 @@
+{
+  "$defs": {
+    "AttributionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "notice_key": {
+          "title": "Notice Key",
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "required": [
+        "notice_key"
+      ],
+      "title": "AttributionSpec",
+      "type": "object"
+    },
+    "EnvironmentVariableSpec": {
+      "additionalProperties": false,
+      "description": "Value-free declaration of one exact process variable.",
+      "properties": {
+        "description_key": {
+          "title": "Description Key",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
+        "secret": {
+          "title": "Secret",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "required",
+        "secret",
+        "description_key"
+      ],
+      "title": "EnvironmentVariableSpec",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.media-finder.dev/module-sdk/v1/module-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Canonical static contract read from a module's ``module.toml``.",
+  "properties": {
+    "attribution": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AttributionSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "capabilities": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Capabilities",
+      "type": "array",
+      "uniqueItems": true
+    },
+    "contract_version": {
+      "maxLength": 32,
+      "minLength": 1,
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "environment": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/EnvironmentVariableSpec"
+      },
+      "title": "Environment",
+      "type": "array"
+    },
+    "module_id": {
+      "maxLength": 100,
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+      "title": "Module Id",
+      "type": "string"
+    },
+    "module_kind": {
+      "enum": [
+        "metadata-provider",
+        "release-provider",
+        "download-client"
+      ],
+      "title": "ModuleKind",
+      "type": "string"
+    },
+    "module_version": {
+      "title": "Module Version",
+      "type": "string"
+    },
+    "name_key": {
+      "title": "Name Key",
+      "type": "string"
+    },
+    "sdk_compatibility": {
+      "title": "Sdk Compatibility",
+      "type": "string"
+    },
+    "translation_keys": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Translation Keys",
+      "type": "array",
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "module_id",
+    "module_kind",
+    "module_version",
+    "sdk_compatibility",
+    "contract_version",
+    "name_key",
+    "capabilities",
+    "translation_keys"
+  ],
+  "title": "Media Finder Module Manifest v1",
+  "type": "object"
+}

@@ -1,0 +1,1779 @@
+{
+  "$defs": {
+    "ArtifactDescriptor": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "magnet"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "byte_length": {
+                "maximum": 8192
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "torrent"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "byte_length": {
+                "maximum": 20971520
+              }
+            }
+          }
+        }
+      ],
+      "description": "Safe digest-and-size descriptor; it never carries an artifact body.",
+      "properties": {
+        "byte_length": {
+          "description": "UTF-8 byte length of a magnet URI or raw byte length of a torrent payload.",
+          "maximum": 20971520,
+          "minimum": 1,
+          "title": "Byte Length",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "magnet",
+            "torrent"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "byte_length",
+        "sha256"
+      ],
+      "title": "ArtifactDescriptor",
+      "type": "object"
+    },
+    "Artwork": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        },
+        "url": {
+          "format": "uri",
+          "maxLength": 2083,
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "url"
+      ],
+      "title": "Artwork",
+      "type": "object"
+    },
+    "ConfigurationFreeCase": {
+      "additionalProperties": false,
+      "properties": {
+        "applicable": {
+          "const": false,
+          "title": "Applicable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "applicable"
+      ],
+      "title": "ConfigurationFreeCase",
+      "type": "object"
+    },
+    "CorrelationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "conclusive": {
+          "default": true,
+          "title": "Conclusive",
+          "type": "boolean"
+        },
+        "correlation": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation",
+          "type": "string"
+        },
+        "external_task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "External Task Id"
+        },
+        "found": {
+          "title": "Found",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "found",
+        "correlation"
+      ],
+      "title": "CorrelationResult",
+      "type": "object"
+    },
+    "DownloadDestination": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "label"
+      ],
+      "title": "DownloadDestination",
+      "type": "object"
+    },
+    "DownloadSuccessCase": {
+      "additionalProperties": false,
+      "properties": {
+        "artifacts": {
+          "items": {
+            "$ref": "#/$defs/ArtifactDescriptor"
+          },
+          "maxItems": 2,
+          "minItems": 1,
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "correlation": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation",
+          "type": "string"
+        },
+        "destination": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Destination",
+          "type": "string"
+        },
+        "destinations": {
+          "items": {
+            "$ref": "#/$defs/DownloadDestination"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Destinations",
+          "type": "array"
+        },
+        "lookup": {
+          "$ref": "#/$defs/CorrelationResult"
+        },
+        "submission": {
+          "$ref": "#/$defs/SubmissionResult"
+        }
+      },
+      "required": [
+        "destinations",
+        "artifacts",
+        "destination",
+        "correlation",
+        "submission",
+        "lookup"
+      ],
+      "title": "DownloadSuccessCase",
+      "type": "object"
+    },
+    "EnvironmentVariableSpec": {
+      "additionalProperties": false,
+      "description": "Value-free declaration of one exact process variable.",
+      "properties": {
+        "description_key": {
+          "title": "Description Key",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
+        "secret": {
+          "title": "Secret",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "required",
+        "secret",
+        "description_key"
+      ],
+      "title": "EnvironmentVariableSpec",
+      "type": "object"
+    },
+    "Episode": {
+      "additionalProperties": false,
+      "properties": {
+        "air_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Air Date"
+        },
+        "number": {
+          "minimum": 1,
+          "title": "Number",
+          "type": "integer"
+        },
+        "ordering": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ordering"
+        },
+        "plot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plot"
+        },
+        "provider_ids": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Provider Ids",
+          "type": "object"
+        },
+        "runtime_minutes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime Minutes"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "title"
+      ],
+      "title": "Episode",
+      "type": "object"
+    },
+    "ExportHeader": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "enum": [
+            "Warning",
+            "Sunset",
+            "X-Media-Finder-Metadata-Expires"
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "title": "ExportHeader",
+      "type": "object"
+    },
+    "ExportWarning": {
+      "additionalProperties": false,
+      "properties": {
+        "headers": {
+          "items": {
+            "$ref": "#/$defs/ExportHeader"
+          },
+          "title": "Headers",
+          "type": "array"
+        }
+      },
+      "required": [
+        "headers"
+      ],
+      "title": "ExportWarning",
+      "type": "object"
+    },
+    "JsonScalar": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "JsonValue": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonScalar"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "MediaKind": {
+      "enum": [
+        "movie",
+        "series"
+      ],
+      "title": "MediaKind",
+      "type": "string"
+    },
+    "MetadataEditorCase": {
+      "additionalProperties": false,
+      "properties": {
+        "imported_identity": {
+          "$ref": "#/$defs/MetadataIdentity"
+        },
+        "merged_episode_count": {
+          "maximum": 100000,
+          "minimum": 1,
+          "title": "Merged Episode Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "imported_identity",
+        "merged_episode_count"
+      ],
+      "title": "MetadataEditorCase",
+      "type": "object"
+    },
+    "MetadataIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "external_id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "External Id",
+          "type": "string"
+        },
+        "locale": {
+          "pattern": "^[a-z]{2}(?:-[A-Z]{2})?$",
+          "title": "Locale",
+          "type": "string"
+        },
+        "media_kind": {
+          "$ref": "#/$defs/MediaKind"
+        },
+        "provider_id": {
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+          "title": "Provider Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider_id",
+        "external_id",
+        "media_kind",
+        "locale"
+      ],
+      "title": "MetadataIdentity",
+      "type": "object"
+    },
+    "MetadataRetentionCase": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/RetentionAction"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "now": {
+          "format": "date-time",
+          "title": "Now",
+          "type": "string"
+        },
+        "policy": {
+          "$ref": "#/$defs/RetentionPolicy"
+        },
+        "warning": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExportWarning"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "created_at",
+        "now",
+        "policy",
+        "action",
+        "warning"
+      ],
+      "title": "MetadataRetentionCase",
+      "type": "object"
+    },
+    "MetadataSearchQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 50,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "locale": {
+          "pattern": "^[a-z]{2}(?:-[A-Z]{2})?$",
+          "title": "Locale",
+          "type": "string"
+        },
+        "media_kinds": {
+          "default": [
+            "movie",
+            "series"
+          ],
+          "items": {
+            "$ref": "#/$defs/MediaKind"
+          },
+          "title": "Media Kinds",
+          "type": "array"
+        },
+        "query": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query",
+        "locale"
+      ],
+      "title": "MetadataSearchQuery",
+      "type": "object"
+    },
+    "MetadataSearchResult": {
+      "additionalProperties": false,
+      "properties": {
+        "external_id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "External Id",
+          "type": "string"
+        },
+        "locale": {
+          "title": "Locale",
+          "type": "string"
+        },
+        "media_kind": {
+          "$ref": "#/$defs/MediaKind"
+        },
+        "provider_id": {
+          "title": "Provider Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "year": {
+          "anyOf": [
+            {
+              "maximum": 3000,
+              "minimum": 1800,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Year"
+        }
+      },
+      "required": [
+        "provider_id",
+        "external_id",
+        "media_kind",
+        "title",
+        "locale"
+      ],
+      "title": "MetadataSearchResult",
+      "type": "object"
+    },
+    "MetadataSuccessCase": {
+      "additionalProperties": false,
+      "properties": {
+        "editor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetadataEditorCase"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "identity": {
+          "$ref": "#/$defs/MetadataIdentity"
+        },
+        "normalized": {
+          "$ref": "#/$defs/NormalizedMetadata"
+        },
+        "query": {
+          "$ref": "#/$defs/MetadataSearchQuery"
+        },
+        "results": {
+          "items": {
+            "$ref": "#/$defs/MetadataSearchResult"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Results",
+          "type": "array"
+        },
+        "retention": {
+          "$ref": "#/$defs/MetadataRetentionCase"
+        }
+      },
+      "required": [
+        "query",
+        "results",
+        "identity",
+        "normalized",
+        "retention"
+      ],
+      "title": "MetadataSuccessCase",
+      "type": "object"
+    },
+    "MissingConfigurationCase": {
+      "additionalProperties": false,
+      "properties": {
+        "applicable": {
+          "const": true,
+          "title": "Applicable",
+          "type": "boolean"
+        },
+        "error": {
+          "$ref": "#/$defs/ModuleErrorData"
+        },
+        "omitted": {
+          "items": {
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Omitted",
+          "type": "array"
+        }
+      },
+      "required": [
+        "applicable",
+        "omitted",
+        "error"
+      ],
+      "title": "MissingConfigurationCase",
+      "type": "object"
+    },
+    "ModuleErrorData": {
+      "additionalProperties": false,
+      "description": "Serializable safe failure shape for conformance fixtures.",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/ModuleFailureCategory"
+        },
+        "code": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Code",
+          "type": "string"
+        },
+        "safe_details": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Safe Details",
+          "type": "object"
+        }
+      },
+      "required": [
+        "category",
+        "code"
+      ],
+      "title": "ModuleErrorData",
+      "type": "object"
+    },
+    "ModuleFailureCategory": {
+      "description": "Stable coarse categories suitable for host-side translation.",
+      "enum": [
+        "configuration",
+        "invalid-request",
+        "invalid-identity",
+        "unavailable",
+        "timeout",
+        "limit-exceeded",
+        "rejected",
+        "inconclusive",
+        "unsupported"
+      ],
+      "title": "ModuleFailureCategory",
+      "type": "string"
+    },
+    "NormalizedMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "artwork": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Artwork"
+          },
+          "title": "Artwork",
+          "type": "array"
+        },
+        "completeness": {
+          "default": 0.0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Completeness",
+          "type": "number"
+        },
+        "countries": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Countries",
+          "type": "array"
+        },
+        "genres": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Genres",
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/MediaKind"
+        },
+        "original_title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Original Title"
+        },
+        "people": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Person"
+          },
+          "title": "People",
+          "type": "array"
+        },
+        "plot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plot"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "provider_ids": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Provider Ids",
+          "type": "object"
+        },
+        "ratings": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Rating"
+          },
+          "title": "Ratings",
+          "type": "array"
+        },
+        "release_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Release Date"
+        },
+        "runtime_minutes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime Minutes"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "seasons": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Season"
+          },
+          "title": "Seasons",
+          "type": "array"
+        },
+        "structural_quality": {
+          "default": 0.0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Structural Quality",
+          "type": "number"
+        },
+        "studios": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Studios",
+          "type": "array"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "titles": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Titles",
+          "type": "object"
+        },
+        "year": {
+          "anyOf": [
+            {
+              "maximum": 3000,
+              "minimum": 1800,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Year"
+        }
+      },
+      "required": [
+        "kind",
+        "titles",
+        "provenance"
+      ],
+      "title": "NormalizedMetadata",
+      "type": "object"
+    },
+    "Person": {
+      "additionalProperties": false,
+      "properties": {
+        "character": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Character"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "role"
+      ],
+      "title": "Person",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "external_id": {
+          "title": "External Id",
+          "type": "string"
+        },
+        "fetched_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fetched At"
+        },
+        "locale": {
+          "title": "Locale",
+          "type": "string"
+        },
+        "provider_id": {
+          "title": "Provider Id",
+          "type": "string"
+        },
+        "source_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Label"
+        }
+      },
+      "required": [
+        "provider_id",
+        "external_id",
+        "locale"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "Rating": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "votes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Votes"
+        }
+      },
+      "required": [
+        "source",
+        "value"
+      ],
+      "title": "Rating",
+      "type": "object"
+    },
+    "RedactionMarker": {
+      "enum": [
+        "artifact-body",
+        "environment-values",
+        "private-selection"
+      ],
+      "type": "string"
+    },
+    "RedactionProbeSet": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_body": {
+          "pattern": "^mf-redaction-probe-[a-z-]+$",
+          "title": "Artifact Body",
+          "type": "string"
+        },
+        "credential": {
+          "pattern": "^mf-redaction-probe-[a-z-]+$",
+          "title": "Credential",
+          "type": "string"
+        },
+        "environment_value": {
+          "pattern": "^mf-redaction-probe-[a-z-]+$",
+          "title": "Environment Value",
+          "type": "string"
+        },
+        "private_selection": {
+          "pattern": "^mf-redaction-probe-[a-z-]+$",
+          "title": "Private Selection",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_body",
+        "credential",
+        "environment_value",
+        "private_selection"
+      ],
+      "title": "RedactionProbeSet",
+      "type": "object"
+    },
+    "ReleaseSearchFilter": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "title": "Key",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "values"
+      ],
+      "title": "ReleaseSearchFilter",
+      "type": "object"
+    },
+    "ReleaseSearchQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "filters": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ReleaseSearchFilter"
+          },
+          "title": "Filters",
+          "type": "array"
+        },
+        "limit": {
+          "default": 50,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "query": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "title": "ReleaseSearchQuery",
+      "type": "object"
+    },
+    "ReleaseSuccessCase": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "$ref": "#/$defs/ReleaseSearchQuery"
+        },
+        "resolved_artifacts": {
+          "items": {
+            "$ref": "#/$defs/SerializedResolvedArtifact"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Resolved Artifacts",
+          "type": "array"
+        },
+        "results": {
+          "items": {
+            "$ref": "#/$defs/SerializedReleaseResult"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Results",
+          "type": "array"
+        }
+      },
+      "required": [
+        "query",
+        "results",
+        "resolved_artifacts"
+      ],
+      "title": "ReleaseSuccessCase",
+      "type": "object"
+    },
+    "RetentionAction": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/RetentionActionKind"
+        },
+        "mandatory": {
+          "default": false,
+          "title": "Mandatory",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "RetentionAction",
+      "type": "object"
+    },
+    "RetentionActionKind": {
+      "enum": [
+        "none",
+        "refresh",
+        "purge"
+      ],
+      "title": "RetentionActionKind",
+      "type": "string"
+    },
+    "RetentionPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "refresh_after": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Refresh After"
+        }
+      },
+      "title": "RetentionPolicy",
+      "type": "object"
+    },
+    "Season": {
+      "additionalProperties": false,
+      "properties": {
+        "episodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Episode"
+          },
+          "title": "Episodes",
+          "type": "array"
+        },
+        "number": {
+          "minimum": 0,
+          "title": "Number",
+          "type": "integer"
+        },
+        "plot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plot"
+        },
+        "provider_ids": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Provider Ids",
+          "type": "object"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        }
+      },
+      "required": [
+        "number"
+      ],
+      "title": "Season",
+      "type": "object"
+    },
+    "SerializedDownloadClientConformance": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "contract_version": {
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "environment": {
+          "items": {
+            "$ref": "#/$defs/EnvironmentVariableSpec"
+          },
+          "title": "Environment",
+          "type": "array"
+        },
+        "manifest_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Manifest Sha256",
+          "type": "string"
+        },
+        "missing_configuration": {
+          "$ref": "#/$defs/SerializedMissingConfiguration"
+        },
+        "module_id": {
+          "maxLength": 100,
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+          "title": "Module Id",
+          "type": "string"
+        },
+        "module_kind": {
+          "const": "download-client",
+          "title": "Module Kind",
+          "type": "string"
+        },
+        "module_version": {
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
+          "title": "Module Version",
+          "type": "string"
+        },
+        "redaction_markers": {
+          "items": {
+            "$ref": "#/$defs/RedactionMarker"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "Redaction Markers",
+          "type": "array"
+        },
+        "redaction_probes": {
+          "$ref": "#/$defs/RedactionProbeSet"
+        },
+        "schema_version": {
+          "const": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "sdk_compatibility": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Sdk Compatibility",
+          "type": "string"
+        },
+        "stable_failures": {
+          "items": {
+            "$ref": "#/$defs/StableFailureCase"
+          },
+          "minItems": 1,
+          "title": "Stable Failures",
+          "type": "array"
+        },
+        "success": {
+          "$ref": "#/$defs/DownloadSuccessCase"
+        }
+      },
+      "required": [
+        "schema_version",
+        "module_id",
+        "module_version",
+        "sdk_compatibility",
+        "contract_version",
+        "manifest_sha256",
+        "capabilities",
+        "environment",
+        "missing_configuration",
+        "stable_failures",
+        "redaction_markers",
+        "redaction_probes",
+        "module_kind",
+        "success"
+      ],
+      "title": "SerializedDownloadClientConformance",
+      "type": "object"
+    },
+    "SerializedMetadataProviderConformance": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "contract_version": {
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "environment": {
+          "items": {
+            "$ref": "#/$defs/EnvironmentVariableSpec"
+          },
+          "title": "Environment",
+          "type": "array"
+        },
+        "manifest_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Manifest Sha256",
+          "type": "string"
+        },
+        "missing_configuration": {
+          "$ref": "#/$defs/SerializedMissingConfiguration"
+        },
+        "module_id": {
+          "maxLength": 100,
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+          "title": "Module Id",
+          "type": "string"
+        },
+        "module_kind": {
+          "const": "metadata-provider",
+          "title": "Module Kind",
+          "type": "string"
+        },
+        "module_version": {
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
+          "title": "Module Version",
+          "type": "string"
+        },
+        "redaction_markers": {
+          "items": {
+            "$ref": "#/$defs/RedactionMarker"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "Redaction Markers",
+          "type": "array"
+        },
+        "redaction_probes": {
+          "$ref": "#/$defs/RedactionProbeSet"
+        },
+        "schema_version": {
+          "const": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "sdk_compatibility": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Sdk Compatibility",
+          "type": "string"
+        },
+        "stable_failures": {
+          "items": {
+            "$ref": "#/$defs/StableFailureCase"
+          },
+          "minItems": 1,
+          "title": "Stable Failures",
+          "type": "array"
+        },
+        "success": {
+          "$ref": "#/$defs/MetadataSuccessCase"
+        }
+      },
+      "required": [
+        "schema_version",
+        "module_id",
+        "module_version",
+        "sdk_compatibility",
+        "contract_version",
+        "manifest_sha256",
+        "capabilities",
+        "environment",
+        "missing_configuration",
+        "stable_failures",
+        "redaction_markers",
+        "redaction_probes",
+        "module_kind",
+        "success"
+      ],
+      "title": "SerializedMetadataProviderConformance",
+      "type": "object"
+    },
+    "SerializedMissingConfiguration": {
+      "discriminator": {
+        "mapping": {
+          "False": "#/$defs/ConfigurationFreeCase",
+          "True": "#/$defs/MissingConfigurationCase"
+        },
+        "propertyName": "applicable"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/MissingConfigurationCase"
+        },
+        {
+          "$ref": "#/$defs/ConfigurationFreeCase"
+        }
+      ]
+    },
+    "SerializedReleaseProviderConformance": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "contract_version": {
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "environment": {
+          "items": {
+            "$ref": "#/$defs/EnvironmentVariableSpec"
+          },
+          "title": "Environment",
+          "type": "array"
+        },
+        "manifest_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Manifest Sha256",
+          "type": "string"
+        },
+        "missing_configuration": {
+          "$ref": "#/$defs/SerializedMissingConfiguration"
+        },
+        "module_id": {
+          "maxLength": 100,
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+          "title": "Module Id",
+          "type": "string"
+        },
+        "module_kind": {
+          "const": "release-provider",
+          "title": "Module Kind",
+          "type": "string"
+        },
+        "module_version": {
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
+          "title": "Module Version",
+          "type": "string"
+        },
+        "redaction_markers": {
+          "items": {
+            "$ref": "#/$defs/RedactionMarker"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "Redaction Markers",
+          "type": "array"
+        },
+        "redaction_probes": {
+          "$ref": "#/$defs/RedactionProbeSet"
+        },
+        "schema_version": {
+          "const": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "sdk_compatibility": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Sdk Compatibility",
+          "type": "string"
+        },
+        "stable_failures": {
+          "items": {
+            "$ref": "#/$defs/StableFailureCase"
+          },
+          "minItems": 1,
+          "title": "Stable Failures",
+          "type": "array"
+        },
+        "success": {
+          "$ref": "#/$defs/ReleaseSuccessCase"
+        }
+      },
+      "required": [
+        "schema_version",
+        "module_id",
+        "module_version",
+        "sdk_compatibility",
+        "contract_version",
+        "manifest_sha256",
+        "capabilities",
+        "environment",
+        "missing_configuration",
+        "stable_failures",
+        "redaction_markers",
+        "redaction_probes",
+        "module_kind",
+        "success"
+      ],
+      "title": "SerializedReleaseProviderConformance",
+      "type": "object"
+    },
+    "SerializedReleaseResult": {
+      "additionalProperties": false,
+      "properties": {
+        "selection_ref": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "title": "Selection Ref",
+          "type": "string"
+        },
+        "snapshot": {
+          "$ref": "#/$defs/SerializedSafeReleaseSnapshot"
+        }
+      },
+      "required": [
+        "selection_ref",
+        "snapshot"
+      ],
+      "title": "SerializedReleaseResult",
+      "type": "object"
+    },
+    "SerializedResolvedArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/ArtifactDescriptor"
+        },
+        "selection_ref": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "title": "Selection Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "selection_ref",
+        "artifact"
+      ],
+      "title": "SerializedResolvedArtifact",
+      "type": "object"
+    },
+    "SerializedSafeReleaseSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "guid": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Guid"
+        },
+        "indexer": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Indexer",
+          "type": "string"
+        },
+        "infohash": {
+          "anyOf": [
+            {
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Infohash"
+        },
+        "source_page_url": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Page Url"
+        },
+        "title": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "indexer"
+      ],
+      "title": "SerializedSafeReleaseSnapshot",
+      "type": "object"
+    },
+    "StableFailureCase": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/ModuleErrorData"
+        },
+        "operation": {
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "title": "Operation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "error"
+      ],
+      "title": "StableFailureCase",
+      "type": "object"
+    },
+    "SubmissionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "correlation": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Correlation",
+          "type": "string"
+        },
+        "external_task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "External Task Id"
+        }
+      },
+      "required": [
+        "accepted",
+        "correlation"
+      ],
+      "title": "SubmissionResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.media-finder.dev/module-sdk/v1/conformance.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "discriminator": {
+    "mapping": {
+      "download-client": "#/$defs/SerializedDownloadClientConformance",
+      "metadata-provider": "#/$defs/SerializedMetadataProviderConformance",
+      "release-provider": "#/$defs/SerializedReleaseProviderConformance"
+    },
+    "propertyName": "module_kind"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/SerializedMetadataProviderConformance"
+    },
+    {
+      "$ref": "#/$defs/SerializedReleaseProviderConformance"
+    },
+    {
+      "$ref": "#/$defs/SerializedDownloadClientConformance"
+    }
+  ],
+  "title": "Media Finder Serialized Module Conformance v1",
+  "type": "object"
+}

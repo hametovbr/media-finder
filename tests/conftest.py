@@ -2,28 +2,26 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
-
-from media_finder.db import create_database, migrate_to_head, session_factory
-from media_finder.sdk.errors import ModuleError
-from media_finder.sdk.types import (
-    Attribution,
+from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
+from media_finder_sdk import (
     CorrelationResult,
+    DownloadArtifact,
     DownloadDestination,
-    ExportHeader,
-    ExportWarning,
     MediaKind,
+    MetadataIdentity,
+    MetadataSearchQuery,
     MetadataSearchResult,
+    ModuleError,
+    ModuleFailureCategory,
     ModuleKind,
     ModuleManifest,
     NormalizedMetadata,
     Provenance,
-    RetentionAction,
-    RetentionActionKind,
-    RetentionPolicy,
+    ProviderPayload,
     SubmissionResult,
 )
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture
@@ -42,78 +40,83 @@ class EmptyConfig(BaseModel):
 
 class FakeProvider:
     manifest = ModuleManifest(
-        key="fixture-provider",
-        version="1.0.0",
+        module_id="fixture-provider",
+        module_kind=ModuleKind.METADATA_PROVIDER,
+        module_version="1.0.0",
+        sdk_compatibility=">=1,<2",
         contract_version="1",
         name_key="fixture.provider",
-        capabilities=frozenset({"movie", "search", "fetch", "normalize"}),
+        capabilities=frozenset({"search", "fetch", "normalize"}),
+        translation_keys=frozenset({"fixture.provider"}),
     )
-    config_model = EmptyConfig
 
-    def validate_config(self) -> None:
-        EmptyConfig()
+    def validate(self) -> None:
+        return None
 
-    def search(self, query: str, locale: str) -> list[MetadataSearchResult]:
-        return [
+    def search(self, query: MetadataSearchQuery) -> tuple[MetadataSearchResult, ...]:
+        return (
             MetadataSearchResult(
-                provider_key=self.manifest.key,
+                provider_id=self.manifest.module_id,
                 external_id="1",
-                kind=MediaKind.MOVIE,
-                title=query,
-                locale=locale,
-            )
-        ]
-
-    def fetch(self, kind: str, external_id: str, locale: str) -> dict:
-        if external_id == "invalid":
-            raise ModuleError(code="fixture_identity_invalid", message="Fixture identity invalid")
-        return {"title": "Fixture"}
-
-    def normalize(self, payload, kind: str, external_id: str, locale: str) -> NormalizedMetadata:
-        return NormalizedMetadata(
-            kind=MediaKind(kind),
-            titles={locale: "Fixture"},
-            provenance=Provenance(
-                provider_key=self.manifest.key, external_id=external_id, locale=locale
+                media_kind=MediaKind.MOVIE,
+                title=query.query,
+                locale=query.locale,
             ),
         )
 
-    def attribution(self) -> Attribution:
-        return Attribution(provider_key=self.manifest.key, notice="Fixture data")
+    def fetch(self, identity: MetadataIdentity) -> ProviderPayload:
+        if identity.external_id == "invalid":
+            raise ModuleError(
+                category=ModuleFailureCategory.INVALID_INPUT,
+                code="fixture_identity_invalid",
+            )
+        return ProviderPayload(data={"title": "Fixture"})
 
-    def retention_for(self, created_at) -> RetentionPolicy:
-        return RetentionPolicy()
-
-    def plan_retention(self, policy, now) -> RetentionAction:
-        return RetentionAction(kind=RetentionActionKind.NONE)
-
-    def export_warning(self, policy, now) -> ExportWarning | None:
-        return ExportWarning(
-            headers=(ExportHeader(name="Warning", value="299 Media Finder fixture"),)
+    def normalize(
+        self,
+        payload: ProviderPayload,
+        identity: MetadataIdentity,
+    ) -> NormalizedMetadata:
+        del payload
+        return NormalizedMetadata(
+            kind=identity.media_kind,
+            titles={identity.locale: "Fixture"},
+            provenance=Provenance(
+                provider_id=self.manifest.module_id,
+                external_id=identity.external_id,
+                locale=identity.locale,
+            ),
         )
+
+    def close(self) -> None:
+        return None
 
 
 class FakeClient:
     manifest = ModuleManifest(
-        key="fixture-client",
-        version="1.0.0",
+        module_id="fixture-client",
+        module_kind=ModuleKind.DOWNLOAD_CLIENT,
+        module_version="1.0.0",
+        sdk_compatibility=">=1,<2",
         contract_version="1",
         name_key="fixture.client",
-        kind=ModuleKind.DOWNLOAD_CLIENT,
         capabilities=frozenset({"magnet", "torrent"}),
+        translation_keys=frozenset({"fixture.client"}),
     )
-    config_model = EmptyConfig
 
     def __init__(self) -> None:
         self.tasks: dict[str, str] = {}
 
-    def validate_config(self) -> None:
-        EmptyConfig()
+    def validate(self) -> None:
+        return None
 
-    def list_destinations(self) -> list[DownloadDestination]:
-        return [DownloadDestination(key="fixture", label="Fixture")]
+    def list_destinations(self) -> tuple[DownloadDestination, ...]:
+        return (DownloadDestination(key="fixture", label="Fixture"),)
 
-    def submit(self, artifact, destination: str, correlation: str) -> SubmissionResult:
+    def submit(
+        self, artifact: DownloadArtifact, destination: str, correlation: str
+    ) -> SubmissionResult:
+        del artifact
         self.tasks[correlation] = destination
         return SubmissionResult(accepted=True, external_task_id="1", correlation=correlation)
 
@@ -123,6 +126,9 @@ class FakeClient:
             correlation=correlation,
             external_task_id="1" if correlation in self.tasks else None,
         )
+
+    def close(self) -> None:
+        return None
 
 
 @pytest.fixture

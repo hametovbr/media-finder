@@ -2,13 +2,14 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
+from catalog_fixtures import CatalogFixture as CatalogService
+from catalog_fixtures import RevisionInput
+from gateway_fixtures import create_gateway
 from media_finder_control import ControlFailure, Locale, PageRequest
+from media_finder_core.catalog.persistence import CollectionRecord as Collection
+from media_finder_sdk import MediaKind, NormalizedMetadata, Provenance
+from media_finder_server.control_gateway import CursorCodec
 from sqlalchemy.orm import Session, sessionmaker
-
-from media_finder.control_gateway import BackendControlGateway, CursorCodec
-from media_finder.domain import CatalogService, RevisionInput
-from media_finder.models import Collection
-from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
 
 
 def _sessions(database: Session) -> sessionmaker[Session]:
@@ -45,9 +46,7 @@ def test_cursor_is_signed_and_bound_to_resource_filters_and_position() -> None:
 def test_gateway_pages_collections_with_default_limit_and_no_repeats(database: Session) -> None:
     database.add_all(Collection(name=f"Collection {number:03}") for number in range(105))
     database.commit()
-    gateway = BackendControlGateway(
-        sessions=_sessions(database), cursor_secret=b"cursor-secret-for-tests"
-    )
+    gateway = create_gateway(database)
 
     async def scenario() -> None:
         first = await gateway.list_collections(page=PageRequest(), archived=False)
@@ -80,7 +79,7 @@ def test_gateway_pages_catalog_in_stable_order(database: Session) -> None:
                     kind=MediaKind.MOVIE,
                     titles={"en": title},
                     provenance=Provenance(
-                        provider_key="fixture",
+                        provider_id="fixture",
                         external_id=str(number),
                         locale="en",
                         fetched_at=datetime(2025, 1, 1, tzinfo=UTC),
@@ -88,9 +87,7 @@ def test_gateway_pages_catalog_in_stable_order(database: Session) -> None:
                 )
             ),
         )
-    gateway = BackendControlGateway(
-        sessions=_sessions(database), cursor_secret=b"cursor-secret-for-tests"
-    )
+    gateway = create_gateway(database)
 
     async def scenario() -> None:
         first = await gateway.list_media_items(

@@ -1,0 +1,24 @@
+module_id = "prowlarr"
+module_kind = "release-provider"
+module_version = "0.1.0"
+sdk_compatibility = ">=1,<2"
+contract_version = "1"
+name_key = "module.prowlarr.name"
+capabilities = ["search", "resolve", "magnet", "torrent"]
+translation_keys = [
+  "module.prowlarr.name",
+  "module.prowlarr.environment.url",
+  "module.prowlarr.environment.api_key",
+]
+
+[[environment]]
+name = "PROWLARR_URL"
+required = true
+secret = false
+description_key = "module.prowlarr.environment.url"
+
+[[environment]]
+name = "PROWLARR_API_KEY"
+required = true
+secret = true
+description_key = "module.prowlarr.environment.api_key"

@@ -1,0 +1,17 @@
+[project]
+name = "media-finder-release-prowlarr"
+version = "0.1.0"
+description = "Prowlarr release provider module for Media Finder"
+requires-python = ">=3.13,<3.14"
+license = "MIT"
+dependencies = [
+  "httpx>=0.28,<1",
+  "media-finder-module-sdk",
+]
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/media_finder_release_prowlarr"]
