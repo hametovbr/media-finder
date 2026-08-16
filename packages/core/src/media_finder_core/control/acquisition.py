@@ -16,7 +16,11 @@ from media_finder_control.models import (
 )
 from media_finder_sdk import DownloadClient, ReleaseSearchFilter, ReleaseSearchQuery
 
-from media_finder_core.acquisition.commands import AcquisitionCommands, ReleaseSelectionService
+from media_finder_core.acquisition.commands import (
+    AcquisitionCommands,
+    ReleaseSelectionExpired,
+    ReleaseSelectionService,
+)
 from media_finder_core.acquisition.models import (
     AcquisitionRequest,
     AcquisitionSnapshot,
@@ -171,6 +175,8 @@ class AcquisitionControlService:
                     ]
                 },
             ) from None
+        except ReleaseSelectionExpired:
+            raise ControlFailure(code="selection_expired", status=410) from None
         except (ControlFailure, ControlPortError):
             raise
         except Exception as error:

@@ -16,11 +16,11 @@ from catalog_fixtures import CatalogFixture as CatalogService
 from catalog_fixtures import RevisionInput
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, Response
-from media_finder_builtin_ui.fake import FakeControlGateway
+from gateway_fixtures import create_gateway
 from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder_core.acquisition.persistence import AcquisitionRecord as Acquisition
 from media_finder_core.catalog.persistence import MediaItemRecord as MediaItem
-from media_finder_core.platform.database import migrate_to_head, session_factory
+from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
 from media_finder_sdk import (
     AttributionSpec,
     CorrelationResult,
@@ -393,10 +393,26 @@ def unavailable_runtime_browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 @pytest.fixture
-def external_ui_browser_site():
+def external_ui_browser_site(tmp_path: Path):
+    database_url = f"sqlite:///{tmp_path / 'external-ui.db'}"
+    engine = create_database(database_url)
+    migrate_to_head(database_url)
+    sessions = session_factory(engine)
+    releases = ReleaseSelectionService(
+        provider=BrowserReleaseProvider(),
+        cache=ReleaseSelectionCache(),
+    )
+    client = BrowserClient("external")
+    with sessions() as session:
+        gateway = create_gateway(
+            session,
+            metadata_provider=BrowserProvider("external-provider"),
+            release_selections=releases,
+            download_client=client,
+        )
     frontend = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     control = create_control_app(
-        gateway=FakeControlGateway(),
+        gateway=gateway,
         security=BackendBrowserSecurity(secret=b"external-ui-session-secret-at-least-32"),
     )
 
@@ -405,40 +421,55 @@ def external_ui_browser_site():
         return """<!doctype html><html lang="en"><body><main id="state">starting</main>
         <script>
         (async () => {
-          const session = await fetch('/api/control/v1/session').then(r => r.json());
+          const control = async (path, options) => {
+            const response = await fetch(path, options);
+            if (!response.ok) {
+              throw new Error('control request failed: ' + response.status + ' ' + path);
+            }
+            return response.json();
+          };
+          const session = await control('/api/control/v1/session');
           const headers = {'Content-Type': 'application/json',
                            'X-CSRF-Token': session.csrf_token};
-          const catalog = await fetch('/api/control/v1/media-items').then(r => r.json());
-          const search = await fetch('/api/control/v1/metadata-searches', {
+          const initialCatalog = await control('/api/control/v1/media-items');
+          const search = await control('/api/control/v1/metadata-searches', {
             method: 'POST', headers, body: JSON.stringify({query: 'Example', locale: 'en'})
-          }).then(r => r.json());
-          await fetch('/api/control/v1/metadata-selections/' + search[0].token, {
+          });
+          const selected = await control('/api/control/v1/metadata-selections/' +
+            search[0].token, {
             method: 'POST', headers, body: JSON.stringify({})
           });
-          await fetch('/api/control/v1/manual-imports', {
+          const manual = await control('/api/control/v1/manual-imports', {
             method: 'POST', headers, body: JSON.stringify({document: {
               schema_version: '1', kind: 'movie', locale: 'en',
               titles: {en: 'External Manual'}
             }})
           });
-          const releases = await fetch('/api/control/v1/media-items/movie-1/release-searches', {
+          const catalog = await control('/api/control/v1/media-items');
+          const manualListed = catalog.items.some(item => item.id === manual.id);
+          const releases = await control('/api/control/v1/media-items/' + selected.id +
+            '/release-searches', {
             method: 'POST', headers, body: JSON.stringify({query: 'Example'})
-          }).then(r => r.json());
-          const destinations = await fetch(
+          });
+          const destinations = await control(
             '/api/control/v1/download-destinations'
-          ).then(r => r.json());
-          const acquisition = await fetch('/api/control/v1/acquisitions', {
-            method: 'POST', headers, body: JSON.stringify({media_item_id: 'movie-1',
+          );
+          const acquisition = await control('/api/control/v1/acquisitions', {
+            method: 'POST', headers, body: JSON.stringify({media_item_id: selected.id,
               release_token: releases[0].token, destination: destinations[0].key,
               idempotency_key: 'external-ui-attempt'})
-          }).then(r => r.json());
-          const reconciled = await fetch(
+          });
+          const reconciled = await control(
             '/api/control/v1/acquisitions/' + acquisition.id + '/reconcile',
             {method: 'POST', headers, body: JSON.stringify({})}
-          ).then(r => r.json());
+          );
           document.querySelector('#state').textContent =
-              catalog.items[0].title + '|' + reconciled.status;
-        })().catch(error => document.querySelector('#state').textContent = 'error:' + error);
+              'catalog:' + initialCatalog.items.length + '->' + catalog.items.length +
+              '|manual:' + manual.metadata.titles.en + '|manual-listed:' + manualListed +
+              '|metadata:' + selected.metadata.titles.en +
+              '|acquisition:' + reconciled.status;
+        })().catch(error => document.querySelector('#state').textContent =
+            'error:' + error.message);
         </script></body></html>"""
 
     frontend.mount("/api/control", control)
@@ -456,6 +487,9 @@ def external_ui_browser_site():
     yield BrowserSite(f"http://127.0.0.1:{port}", frontend, "")
     server.should_exit = True
     thread.join(timeout=10)
+    gateway._test_release_selections.close()  # type: ignore[attr-defined]
+    gateway._test_runtime.close()  # type: ignore[attr-defined]
+    engine.dispose()
 
 
 def _strict_page(browser: Browser, *, locale: str = "en-US") -> tuple[Page, list[str]]:
@@ -502,12 +536,41 @@ def test_minimal_same_origin_external_ui_uses_only_control_api(
 ) -> None:
     page, failures = _strict_page(browser)
     page.goto(external_ui_browser_site.url)
-    page.locator("#state").filter(has_text="Example Movie|submitted").wait_for()
+    page.locator("#state").filter(
+        has_text=(
+            "catalog:0->2|manual:External Manual|manual-listed:true|"
+            "metadata:Shared Title|acquisition:submitted"
+        )
+    ).wait_for()
     assert failures == []
     assert page.evaluate(
         "performance.getEntriesByType('resource').every(r => !r.name.includes('/api/v1'))"
     )
     page.context.close()
+
+
+def test_minimal_same_origin_external_ui_stops_on_non_ok_control_response(
+    browser: Browser,
+    external_ui_browser_site: BrowserSite,
+) -> None:
+    context = browser.new_context()
+    context.add_init_script(
+        """
+        const nativeFetch = window.fetch.bind(window);
+        window.fetch = (resource, options) => {
+          if (String(resource).endsWith('/api/control/v1/media-items')) {
+            return Promise.resolve(new Response(JSON.stringify({items: []}), {
+              status: 503, headers: {'Content-Type': 'application/json'}
+            }));
+          }
+          return nativeFetch(resource, options);
+        };
+        """
+    )
+    page = context.new_page()
+    page.goto(external_ui_browser_site.url)
+    page.locator("#state").filter(has_text="error:control request failed: 503").wait_for()
+    context.close()
 
 
 def test_keyboard_structured_manual_edit_specials_and_announced_completion(

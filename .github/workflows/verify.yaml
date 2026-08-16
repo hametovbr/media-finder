@@ -137,6 +137,7 @@ jobs:
           tests/test_control_api_catalog.py
           tests/test_control_api_metadata.py
           tests/test_control_api_security.py
+          tests/test_control_conformance_real.py
           tests/test_control_openapi.py
           tests/test_processor_openapi.py
           tests/test_module_registry_composition.py

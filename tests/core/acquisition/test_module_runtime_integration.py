@@ -186,7 +186,8 @@ def test_first_party_round_trip_uses_only_typed_module_runtime_and_exact_version
                     idempotency_key="typed-runtime-consumed-token",
                 )
             )
-        assert consumed.value.error.code == "release_search_token_expired"
+        assert consumed.value.status == 410
+        assert consumed.value.error.code == "selection_expired"
         return first.id, releases[0].token
 
     try:

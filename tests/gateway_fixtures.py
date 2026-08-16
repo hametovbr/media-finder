@@ -7,6 +7,7 @@ from datetime import datetime
 
 from media_finder_core import ModuleRuntime
 from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
+from media_finder_core.control import ManualDraft
 from media_finder_core.platform import EphemeralCache
 from media_finder_metadata_manual import registration as manual_registration
 from media_finder_sdk import (
@@ -15,6 +16,7 @@ from media_finder_sdk import (
     ExportWarning,
     MetadataProvider,
     MetadataProviderRegistration,
+    MetadataSearchResult,
     ModuleError,
     ModuleFailureCategory,
     ModuleKind,
@@ -103,6 +105,8 @@ def create_gateway(
     download_manifest: ModuleManifest | None = None,
     environment: Mapping[str, str] | None = None,
     build_version: str = "0.1.0",
+    metadata_selections: EphemeralCache[MetadataSearchResult] | None = None,
+    manual_drafts: EphemeralCache[ManualDraft] | None = None,
 ) -> BackendControlGateway:
     metadata = [manual_registration()]
     selected_metadata = (
@@ -169,8 +173,8 @@ def create_gateway(
                 if registration.manifest.attribution is not None
             },
         },
-        metadata_selections=EphemeralCache(),
-        manual_drafts=EphemeralCache(),
+        metadata_selections=metadata_selections or EphemeralCache(),
+        manual_drafts=manual_drafts or EphemeralCache(),
         build_version=build_version,
     )
     gateway._test_runtime = runtime  # type: ignore[attr-defined]

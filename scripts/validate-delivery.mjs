@@ -293,6 +293,9 @@ function validateVerification(root, verify, verifyText, failures) {
   const browserCommands = (verify.jobs?.browser?.steps ?? [])
     .map((step) => step.run ?? "")
     .join("\n");
+  const contractCommands = (verify.jobs?.contract?.steps ?? [])
+    .map((step) => step.run ?? "")
+    .join("\n");
   requireValue(
     failures,
     unitCommands.includes("packages/builtin-ui/tests/run_isolated.py unit"),
@@ -302,6 +305,11 @@ function validateVerification(root, verify, verifyText, failures) {
     failures,
     browserCommands.includes("packages/builtin-ui/tests/run_isolated.py browser"),
     ".github/workflows/verify.yaml: browser job must run the wheel-only built-in UI suite",
+  );
+  requireValue(
+    failures,
+    contractCommands.includes("tests/test_control_conformance_real.py"),
+    ".github/workflows/verify.yaml: contract job must run real browser-control conformance",
   );
   const testsPath = path.join(root, "tests");
   if (fs.existsSync(testsPath)) {

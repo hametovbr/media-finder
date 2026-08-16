@@ -379,6 +379,24 @@ def test_submit_persists_pending_first_pins_catalog_and_is_idempotent() -> None:
     assert context.provider.resolve_calls == 1
 
 
+def test_token_expiry_after_pending_creation_remains_a_persisted_internal_failure() -> None:
+    context = _services()
+    token = _token(context)
+    resolve = context.releases.resolve
+
+    def expire_before_resolution(selected_token: str):
+        context.releases.close()
+        return resolve(selected_token)
+
+    context.releases.resolve = expire_before_resolution
+
+    result = context.commands.submit(_request(token))
+
+    assert result.status is context.api.AcquisitionStatus.FAILED
+    assert result.failure_code == "release_search_token_expired"
+    assert context.store.get(result.id) == result
+
+
 def test_invalid_pinned_catalog_reference_has_no_acquisition_or_external_effect() -> None:
     context = _services()
     context.catalog.valid = False
