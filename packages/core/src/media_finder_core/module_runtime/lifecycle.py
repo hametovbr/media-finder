@@ -1,4 +1,4 @@
-"""Core-owned lifecycle for statically registered trusted modules."""
+"""Construction, caching, and lifecycle ownership for module capabilities."""
 
 from __future__ import annotations
 
@@ -12,15 +12,16 @@ from media_finder_sdk import (
     MetadataEditor,
     MetadataProvider,
     MetadataRetentionPolicy,
-    ModuleError,
-    ModuleFailureCategory,
     ReleaseProvider,
     StaticModuleRegistry,
-    resolve_module_environment,
 )
 
+from .configuration import _EnvironmentResolver
+from .diagnostics import _metadata_editor_unsupported, _module_runtime_closed
+from .registry import _RegistryAccess
 
-class Closeable(Protocol):
+
+class _Closeable(Protocol):
     def close(self) -> None: ...
 
 
@@ -33,20 +34,20 @@ class ModuleRuntime:
         registry: StaticModuleRegistry,
         environment: Mapping[str, str],
     ) -> None:
-        self._registry = registry
-        self._environment = dict(environment)
+        self._registrations = _RegistryAccess(registry)
+        self._environment = _EnvironmentResolver(environment)
         self._metadata: dict[str, MetadataProvider] = {}
         self._editors: dict[str, MetadataEditor] = {}
         self._retention: dict[str, MetadataRetentionPolicy] = {}
         self._release: dict[str, ReleaseProvider] = {}
         self._download: dict[str, DownloadClient] = {}
-        self._owned: list[Closeable] = []
+        self._owned: list[_Closeable] = []
         self._lock = RLock()
         self._closed = False
 
     @property
     def registry(self) -> StaticModuleRegistry:
-        return self._registry
+        return self._registrations.registry
 
     def metadata_provider(self, module_id: str) -> MetadataProvider:
         with self._lock:
@@ -54,11 +55,8 @@ class ModuleRuntime:
             cached = self._metadata.get(module_id)
             if cached is not None:
                 return cached
-            registration = self._registry.metadata.get(module_id)
-            if registration is None:
-                raise _not_found()
-        environment = resolve_module_environment(registration.manifest, self._environment)
-        instance = registration.build(environment)
+            registration = self._registrations.metadata(module_id)
+        instance = registration.build(self._environment.resolve(registration.manifest))
         try:
             instance.validate()
         except BaseException:
@@ -72,16 +70,11 @@ class ModuleRuntime:
             cached = self._editors.get(module_id)
             if cached is not None:
                 return cached
-            registration = self._registry.metadata.get(module_id)
-            if registration is None:
-                raise _not_found()
+            registration = self._registrations.metadata(module_id)
             factory = registration.editor
             if factory is None:
-                raise ModuleError(
-                    category=ModuleFailureCategory.UNSUPPORTED,
-                    code="metadata_editor_unsupported",
-                )
-        instance = factory(resolve_module_environment(registration.manifest, self._environment))
+                raise _metadata_editor_unsupported()
+        instance = factory(self._environment.resolve(registration.manifest))
         return self._adopt(module_id, self._editors, instance)
 
     def retention_policy(self, module_id: str) -> MetadataRetentionPolicy:
@@ -90,9 +83,7 @@ class ModuleRuntime:
             cached = self._retention.get(module_id)
             if cached is not None:
                 return cached
-            registration = self._registry.metadata.get(module_id)
-            if registration is None:
-                raise _not_found()
+            registration = self._registrations.metadata(module_id)
         instance = registration.retention()
         return self._adopt(module_id, self._retention, instance)
 
@@ -102,11 +93,8 @@ class ModuleRuntime:
             cached = self._release.get(module_id)
             if cached is not None:
                 return cached
-            registration = self._registry.release.get(module_id)
-            if registration is None:
-                raise _not_found()
-        environment = resolve_module_environment(registration.manifest, self._environment)
-        instance = registration.build(environment)
+            registration = self._registrations.release(module_id)
+        instance = registration.build(self._environment.resolve(registration.manifest))
         try:
             instance.validate()
         except BaseException:
@@ -120,11 +108,8 @@ class ModuleRuntime:
             cached = self._download.get(module_id)
             if cached is not None:
                 return cached
-            registration = self._registry.download.get(module_id)
-            if registration is None:
-                raise _not_found()
-        environment = resolve_module_environment(registration.manifest, self._environment)
-        instance = registration.build(environment)
+            registration = self._registrations.download(module_id)
+        instance = registration.build(self._environment.resolve(registration.manifest))
         try:
             instance.validate()
         except BaseException:
@@ -132,7 +117,7 @@ class ModuleRuntime:
             raise
         return self._adopt(module_id, self._download, instance)
 
-    def _adopt[T: Closeable](self, module_id: str, cache: dict[str, T], instance: T) -> T:
+    def _adopt[T: _Closeable](self, module_id: str, cache: dict[str, T], instance: T) -> T:
         with self._lock:
             if self._closed:
                 selected = None
@@ -145,10 +130,7 @@ class ModuleRuntime:
         _close_failed_attempt(instance)
         if selected is not None:
             return selected
-        raise ModuleError(
-            category=ModuleFailureCategory.UNAVAILABLE,
-            code="module_runtime_closed",
-        )
+        raise _module_runtime_closed()
 
     def close(self) -> None:
         with self._lock:
@@ -174,22 +156,10 @@ class ModuleRuntime:
 
     def _require_open(self) -> None:
         if self._closed:
-            raise ModuleError(
-                category=ModuleFailureCategory.UNAVAILABLE,
-                code="module_runtime_closed",
-            )
+            raise _module_runtime_closed()
 
 
-def _not_found() -> ModuleError:
-    return ModuleError(
-        category=ModuleFailureCategory.INVALID_REQUEST,
-        code="module_not_found",
-    )
-
-
-def _close_failed_attempt(
-    instance: Closeable,
-) -> None:
+def _close_failed_attempt(instance: _Closeable) -> None:
     # Construction/validation failure remains the actionable root cause.
     with suppress(BaseException):
         instance.close()
