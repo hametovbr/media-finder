@@ -1,0 +1,4 @@
+interface:
+  display_name: "Debug Media Finder Failures"
+  short_description: "Trace failures to the correct boundary"
+  default_prompt: "Use $debugging-media-finder-failures to diagnose this Media Finder failure before fixing it."

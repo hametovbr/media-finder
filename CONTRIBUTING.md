@@ -20,9 +20,31 @@ OpenSpec is the source of truth for product behavior and architecture. Start any
 
 Do not manually edit generated `.agents/skills/openspec-*` files. Regenerate them with the pinned CLI when the OpenSpec profile changes.
 
+## Project skills
+
+The checked-in [project skill catalog](docs/agent-skills.md) is the portable
+workflow for architecture, implementation, debugging, review, contracts, module
+authoring, verification, publication, and skill maintenance. `AGENTS.md` contains
+the trigger table and stable invariants; individual `SKILL.md` files contain the
+conditional procedures. Do not copy their bodies into contribution docs.
+
+Use `making-pragmatic-media-finder-decisions` before approving a new ownership
+level and again during final subtraction review. Use
+`developing-media-finder-changes` for implementation,
+`debugging-media-finder-failures` for failures,
+`reviewing-media-finder-changes` for review, and
+`evolving-media-finder-contracts` for public representations. Use
+`maintaining-media-finder-skills` when changing the catalog. Verification,
+commit/push/PR/merge, image publication, and stable release work use
+`verifying-and-publishing-media-finder`; it derives release identifiers from the
+approved release context rather than embedding them in reusable guidance.
+
 ## Extension modules
 
-Before adding a metadata provider, use `.agents/skills/adding-metadata-provider`. Before adding a download client, use `.agents/skills/adding-download-client`. Release-provider changes follow the same OpenSpec, manifest, fixture, and conformance workflow. Before changing normalized metadata, use `.agents/skills/evolving-metadata-schema`.
+Before adding or changing a module, use the matching project skill:
+`adding-metadata-provider`, `adding-release-provider`, or
+`adding-download-client`. Before changing normalized metadata, use
+`evolving-metadata-schema`.
 
 The [module-authoring guide](docs/module-authoring.md) describes the package,
 manifest, registration, lifecycle, conformance, and review boundaries shared by

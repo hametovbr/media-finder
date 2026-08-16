@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verify and Publish Media Finder"
+  short_description: "Bind verification and releases to exact SHAs"
+  default_prompt: "Use $verifying-and-publishing-media-finder to verify and publish this Media Finder candidate."

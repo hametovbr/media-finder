@@ -64,6 +64,49 @@ Use the installed OpenSpec skills as follows:
 
 Planning and implementation are separate authorization boundaries. Completing `openspec-propose` does not authorize implementation; implementation begins only through `openspec-apply-change` after the planning artifacts are approved.
 
+Project-local skills under `.agents/skills` are the self-contained Media Finder
+workflow. Subject to system, developer, and explicit user instructions, use them
+before overlapping workstation-local skills. A clean checkout must be sufficient;
+never depend on a personal skill path or installation.
+
+## Project skill routing
+
+| Work | Required project skill |
+|---|---|
+| Architecture, ownership, compatibility, or increased complexity | `making-pragmatic-media-finder-decisions` |
+| Implementing an approved change or moving a business path | `developing-media-finder-changes` |
+| Test, CI, packaging, migration, browser, image, or runtime failure | `debugging-media-finder-failures` |
+| Design, implementation, PR, auxiliary mechanism, or release review | `reviewing-media-finder-changes` |
+| API, SDK, schema, manifest, bound, error, or serialized-contract change | `evolving-media-finder-contracts` |
+| Metadata provider | `adding-metadata-provider` |
+| Release provider | `adding-release-provider` |
+| Download client | `adding-download-client` |
+| Normalized metadata or stored schema evolution | `evolving-metadata-schema` |
+| Creating, editing, routing, or evaluating project skills | `maintaining-media-finder-skills` |
+| Verification, commit, PR, merge, image publication, or stable release | `verifying-and-publishing-media-finder` |
+
+Use the applicable OpenSpec lifecycle skill together with the routed skill. The
+OpenSpec skills are generated and never manually edited.
+
+## Complexity and compatibility circuit breaker
+
+Use the lowest sufficient rung:
+
+`configuration → script/adapter → module → package → process/service`
+
+If implementation crosses an approved rung, adds an owner or business path, or
+expands public scope, stop apply. Use `openspec-update-change`, compare simpler
+alternatives, and obtain renewed approval; earlier apply authorization no longer
+covers the escalated design. Prefer direct execution or maintained structured
+tools over interpreting source text. Custom parsers, interpreters, platforms, or
+services for auxiliary work require their own approved requirement and ownership
+decision.
+
+Every test must trace to an approved scenario or a reproduced defect in approved
+behavior. Mutation tests do not create requirements. Before preserving or
+breaking compatibility, inspect actual users, stored data, external consumers,
+published contracts, and rollout coordination; neither answer is assumed.
+
 During `openspec-apply-change`, use test-driven development for every behavior or contract change:
 
 1. Add or update a focused test that expresses the approved requirement.
@@ -73,14 +116,5 @@ During `openspec-apply-change`, use test-driven development for every behavior o
 5. Run the relevant regression and repository verification gates.
 
 If implementation exposes a missing or incorrect requirement or design decision, stop implementation and use `openspec-update-change`. Do not silently change scope, defer specified behavior, or modify planning artifacts ad hoc.
-
-The project-specific skills `adding-metadata-provider`, `adding-release-provider`,
-`adding-download-client`, and `evolving-metadata-schema` are additional domain
-guardrails. Use them together with the applicable OpenSpec lifecycle skill; they
-never replace proposal, apply, sync, or archive workflows. Update manifests,
-executable and serialized conformance, deterministic artifacts, architecture
-checks, and fixtures together with behavior.
-
-Never edit generated `.agents/skills/openspec-*` files manually; regenerate them with the pinned OpenSpec CLI.
 
 Before handoff, run `pnpm spec:validate` plus the format, lint, type, test, and production-build commands documented for the current project stage.

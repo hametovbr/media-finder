@@ -22,25 +22,38 @@ owns opaque browser selections, acquisition persistence, and artifact lifetime.
    environment declarations in `src/<package>/module.toml`. Factories receive
    only `ResolvedModuleEnvironment`, not `os.environ`, core services, database
    records, browser tokens, or UI objects.
-4. Keep torrent-only search bounded. Return SDK release DTOs and safe snapshots;
-   resolve only a core-held opaque selection into an in-memory magnet or torrent
-   artifact. Validate URL, result, string, and artifact bounds; map upstream
-   failures to safe `ModuleError` data and redact credentials, passkeys, URLs,
-   selections, and artifacts.
-5. Use deterministic fake transports and
+4. Bound every validation, search, intermediate resolve, magnet, and torrent
+   response before decoding or buffering. Enforce both declared and streamed
+   bytes, strict JSON/text, raw and returned result counts, private-selection
+   size, and artifact limits. Resolve only a core-held opaque selection into an
+   in-memory magnet or torrent artifact; do not retry ambiguous operations unless
+   an approved contract defines idempotency and reconciliation.
+5. Build snapshots with the SDK's canonical safe GUID, infohash, and public-page
+   rules. Runtime DTOs, executable conformance, serialized conformance, generated
+   schemas, and core defensive validation must accept and reject the same boundary
+   corpus. Map upstream failures to stable safe `ModuleError` data without
+   credentials, passkeys, sensitive URLs, selections, response bodies, or
+   artifacts.
+6. Keep logging lifecycle-safe. A module may redact its own records, but must not
+   install unowned process-global filters or handlers. Process-wide HTTP logging
+   policy belongs to the host lifespan with identity-owned cleanup. Test the
+   actual emitting logger names and ensure close is idempotent.
+7. Use deterministic fake transports and
    `assert_release_registration_conforms` for required configuration, bounded
-   search, safe snapshots, every declared artifact kind, standardized failures,
-   redaction, and idempotent double close. Prowlarr is a contract example, not a
-   template for its URL policy, API-key flow, parser, or error codes.
-6. Add hash-bound `fixtures/conformance.json` validated against
+   validation/search/resolve, safe snapshots, every declared artifact kind,
+   standardized failures, redaction/logging, and idempotent double close.
+   Prowlarr is a contract example, not a template for its URL policy, API-key
+   flow, parser, or error codes.
+8. Add hash-bound `fixtures/conformance.json` validated against
    `schemas/module-sdk/v1/conformance.schema.json`. Store only safe serialized
    descriptors; never serialize private selections, magnets, torrent bytes,
-   credentials, raw responses, or download URLs.
-7. Register the public registration explicitly in
+   credentials, raw responses, or download URLs. Bind deterministic runtime
+   outputs and failures to the same serialized expectations.
+9. Register the public registration explicitly in
    `apps/server/src/media_finder_server/modules.py`. If replacing acquisition
    behavior, change `SELECTED_RELEASE_MODULE_ID` explicitly in the same review;
    registration order must never select a provider.
-8. Run focused package and SDK tests, `pnpm module-conformance:test`,
+10. Run focused package and SDK tests, `pnpm module-conformance:test`,
    `pnpm module-conformance:validate`,
    `uv run pytest tests/architecture/test_package_boundaries.py tests/test_wheel_isolation.py`,
    format, lint, type, and `pnpm spec:validate`.

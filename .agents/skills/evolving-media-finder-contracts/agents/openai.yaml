@@ -1,0 +1,4 @@
+interface:
+  display_name: "Evolve Media Finder Contracts"
+  short_description: "Keep public contract representations aligned"
+  default_prompt: "Use $evolving-media-finder-contracts to change this Media Finder contract safely."

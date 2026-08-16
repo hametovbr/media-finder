@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Media Finder Changes"
+  short_description: "Review necessity before implementation detail"
+  default_prompt: "Use $reviewing-media-finder-changes to review this Media Finder change."
