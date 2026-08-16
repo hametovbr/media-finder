@@ -9,23 +9,28 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from urllib.parse import quote
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from media_finder_core.acquisition.persistence import SqlAlchemyAcquisitionQueries
+from media_finder_core.catalog.persistence import SqlAlchemyCatalogQueries
+from media_finder_core.exports import (
+    EntityType,
+    ExportRevisionSnapshot,
+    ExportWarningPolicy,
+    MetadataExportService,
+    NamingExportService,
+    NfoExportService,
+)
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import EnvReference, resolve_env_reference
 from .db import create_database, migration_state, session_factory
-from .models import Acquisition, MediaItem, MetadataRevision
-from .naming import EntityType, render_naming
-from .nfo import render_nfo
-from .sdk.protocols import MetadataProvider
-from .sdk.types import ExportWarning, NormalizedMetadata, RetentionPolicy
 
 REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 bearer = HTTPBearer(auto_error=False)
@@ -49,6 +54,36 @@ class APIError(Exception):
         self.headers = headers or {}
 
 
+class _CatalogExportReader:
+    def __init__(self, queries: SqlAlchemyCatalogQueries) -> None:
+        self._queries = queries
+
+    def current_revision_id(self, media_item_id: str) -> str | None:
+        item = self._queries.get_item(media_item_id)
+        return item.current_revision_id if item is not None else None
+
+    def revision(self, revision_id: str) -> ExportRevisionSnapshot | None:
+        revision = self._queries.get_revision(revision_id)
+        if revision is None:
+            return None
+        return ExportRevisionSnapshot(
+            id=revision.id,
+            effective=revision.effective,
+            refresh_after=revision.refresh_after,
+            expires_at=revision.expires_at,
+            created_at=revision.created_at,
+        )
+
+
+class _AcquisitionExportReader:
+    def __init__(self, queries: SqlAlchemyAcquisitionQueries) -> None:
+        self._queries = queries
+
+    def pinned_revision_id(self, acquisition_id: str) -> str | None:
+        acquisition = self._queries.get(acquisition_id)
+        return acquisition.metadata_revision_id if acquisition is not None else None
+
+
 def _error_response(request: Request, error: APIError) -> JSONResponse:
     request_id = getattr(request.state, "request_id", str(uuid4()))
     headers = {"X-Request-ID": request_id, **error.headers}
@@ -70,7 +105,7 @@ def create_app(
     *,
     integration_token_reference: str,
     clock: Callable[[], datetime] | None = None,
-    providers: Mapping[str, MetadataProvider] | None = None,
+    retention_policies: Mapping[str, ExportWarningPolicy] | None = None,
     database_engine: Engine | None = None,
     sessions: sessionmaker[Session] | None = None,
 ) -> FastAPI:
@@ -93,8 +128,15 @@ def create_app(
     app.state.engine = engine
     app.state.owns_engine = owns_engine
     app.state.clock = clock or (lambda: datetime.now(UTC))
-    app.state.providers = dict(providers or {})
     session_source = sessions or session_factory(engine)
+    metadata_exports = MetadataExportService(
+        catalog=_CatalogExportReader(SqlAlchemyCatalogQueries(session_source)),
+        acquisitions=_AcquisitionExportReader(SqlAlchemyAcquisitionQueries(session_source)),
+        retention_policies=dict(retention_policies or {}),
+        clock=app.state.clock,
+    )
+    naming_exports = NamingExportService(metadata=metadata_exports)
+    nfo_exports = NfoExportService(metadata=metadata_exports)
 
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next: Any) -> Any:
@@ -182,59 +224,43 @@ def create_app(
 
     router = APIRouter(prefix="/api/v1", dependencies=[Depends(authenticate)])
 
-    def validated_snapshot(revision: MetadataRevision) -> NormalizedMetadata:
-        expires_at = revision.expires_at
-        if expires_at is not None and expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=UTC)
-        now = app.state.clock()
-        if now.tzinfo is None:
-            now = now.replace(tzinfo=UTC)
-        if revision.effective_payload is None or (expires_at is not None and now >= expires_at):
-            raise APIError(410, "metadata_source_expired")
-        try:
-            return NormalizedMetadata.model_validate(revision.effective_payload)
-        except Exception:
-            raise APIError(500, "metadata_snapshot_invalid") from None
-
-    def revision_snapshot(revision: MetadataRevision) -> dict[str, Any]:
-        return validated_snapshot(revision).model_dump(mode="json")
-
-    def current_revision(item_id: str) -> MetadataRevision:
-        with session_source() as session:
-            item = session.get(MediaItem, item_id)
-            if item is None or item.current_revision_id is None:
-                raise APIError(404, "media_item_not_found")
-            revision = session.get(MetadataRevision, item.current_revision_id)
-            if revision is None:
-                raise APIError(404, "metadata_revision_not_found")
-            session.expunge(revision)
-            return revision
-
-    def pinned_revision(acquisition_id: str) -> MetadataRevision:
-        try:
-            identity = UUID(acquisition_id)
-        except ValueError:
-            raise APIError(404, "acquisition_not_found") from None
-        with session_source() as session:
-            acquisition = session.get(Acquisition, identity)
-            if acquisition is None:
-                raise APIError(404, "acquisition_not_found")
-            revision = session.get(MetadataRevision, acquisition.metadata_revision_id)
-            if revision is None:
-                raise APIError(404, "metadata_revision_not_found")
-            session.expunge(revision)
-            return revision
+    def export_failure(error: ValueError) -> APIError:
+        code = str(error)
+        if code == "metadata_source_expired":
+            return APIError(410, code)
+        if code in {
+            "media_item_not_found",
+            "metadata_revision_not_found",
+            "acquisition_not_found",
+        }:
+            return APIError(404, code)
+        if code == "metadata_snapshot_invalid":
+            return APIError(500, code)
+        if code == "export_warning_invalid":
+            return APIError(500, "internal_error")
+        return APIError(
+            422,
+            "request_validation_failed",
+            details={"issues": [{"field": "selector", "type": code}]},
+        )
 
     @router.get("/media-items/{item_id}/metadata")
     def media_item_metadata(item_id: str) -> dict[str, Any]:
-        return revision_snapshot(current_revision(item_id))
+        try:
+            return metadata_exports.current(item_id).metadata.model_dump(mode="json")
+        except ValueError as error:
+            raise export_failure(error) from None
 
     @router.get("/acquisitions/{acquisition_id}/metadata")
     def acquisition_metadata(acquisition_id: str) -> dict[str, Any]:
-        return revision_snapshot(pinned_revision(acquisition_id))
+        try:
+            return metadata_exports.pinned(acquisition_id).metadata.model_dump(mode="json")
+        except ValueError as error:
+            raise export_failure(error) from None
 
     def naming_response(
-        revision: MetadataRevision,
+        identity: str,
+        pinned: bool,
         entity_type: Literal["movie", "tvshow", "season", "episode"],
         season_number: int | None,
         episode_numbers: list[int],
@@ -242,8 +268,9 @@ def create_app(
         profile: str,
     ) -> dict[str, Any]:
         try:
-            result = render_naming(
-                validated_snapshot(revision),
+            operation = naming_exports.pinned if pinned else naming_exports.current
+            result = operation(
+                identity,
                 entity_type=EntityType(entity_type),
                 season_number=season_number,
                 episode_numbers=tuple(episode_numbers),
@@ -251,11 +278,7 @@ def create_app(
                 profile=profile,
             )
         except ValueError as error:
-            raise APIError(
-                422,
-                "request_validation_failed",
-                details={"issues": [{"field": "selector", "type": str(error)}]},
-            ) from None
+            raise export_failure(error) from None
         return result.model_dump(mode="json")
 
     @router.get("/media-items/{item_id}/exports/naming")
@@ -268,7 +291,8 @@ def create_app(
         profile: str = "jellyfin-v1",
     ) -> dict[str, Any]:
         return naming_response(
-            current_revision(item_id),
+            item_id,
+            False,
             entity_type,
             season_number,
             episode_numbers or [],
@@ -286,7 +310,8 @@ def create_app(
         profile: str = "jellyfin-v1",
     ) -> dict[str, Any]:
         return naming_response(
-            pinned_revision(acquisition_id),
+            acquisition_id,
+            True,
             entity_type,
             season_number,
             episode_numbers or [],
@@ -295,14 +320,16 @@ def create_app(
         )
 
     def nfo_response(
-        revision: MetadataRevision,
+        identity: str,
+        pinned: bool,
         entity_type: Literal["movie", "tvshow", "season", "episode"],
         season_number: int | None,
         episode_numbers: list[int],
     ) -> Response:
         try:
-            result = render_nfo(
-                validated_snapshot(revision),
+            operation = nfo_exports.pinned if pinned else nfo_exports.current
+            result = operation(
+                identity,
                 entity_type=EntityType(entity_type),
                 season_number=season_number,
                 episode_numbers=tuple(episode_numbers),
@@ -314,25 +341,11 @@ def create_app(
                     "nfo_multi_episode_unsupported",
                     details={"recommendation": "split_episodes"},
                 ) from None
-            raise APIError(
-                422,
-                "request_validation_failed",
-                details={"issues": [{"field": "selector", "type": str(error)}]},
-            ) from None
+            raise export_failure(error) from None
 
         headers = {"Content-Disposition": content_disposition(result.filename)}
-        provider = app.state.providers.get(revision.provider_key)
-        if provider is not None:
-            warning = provider.export_warning(
-                RetentionPolicy(
-                    refresh_after=revision.refresh_after,
-                    expires_at=revision.expires_at,
-                ),
-                app.state.clock(),
-            )
-            if warning is not None:
-                validated_warning = ExportWarning.model_validate(warning.model_dump())
-                headers.update(validated_warning.as_headers())
+        if result.warning is not None:
+            headers.update({header.name: header.value for header in result.warning.headers})
         return Response(content=result.xml, media_type="application/xml", headers=headers)
 
     def content_disposition(filename: str) -> str:
@@ -350,9 +363,7 @@ def create_app(
         season_number: int | None = Query(default=None, ge=0),
         episode_numbers: Annotated[list[int] | None, Query()] = None,
     ) -> Response:
-        return nfo_response(
-            current_revision(item_id), entity_type, season_number, episode_numbers or []
-        )
+        return nfo_response(item_id, False, entity_type, season_number, episode_numbers or [])
 
     @router.get("/acquisitions/{acquisition_id}/exports/nfo")
     def acquisition_nfo(
@@ -361,9 +372,7 @@ def create_app(
         season_number: int | None = Query(default=None, ge=0),
         episode_numbers: Annotated[list[int] | None, Query()] = None,
     ) -> Response:
-        return nfo_response(
-            pinned_revision(acquisition_id), entity_type, season_number, episode_numbers or []
-        )
+        return nfo_response(acquisition_id, True, entity_type, season_number, episode_numbers or [])
 
     app.include_router(router)
     return app

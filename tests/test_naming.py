@@ -7,8 +7,16 @@ from media_finder.api import create_app
 from media_finder.db import create_database, migrate_to_head, session_factory
 from media_finder.domain import CatalogService
 from media_finder.models import Acquisition
-from media_finder.naming import EntityType, render_naming
-from media_finder.sdk.types import Episode, MediaKind, NormalizedMetadata, Provenance, Season
+from media_finder.sdk.types import NormalizedMetadata as LegacyNormalizedMetadata
+from media_finder_core.exports import EntityType, render_naming
+from media_finder_sdk import Episode, MediaKind, NormalizedMetadata, Provenance, Season
+
+
+def _legacy(metadata: NormalizedMetadata) -> LegacyNormalizedMetadata:
+    payload = metadata.model_dump(mode="json")
+    provenance = payload["provenance"]
+    provenance["provider_key"] = provenance.pop("provider_id")
+    return LegacyNormalizedMetadata.model_validate(payload)
 
 
 def _series(title: str = "Мой: сериал / ../ CON") -> NormalizedMetadata:
@@ -32,7 +40,7 @@ def _series(title: str = "Мой: сериал / ../ CON") -> NormalizedMetadata
                 ),
             ),
         ),
-        provenance=Provenance(provider_key="manual", external_id="series", locale="ru-RU"),
+        provenance=Provenance(provider_id="manual", external_id="series", locale="ru-RU"),
         completeness=1,
         structural_quality=1,
     )
@@ -70,7 +78,7 @@ def test_movie_special_and_portable_sanitation() -> None:
         kind=MediaKind.MOVIE,
         titles={"en-US": "CON"},
         year=2001,
-        provenance=Provenance(provider_key="manual", external_id="movie", locale="en-US"),
+        provenance=Provenance(provider_id="manual", external_id="movie", locale="en-US"),
     )
     movie_name = render_naming(movie, entity_type=EntityType.MOVIE)
     special = render_naming(
@@ -134,7 +142,7 @@ def test_windows_device_names_remain_reserved_with_suffixes(title: str, expected
     movie = NormalizedMetadata(
         kind=MediaKind.MOVIE,
         titles={"en-US": title},
-        provenance=Provenance(provider_key="manual", external_id=title, locale="en-US"),
+        provenance=Provenance(provider_id="manual", external_id=title, locale="en-US"),
     )
 
     result = render_naming(movie, entity_type=EntityType.MOVIE)
@@ -151,7 +159,7 @@ def test_current_and_pinned_naming_endpoints_use_the_fixed_profile(
     migrate_to_head(url)
     engine = create_database(url)
     with session_factory(engine)() as session:
-        item = CatalogService(session).create_manual_item(_series("Волшебный сериал"))
+        item = CatalogService(session).create_manual_item(_legacy(_series("Волшебный сериал")))
         revision = item.current_revision
         assert revision is not None
         acquisition = Acquisition(

@@ -33,7 +33,6 @@ from .integration_runtime import (
     RuntimeResolver,
 )
 from .maintenance import MaintenanceRunner
-from .sdk.protocols import MetadataProvider
 from .sdk.registration import StaticModuleRegistry
 
 DEFAULT_DATABASE_URL = "sqlite:////data/media-finder.db"
@@ -125,11 +124,17 @@ def _compose_application(
         security=security,
         secure_cookie=_secure_cookie(),
     )
-    providers: dict[str, MetadataProvider] = registry.retention_providers()
+    module_runtime = runtime_factory.module_runtime
+    if module_runtime is None:
+        raise RuntimeError("metadata_module_runtime_unavailable")
+    retention_policies = {
+        module_id: module_runtime.retention_policy(module_id)
+        for module_id in module_runtime.registry.metadata
+    }
     processor = create_processor_app(
         url,
         integration_token_reference=INTEGRATION_TOKEN_REFERENCE,
-        providers=providers,
+        retention_policies=retention_policies,
         database_engine=engine,
         sessions=sessions,
     )

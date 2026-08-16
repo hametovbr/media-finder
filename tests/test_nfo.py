@@ -9,9 +9,10 @@ from media_finder.api import create_app
 from media_finder.db import create_database, migrate_to_head, session_factory
 from media_finder.domain import CatalogService
 from media_finder.models import Acquisition
-from media_finder.naming import EntityType
-from media_finder.nfo import render_nfo
-from media_finder.sdk.types import (
+from media_finder.sdk.types import NormalizedMetadata as LegacyNormalizedMetadata
+from media_finder.sdk.types import RetentionPolicy as LegacyRetentionPolicy
+from media_finder_core.exports import EntityType, render_nfo
+from media_finder_sdk import (
     Artwork,
     Episode,
     ExportHeader,
@@ -21,12 +22,18 @@ from media_finder.sdk.types import (
     Person,
     Provenance,
     Rating,
-    RetentionPolicy,
     Season,
 )
 from media_finder_server import create_legacy_module_registry
 
 LEGACY_REGISTRY = create_legacy_module_registry()
+
+
+def _legacy(metadata: NormalizedMetadata) -> LegacyNormalizedMetadata:
+    payload = metadata.model_dump(mode="json")
+    provenance = payload["provenance"]
+    provenance["provider_key"] = provenance.pop("provider_id")
+    return LegacyNormalizedMetadata.model_validate(payload)
 
 
 def _rich_movie(provider: str = "manual") -> NormalizedMetadata:
@@ -52,7 +59,7 @@ def _rich_movie(provider: str = "manual") -> NormalizedMetadata:
             Artwork(kind="poster", url="https://images.example.test/poster.jpg", language="en"),
         ),
         provenance=Provenance(
-            provider_key=provider, external_id="42", locale="en-US", source_label="Fixture"
+            provider_id=provider, external_id="42", locale="en-US", source_label="Fixture"
         ),
         completeness=1,
         structural_quality=1,
@@ -86,7 +93,7 @@ def _series() -> NormalizedMetadata:
             ),
             Season(number=1, title="Season One", episodes=(Episode(number=1, title="One"),)),
         ),
-        provenance=Provenance(provider_key="manual", external_id="series", locale="en-US"),
+        provenance=Provenance(provider_id="manual", external_id="series", locale="en-US"),
     )
 
 
@@ -155,9 +162,9 @@ def test_current_and_pinned_nfo_api_adds_provider_owned_warning_headers(
         revision = service.add_provider_revision(
             item,
             {"private": "provider-only"},
-            _rich_movie("tmdb"),
+            _legacy(_rich_movie("tmdb")),
             {},
-            RetentionPolicy(expires_at=expiry),
+            LegacyRetentionPolicy(expires_at=expiry),
             datetime(2025, 1, 1, tzinfo=UTC),
         )
         acquisition = Acquisition(
@@ -182,7 +189,7 @@ def test_current_and_pinned_nfo_api_adds_provider_owned_warning_headers(
         url,
         integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN",
         clock=lambda: datetime(2025, 2, 1, tzinfo=UTC),
-        providers={"tmdb": LEGACY_REGISTRY.metadata_providers["tmdb"].retention_factory()},
+        retention_policies={"tmdb": LEGACY_REGISTRY.metadata_providers["tmdb"].retention_factory()},
     )
     client = TestClient(app)
     headers = {"Authorization": "Bearer integration-secret"}
@@ -215,7 +222,7 @@ def test_multi_episode_nfo_api_has_stable_machine_code(tmp_path: Path, monkeypat
     migrate_to_head(url)
     engine = create_database(url)
     with session_factory(engine)() as session:
-        item = CatalogService(session).create_manual_item(_series())
+        item = CatalogService(session).create_manual_item(_legacy(_series()))
         item_id = item.id
     engine.dispose()
     client = TestClient(
@@ -247,7 +254,7 @@ def test_nfo_content_disposition_supports_safe_unicode_filename(
         }
     )
     with session_factory(engine)() as session:
-        item = CatalogService(session).create_manual_item(metadata)
+        item = CatalogService(session).create_manual_item(_legacy(metadata))
         item_id = item.id
     engine.dispose()
     client = TestClient(
@@ -341,7 +348,7 @@ def test_nfo_sanitizes_invalid_xml_10_codepoints_in_all_projection_boundaries(
                 ),
             ),
             seasons=(season,),
-            provenance=Provenance(provider_key="manual", external_id="invalid-xml", locale="en-US"),
+            provenance=Provenance(provider_id="manual", external_id="invalid-xml", locale="en-US"),
         )
 
     result = render_nfo(
@@ -380,9 +387,9 @@ def test_nfo_api_defensively_revalidates_forged_provider_warning(
         service.add_provider_revision(
             item,
             {"private": True},
-            _rich_movie("forged"),
+            _legacy(_rich_movie("forged")),
             {},
-            RetentionPolicy(expires_at=datetime(2026, 1, 1, tzinfo=UTC)),
+            LegacyRetentionPolicy(expires_at=datetime(2026, 1, 1, tzinfo=UTC)),
             datetime(2025, 1, 1, tzinfo=UTC),
         )
         item_id = item.id
@@ -392,7 +399,7 @@ def test_nfo_api_defensively_revalidates_forged_provider_warning(
             url,
             integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN",
             clock=lambda: datetime(2025, 2, 1, tzinfo=UTC),
-            providers={"forged": ForgedWarningProvider()},  # type: ignore[dict-item]
+            retention_policies={"forged": ForgedWarningProvider()},  # type: ignore[dict-item]
         )
     )
 

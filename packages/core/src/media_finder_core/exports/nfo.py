@@ -1,16 +1,77 @@
-"""Structured Jellyfin/Kodi NFO projection."""
+"""Structured Jellyfin/Kodi NFO projection and export use cases."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from dataclasses import dataclass
 from xml.etree import ElementTree as ET
 
+from media_finder_sdk import Episode, ExportWarning, NormalizedMetadata, Season
+
+from .metadata import MetadataExportService, ResolvedMetadata
 from .naming import EntityType, render_naming
-from .sdk.types import Episode, NormalizedMetadata, Season
 
 
 @dataclass(frozen=True, slots=True)
 class NfoResult:
     xml: str
     filename: str
+    warning: ExportWarning | None = None
+
+
+class NfoExportService:
+    def __init__(self, *, metadata: MetadataExportService) -> None:
+        self._metadata = metadata
+
+    def current(
+        self,
+        media_item_id: str,
+        *,
+        entity_type: EntityType,
+        season_number: int | None = None,
+        episode_numbers: tuple[int, ...] = (),
+    ) -> NfoResult:
+        return self._render(
+            self._metadata.current(media_item_id),
+            entity_type=entity_type,
+            season_number=season_number,
+            episode_numbers=episode_numbers,
+        )
+
+    def pinned(
+        self,
+        acquisition_id: str,
+        *,
+        entity_type: EntityType,
+        season_number: int | None = None,
+        episode_numbers: tuple[int, ...] = (),
+    ) -> NfoResult:
+        return self._render(
+            self._metadata.pinned(acquisition_id),
+            entity_type=entity_type,
+            season_number=season_number,
+            episode_numbers=episode_numbers,
+        )
+
+    def _render(
+        self,
+        resolved: ResolvedMetadata,
+        *,
+        entity_type: EntityType,
+        season_number: int | None,
+        episode_numbers: tuple[int, ...],
+    ) -> NfoResult:
+        rendered = render_nfo(
+            resolved.metadata,
+            entity_type=entity_type,
+            season_number=season_number,
+            episode_numbers=episode_numbers,
+        )
+        return NfoResult(
+            xml=rendered.xml,
+            filename=rendered.filename,
+            warning=self._metadata.warning(resolved),
+        )
 
 
 def render_nfo(
@@ -42,7 +103,7 @@ def render_nfo(
         _text(root, "title", season.title)
         _text(root, "plot", season.plot)
         _text(root, "seasonnumber", season.number)
-        _provider_ids(root, season.provider_ids, metadata.provenance.provider_key)
+        _provider_ids(root, season.provider_ids, metadata.provenance.provider_id)
     else:
         if metadata.kind.value != "series":
             raise ValueError("nfo_entity_mismatch")
@@ -61,7 +122,7 @@ def render_nfo(
         _text(root, "season", season.number)
         _text(root, "episode", episode.number)
         _text(root, "displayepisode", episode.ordering)
-        _provider_ids(root, episode.provider_ids, metadata.provenance.provider_key)
+        _provider_ids(root, episode.provider_ids, metadata.provenance.provider_id)
 
     filename = render_naming(
         metadata,
@@ -79,7 +140,7 @@ def _media_fields(root: ET.Element, metadata: NormalizedMetadata) -> None:
     _text(root, "year", metadata.year)
     _text(root, "premiered", metadata.release_date)
     _text(root, "runtime", metadata.runtime_minutes)
-    _provider_ids(root, metadata.provider_ids, metadata.provenance.provider_key)
+    _provider_ids(root, metadata.provider_ids, metadata.provenance.provider_id)
     if metadata.ratings:
         ratings = ET.SubElement(root, "ratings")
         for rating in metadata.ratings:
@@ -112,7 +173,7 @@ def _media_fields(root: ET.Element, metadata: NormalizedMetadata) -> None:
         node.text = _xml(artwork.url)
 
 
-def _provider_ids(root: ET.Element, values: dict[str, str], default_provider: str) -> None:
+def _provider_ids(root: ET.Element, values: Mapping[str, str], default_provider: str) -> None:
     for provider, value in sorted(values.items()):
         node = ET.SubElement(
             root,
@@ -164,3 +225,6 @@ def _episode(season: Season, number: int) -> Episode:
         if episode.number == number:
             return episode
     raise ValueError("nfo_selector_invalid")
+
+
+__all__ = ["NfoExportService", "NfoResult", "render_nfo"]

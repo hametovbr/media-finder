@@ -1,12 +1,15 @@
 """Fixed, extension-independent Jellyfin naming contract."""
 
+from __future__ import annotations
+
 import re
 import unicodedata
 from enum import StrEnum
 
+from media_finder_sdk import NormalizedMetadata, Season
 from pydantic import BaseModel, ConfigDict
 
-from .sdk.types import NormalizedMetadata, Season
+from .metadata import MetadataExportService
 
 EXTENSION = re.compile(r"^[A-Za-z0-9]{1,10}$")
 RESERVED_CHARACTERS = frozenset('<>:"/\\|?*')
@@ -33,6 +36,49 @@ class NamingResult(BaseModel):
     target_extension: str | None
     relative_path: str
     nfo_filename: str
+
+
+class NamingExportService:
+    def __init__(self, *, metadata: MetadataExportService) -> None:
+        self._metadata = metadata
+
+    def current(
+        self,
+        media_item_id: str,
+        *,
+        entity_type: EntityType,
+        season_number: int | None = None,
+        episode_numbers: tuple[int, ...] = (),
+        target_extension: str | None = None,
+        profile: str = "jellyfin-v1",
+    ) -> NamingResult:
+        return render_naming(
+            self._metadata.current(media_item_id).metadata,
+            entity_type=entity_type,
+            season_number=season_number,
+            episode_numbers=episode_numbers,
+            target_extension=target_extension,
+            profile=profile,
+        )
+
+    def pinned(
+        self,
+        acquisition_id: str,
+        *,
+        entity_type: EntityType,
+        season_number: int | None = None,
+        episode_numbers: tuple[int, ...] = (),
+        target_extension: str | None = None,
+        profile: str = "jellyfin-v1",
+    ) -> NamingResult:
+        return render_naming(
+            self._metadata.pinned(acquisition_id).metadata,
+            entity_type=entity_type,
+            season_number=season_number,
+            episode_numbers=episode_numbers,
+            target_extension=target_extension,
+            profile=profile,
+        )
 
 
 def render_naming(
@@ -143,3 +189,6 @@ def _season(metadata: NormalizedMetadata, number: int) -> Season:
         if season.number == number:
             return season
     raise ValueError("naming_selector_invalid")
+
+
+__all__ = ["EntityType", "NamingExportService", "NamingResult", "render_naming"]

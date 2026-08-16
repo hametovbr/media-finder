@@ -36,6 +36,7 @@ TEXT_SUFFIXES = {
 }
 TEXT_FILENAMES = {".dockerignore", "Dockerfile", "LICENSE"}
 LOCALIZATION_TESTS = {
+    "tests/core/exports/test_exports_slice.py",
     "tests/test_documentation_language.py",
     "tests/test_naming.py",
     "tests/test_nfo.py",

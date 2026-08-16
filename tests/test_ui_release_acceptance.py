@@ -5,15 +5,21 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from media_finder_server import create_ui_app
-from sqlalchemy import select
-
 from media_finder.db import migrate_to_head, session_factory
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.models import DownloadClientInstance, MediaItem, MetadataRevision
-from media_finder.naming import EntityType, render_naming
-from media_finder.nfo import render_nfo
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
+from media_finder_core.exports import EntityType, render_naming, render_nfo
+from media_finder_sdk import NormalizedMetadata as CoreNormalizedMetadata
+from media_finder_server import create_ui_app
+from sqlalchemy import select
+
+
+def _core_metadata(metadata: NormalizedMetadata) -> CoreNormalizedMetadata:
+    payload = metadata.model_dump(mode="json")
+    provenance = payload["provenance"]
+    provenance["provider_id"] = provenance.pop("provider_key")
+    return CoreNormalizedMetadata.model_validate(payload)
 
 
 def _csrf(text: str) -> str:
@@ -161,10 +167,11 @@ def test_rich_manual_import_edit_preserves_unedited_contract_fields(acceptance_a
         assert episode.runtime_minutes == 25
         assert episode.provider_ids == {"tmdb": "e1"}
         assert episode.ordering == 7
+        exported_metadata = _core_metadata(metadata)
         assert (
             "Rich show revised"
             in render_naming(
-                metadata,
+                exported_metadata,
                 entity_type=EntityType.EPISODE,
                 season_number=0,
                 episode_numbers=(1,),
@@ -173,7 +180,7 @@ def test_rich_manual_import_edit_preserves_unedited_contract_fields(acceptance_a
         assert (
             "<displayepisode>7</displayepisode>"
             in render_nfo(
-                metadata,
+                exported_metadata,
                 entity_type=EntityType.EPISODE,
                 season_number=0,
                 episode_numbers=(1,),
