@@ -20,7 +20,7 @@
       "secret": true
     }
   ],
-  "manifest_sha256": "06371a9286105583108c1043b4f7ebc4f5dd831e24bbcec0c3007c0720578db2",
+  "manifest_sha256": "5d21cd8e7d095f8fc4d7afc0f60d1cd9b3312e3f60c8c988868e5eae7631441d",
   "missing_configuration": {
     "applicable": true,
     "error": {
@@ -40,7 +40,7 @@
   },
   "module_id": "prowlarr",
   "module_kind": "release-provider",
-  "module_version": "0.1.0",
+  "module_version": "0.2.0",
   "redaction_markers": [
     "artifact-body",
     "environment-values",

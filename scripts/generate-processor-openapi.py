@@ -29,7 +29,8 @@ def main() -> None:
         engine.dispose()
 
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
-    arguments.output.write_text(content, encoding="utf-8")
+    with arguments.output.open("w", encoding="utf-8", newline="\n") as output:
+        output.write(content)
 
 
 if __name__ == "__main__":

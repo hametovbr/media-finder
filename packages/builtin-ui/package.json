@@ -1,7 +1,7 @@
 {
   "name": "@media-finder/builtin-ui",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "scripts": {
     "assets:build": "node ../../scripts/build-assets.mjs"
   }

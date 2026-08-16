@@ -15,7 +15,7 @@
       "secret": true
     }
   ],
-  "manifest_sha256": "5b92b3282a544398733c44d9da4296de3a9615300382f3efb0e2543b3a71f3be",
+  "manifest_sha256": "b03afefe58091771f0c577c1f1909410cc03183d40b5dd9d41643d85e175159b",
   "missing_configuration": {
     "applicable": true,
     "error": {
@@ -33,7 +33,7 @@
   },
   "module_id": "tmdb",
   "module_kind": "metadata-provider",
-  "module_version": "0.1.0",
+  "module_version": "0.2.0",
   "redaction_markers": [
     "artifact-body",
     "environment-values",

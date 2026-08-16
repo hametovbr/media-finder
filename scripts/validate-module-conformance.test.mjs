@@ -66,7 +66,9 @@ test("fixture module versions accept the same full SemVer as module manifests", 
   );
   fs.writeFileSync(
     manifest,
-    fs.readFileSync(manifest, "utf8").replace('module_version = "0.1.0"', 'module_version = "1.2.3-rc.1+build.5"'),
+    fs
+      .readFileSync(manifest, "utf8")
+      .replace(/module_version = "[^"]+"/, 'module_version = "1.2.3-rc.1+build.5"'),
     "utf8",
   );
   mutateFixture(root, "metadata-manual", (fixture) => {
