@@ -624,6 +624,18 @@ def test_release_token_is_consumed_when_submission_fails_after_prechecks(
         status=410,
     )
 
+    state.provider.resolve_error = None
+    state.client.submit_error = None
+    fresh_release = driver.search_releases(state.catalog_item_id, f"{failure_stage}-fresh")[0]
+    retry = driver.submit(
+        item_id=state.catalog_item_id,
+        release_token=str(fresh_release["token"]),
+        destination="current",
+        idempotency_key=f"{failure_stage}-fresh-retry",
+    )
+    assert retry["status"] == "submitted"
+    assert retry["id"] != first["id"]
+
 
 def test_pending_reconcile_does_not_use_release_provider(real_control) -> None:  # type: ignore[no-untyped-def]
     driver, state = real_control
