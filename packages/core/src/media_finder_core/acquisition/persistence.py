@@ -50,9 +50,6 @@ class AcquisitionRecord(Base):
     metadata_revision_id: Mapped[str] = mapped_column(
         ForeignKey("metadata_revisions.id", ondelete="RESTRICT"), nullable=False
     )
-    download_client_instance_id: Mapped[str | None] = mapped_column(
-        ForeignKey("download_client_instances.id", ondelete="RESTRICT")
-    )
     idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
     naming_profile: Mapped[str] = mapped_column(String(100), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -80,7 +77,6 @@ class AcquisitionRecord(Base):
 _IMMUTABLE_FIELDS = (
     "media_item_id",
     "metadata_revision_id",
-    "download_client_instance_id",
     "idempotency_key",
     "naming_profile",
     "destination",
@@ -111,14 +107,8 @@ def prevent_acquisition_snapshot_mutation(session: Session, *_: object) -> None:
 
 
 class SqlAlchemyAcquisitionRepository:
-    def __init__(
-        self,
-        session: Session,
-        *,
-        legacy_download_client_instance_id: str | None = None,
-    ) -> None:
+    def __init__(self, session: Session) -> None:
         self._session = session
-        self._legacy_download_client_instance_id = legacy_download_client_instance_id
 
     def find_by_idempotency(self, key: str) -> AcquisitionSnapshot | None:
         record = self._session.scalar(
@@ -136,7 +126,6 @@ class SqlAlchemyAcquisitionRepository:
             id=draft.id,
             media_item_id=draft.media_item_id,
             metadata_revision_id=draft.metadata_revision_id,
-            download_client_instance_id=self._legacy_download_client_instance_id,
             idempotency_key=draft.idempotency_key,
             naming_profile=draft.naming_profile,
             status=AcquisitionStatus.PENDING.value,
@@ -237,14 +226,8 @@ class SqlAlchemyAcquisitionRepository:
 
 
 class SqlAlchemyAcquisitionQueries:
-    def __init__(
-        self,
-        sessions: sessionmaker[Session],
-        *,
-        legacy_download_client_instance_id: str | None = None,
-    ) -> None:
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
-        self._legacy_download_client_instance_id = legacy_download_client_instance_id
 
     def find_by_idempotency(self, key: str) -> AcquisitionSnapshot | None:
         return self._read(lambda repository: repository.find_by_idempotency(key))
@@ -260,27 +243,14 @@ class SqlAlchemyAcquisitionQueries:
 
     def _read(self, operation: Callable[[SqlAlchemyAcquisitionRepository], T]) -> T:
         with self._sessions() as session:
-            return operation(
-                SqlAlchemyAcquisitionRepository(
-                    session,
-                    legacy_download_client_instance_id=self._legacy_download_client_instance_id,
-                )
-            )
+            return operation(SqlAlchemyAcquisitionRepository(session))
 
 
 class SqlAlchemyAcquisitionUnitOfWork:
-    def __init__(
-        self,
-        sessions: sessionmaker[Session],
-        *,
-        legacy_download_client_instance_id: str | None = None,
-    ) -> None:
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._transactions = SqlAlchemyTransactionOwner(
             sessions=sessions,
-            resource_factory=lambda session: SqlAlchemyAcquisitionRepository(
-                session,
-                legacy_download_client_instance_id=legacy_download_client_instance_id,
-            ),
+            resource_factory=SqlAlchemyAcquisitionRepository,
         )
 
     @contextmanager

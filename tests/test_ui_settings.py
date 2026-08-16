@@ -3,10 +3,9 @@ from pathlib import Path
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from media_finder.models import AppSetting, DownloadClientInstance
-from media_finder_core.platform.database import migrate_to_head, session_factory
+from media_finder_core.platform.database import migrate_to_head
 from media_finder_server import create_ui_app
-from sqlalchemy import select
+from sqlalchemy import inspect
 
 
 @pytest.fixture
@@ -107,8 +106,6 @@ def test_legacy_integration_mutation_routes_are_absent(settings_url: str, path: 
         response = client.post(path)
 
     assert response.status_code in {404, 405}
-    sessions = session_factory(app.state.engine)
-    with sessions() as database:
-        assert list(database.scalars(select(AppSetting))) == []
-        clients = list(database.scalars(select(DownloadClientInstance)))
-    assert len(clients) == 1 and clients[0].system_owned
+    tables = set(inspect(app.state.engine).get_table_names())
+    assert "app_settings" not in tables
+    assert "download_client_instances" not in tables

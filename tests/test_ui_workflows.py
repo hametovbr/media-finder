@@ -5,8 +5,7 @@ from pathlib import Path
 import pytest
 from acquisition_fakes import StaticAcquisitionModules
 from fastapi.testclient import TestClient
-from media_finder.models import Acquisition, DownloadClientInstance, MediaItem, MetadataRevision
-from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
+from media_finder.models import Acquisition, MediaItem, MetadataRevision
 from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder_core.platform.database import migrate_to_head, session_factory
 from media_finder_sdk import (
@@ -85,11 +84,6 @@ def workflow_app(
             download_id="qbittorrent",
         ),
     )
-    sessions = session_factory(app.state.engine)
-    with sessions() as session:
-        client_instance = session.get(DownloadClientInstance, SYSTEM_QBITTORRENT_ID)
-        assert client_instance is not None
-        app.state.client_instance_id = client_instance.id
     return app
 
 

@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse, Response
 from media_finder.control_api import create_control_app
 from media_finder.control_security import BackendBrowserSecurity
 from media_finder.domain import CatalogService, RevisionInput
-from media_finder.models import Acquisition, DownloadClientInstance, MediaItem
+from media_finder.models import Acquisition, MediaItem
 from media_finder.sdk.types import (
     Attribution,
     CorrelationResult,
@@ -33,7 +33,6 @@ from media_finder.sdk.types import (
     RetentionPolicy,
     SubmissionResult,
 )
-from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 from media_finder_builtin_ui import create_builtin_ui
 from media_finder_builtin_ui.fake import FakeBrowserSecurity, FakeControlGateway
 from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
@@ -240,8 +239,6 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     sessions = session_factory(app.state.engine)
     with sessions() as session:
-        system = session.get(DownloadClientInstance, SYSTEM_QBITTORRENT_ID)
-        assert system is not None
         item = MediaItem(provider_key="manual", external_id=str(uuid4()), kind="movie")
         session.add(item)
         session.flush()
@@ -261,7 +258,6 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             download_client_module_version="9.8.7",
             media_item_id=item.id,
             metadata_revision_id=revision.id,
-            download_client_instance_id=system.id,
             idempotency_key="pending-browser",
             naming_profile="jellyfin-v1",
             status="pending",

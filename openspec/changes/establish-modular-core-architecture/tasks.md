@@ -42,10 +42,10 @@
 
 ## 5. Replace Persistence with the Clean Core Schema
 
-- [ ] 5.1 Add RED schema tests for the complete context-owned schema, immutable revision/acquisition snapshots, foreign-key integrity without cross-context ORM navigation, and the absence of `app_settings`, mutable client instances, integration configuration, and environment references; retain the already-green acquisition module-version snapshot assertions from 4.4.
-- [ ] 5.2 Split the remaining SQLAlchemy records and repositories by owning core context, remove cross-context relationships and legacy settings/client records, persist only scalar IDs and immutable boundary values, and make repository/application tests GREEN.
-- [ ] 5.3 Replace all legacy and temporary Alembic revisions with one new pre-release initial migration that creates catalog, acquisition, and maintenance records; fail safely for unsupported old revision state and document recreation of disposable `/data`.
-- [ ] 5.4 Run fresh upgrade, schema-drift/autogenerate, WAL, foreign-key, readiness, immutability, idempotency, retention savepoint, and acquisition snapshot tests to GREEN against the new initial schema.
+- [x] 5.1 Add RED schema tests for the complete context-owned schema, immutable revision/acquisition snapshots, foreign-key integrity without cross-context ORM navigation, and the absence of `app_settings`, mutable client instances, integration configuration, and environment references; retain the already-green acquisition module-version snapshot assertions from 4.4.
+- [x] 5.2 Split the remaining SQLAlchemy records and repositories by owning core context, remove cross-context relationships and legacy settings/client records, persist only scalar IDs and immutable boundary values, and make repository/application tests GREEN.
+- [x] 5.3 Replace all legacy and temporary Alembic revisions with one new pre-release initial migration that creates catalog, acquisition, and maintenance records; fail safely for unsupported old revision state and document recreation of disposable `/data`.
+- [x] 5.4 Run fresh upgrade, schema-drift/autogenerate, WAL, foreign-key, readiness, immutability, idempotency, retention savepoint, and acquisition snapshot tests to GREEN against the new initial schema.
 
 ## 6. Decompose Control Orchestration and Build the Server Host
 

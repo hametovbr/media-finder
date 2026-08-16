@@ -3,10 +3,9 @@ from pathlib import Path
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from media_finder.models import DownloadClientInstance
-from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 from media_finder_core.platform.database import migrate_to_head
 from media_finder_server import create_runtime_factory, create_ui_app
+from sqlalchemy import inspect
 
 ENVIRONMENT = {
     "TMDB_TOKEN": "tmdb-secret",
@@ -57,9 +56,9 @@ def test_environment_runtime_is_reconstructed_without_persisted_settings(
         assert "This product uses the TMDB API" in about.text
         for value in ENVIRONMENT.values():
             assert value not in settings.text
-        with app.state.sessions() as database:
-            system = database.get(DownloadClientInstance, SYSTEM_QBITTORRENT_ID)
-        assert system is not None and system.config_payload == {}
+        tables = set(inspect(app.state.engine).get_table_names())
+        assert "app_settings" not in tables
+        assert "download_client_instances" not in tables
 
 
 def test_default_factory_returns_safe_codes_for_missing_or_unknown_integrations() -> None:

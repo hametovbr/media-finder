@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from media_finder.domain import CatalogService, RevisionInput
-from media_finder.models import DownloadClientInstance, MediaItem, MetadataRevision
+from media_finder.models import MediaItem, MetadataRevision
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
 from media_finder_core.exports import EntityType, render_naming, render_nfo
 from media_finder_core.platform.database import migrate_to_head, session_factory
@@ -277,11 +277,8 @@ def test_legacy_download_client_lifecycle_is_absent_and_unreachable(
 ) -> None:
     sessions = session_factory(acceptance_app.state.engine)
     with sessions() as database:
-        instance = DownloadClientInstance(
-            name="Living room", module_key="qbittorrent", config_payload={}
-        )
         item = MediaItem(provider_key="manual", external_id=str(uuid4()), kind="movie")
-        database.add_all([instance, item])
+        database.add(item)
         database.flush()
         CatalogService(database).add_revision(
             item,
@@ -295,34 +292,31 @@ def test_legacy_download_client_lifecycle_is_absent_and_unreachable(
                 )
             ),
         )
-        instance_id, item_id = instance.id, item.id
+        item_id = item.id
+        legacy_instance_id = "legacy-client-instance"
     with TestClient(acceptance_app) as client:
         settings = client.get("/settings")
         csrf = _csrf(settings.text)
-        assert f'action="/ui/settings/clients/{instance_id}/archive"' not in settings.text
+        assert f'action="/ui/settings/clients/{legacy_instance_id}/archive"' not in settings.text
         archived = client.post(
-            f"/ui/settings/clients/{instance_id}/archive",
+            f"/ui/settings/clients/{legacy_instance_id}/archive",
             data={"csrf": csrf},
             follow_redirects=False,
         )
         assert archived.status_code in {404, 405}
         unavailable = client.post(
-            f"/ui/clients/{instance_id}/destinations",
+            f"/ui/clients/{legacy_instance_id}/destinations",
             data={"csrf": csrf},
         )
         assert unavailable.status_code in {404, 405}
         settings = client.get("/settings?clients=archived")
         assert "Archived download clients" not in settings.text
-        assert f'action="/ui/settings/clients/{instance_id}/restore"' not in settings.text
+        assert f'action="/ui/settings/clients/{legacy_instance_id}/restore"' not in settings.text
         release = client.get(f"/items/{item_id}/releases")
         assert "Living room" not in release.text
         restored = client.post(
-            f"/ui/settings/clients/{instance_id}/restore",
+            f"/ui/settings/clients/{legacy_instance_id}/restore",
             data={"csrf": csrf},
             follow_redirects=False,
         )
         assert restored.status_code in {404, 405}
-
-    with sessions() as database:
-        persisted = database.get(DownloadClientInstance, instance_id)
-        assert persisted is not None and persisted.system_owned is False

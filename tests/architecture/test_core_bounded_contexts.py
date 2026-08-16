@@ -68,6 +68,7 @@ PERSISTENCE_IMPORT_OWNERS = {
     "catalog/persistence.py",
     "acquisition/persistence.py",
     "platform/database.py",
+    "platform/persistence.py",
     "platform/transactions.py",
 }
 CONCRETE_MODULE_PACKAGES = (

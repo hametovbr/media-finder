@@ -20,6 +20,7 @@ from media_finder_core.catalog.persistence import (
 from media_finder_core.platform import (
     CoreConfiguration,
     MaintenanceRunner,
+    SqlAlchemyMaintenanceState,
     SystemClock,
     create_database,
     migrate_to_head,
@@ -38,7 +39,6 @@ from .integration_runtime import (
     DefaultRuntimeFactory,
     RuntimeResolver,
 )
-from .maintenance_state import SqlAlchemyMaintenanceState
 from .sdk.registration import StaticModuleRegistry
 
 MAINTENANCE_CHECK_SECONDS = 60 * 60

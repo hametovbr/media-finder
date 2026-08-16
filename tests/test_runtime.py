@@ -4,9 +4,9 @@ from time import monotonic, sleep
 import pytest
 from fastapi.testclient import TestClient
 from media_finder import runtime as legacy_runtime
-from media_finder.models import AppSetting
 from media_finder_core.platform.configuration import ConfigurationError
 from media_finder_core.platform.database import migrate_to_head
+from media_finder_core.platform.persistence import MaintenanceExecutionStateRecord
 from media_finder_server import create_application, run
 
 
@@ -48,7 +48,7 @@ def test_runtime_lifespan_executes_generic_startup_maintenance(
         completed = None
         while monotonic() < deadline:
             with app.state.sessions() as session:
-                completed = session.get(AppSetting, "maintenance.last_completed")
+                completed = session.get(MaintenanceExecutionStateRecord, "metadata-retention")
             if completed is not None:
                 break
             sleep(0.01)

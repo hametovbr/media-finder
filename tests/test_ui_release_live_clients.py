@@ -8,7 +8,6 @@ from acquisition_fakes import StaticAcquisitionModules
 from fastapi.testclient import TestClient
 from media_finder.models import Acquisition, MediaItem
 from media_finder.sdk.types import CorrelationResult, DownloadDestination, SubmissionResult
-from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder_core.platform.database import migrate_to_head, session_factory
 from media_finder_sdk import (
@@ -171,7 +170,7 @@ def test_destination_drift_returns_current_choices_and_keeps_release_token_reusa
     with sessions() as database:
         attempts = list(database.scalars(select(Acquisition)))
     assert len(attempts) == 1
-    assert attempts[0].download_client_instance_id is None
+    assert attempts[0].download_client_module_id == "qbittorrent"
 
 
 def test_legacy_client_destination_route_is_absent_and_errors_remain_safe(release_app) -> None:
@@ -212,7 +211,6 @@ def test_pending_system_reconcile_does_not_require_release_provider(release_app)
                 download_client_module_version="0.1.0",
                 media_item_id=item.id,
                 metadata_revision_id=item.current_revision_id,
-                download_client_instance_id=SYSTEM_QBITTORRENT_ID,
                 idempotency_key="reconcile-without-prowlarr",
                 naming_profile="jellyfin-v1",
                 status="pending",

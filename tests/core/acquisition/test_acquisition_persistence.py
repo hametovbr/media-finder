@@ -11,9 +11,8 @@ from typing import cast
 
 import pytest
 from media_finder.domain import CatalogService
-from media_finder.models import DownloadClientInstance, MetadataRevision
+from media_finder.models import MetadataRevision
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
-from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 from media_finder_core.acquisition import (
     AcquisitionCommands,
     AcquisitionQueries,
@@ -133,7 +132,7 @@ class _DownloadClient:
     def close(self) -> None: ...
 
 
-def _seed(database: Session) -> tuple[str, str, str]:
+def _seed(database: Session) -> tuple[str, str]:
     normalized = NormalizedMetadata(
         kind=MediaKind.MOVIE,
         titles={"en": "Fixture"},
@@ -146,9 +145,7 @@ def _seed(database: Session) -> tuple[str, str, str]:
     )
     item = CatalogService(database).create_manual_item(normalized)
     revision = cast(MetadataRevision, item.current_revision)
-    instance = database.get(DownloadClientInstance, SYSTEM_QBITTORRENT_ID)
-    assert instance is not None
-    return item.id, revision.id, instance.id
+    return item.id, revision.id
 
 
 def _services(
@@ -164,17 +161,11 @@ def _services(
         provider=selected_provider,
         cache=ReleaseSelectionCache(),
     )
-    queries = SqlAlchemyAcquisitionQueries(
-        sessions,
-        legacy_download_client_instance_id=SYSTEM_QBITTORRENT_ID,
-    )
+    queries = SqlAlchemyAcquisitionQueries(sessions)
     selected_client = client or _DownloadClient(queries, barrier=barrier)
     commands = AcquisitionCommands(
         query_port=queries,
-        unit_of_work=SqlAlchemyAcquisitionUnitOfWork(
-            sessions,
-            legacy_download_client_instance_id=SYSTEM_QBITTORRENT_ID,
-        ),
+        unit_of_work=SqlAlchemyAcquisitionUnitOfWork(sessions),
         catalog=SqlAlchemyCatalogQueries(sessions),
         releases=releases,
         download_client=selected_client,
@@ -199,7 +190,7 @@ def _request(item_id: str, revision_id: str, token: str, key: str) -> Acquisitio
 def test_sql_submission_persists_pending_snapshot_before_exact_client_handoff(
     database: Session,
 ) -> None:
-    item_id, revision_id, _instance_id = _seed(database)
+    item_id, revision_id = _seed(database)
     commands, queries, releases, client = _services(database)
     token = releases.search(ReleaseSearchQuery(query="Fixture"))[0].token
 
@@ -220,7 +211,7 @@ def test_sql_submission_persists_pending_snapshot_before_exact_client_handoff(
 def test_live_destination_drift_does_not_create_or_consume_an_acquisition(
     database: Session,
 ) -> None:
-    item_id, revision_id, _instance_id = _seed(database)
+    item_id, revision_id = _seed(database)
     commands, queries, releases, client = _services(database)
     client.destinations = (DownloadDestination(key="movies", label="Movies"),)
     token = releases.search(ReleaseSearchQuery(query="Fixture"))[0].token
@@ -246,7 +237,7 @@ def test_sql_timeout_uses_exact_lookup_and_manual_reconcile_only_changes_pending
     status: AcquisitionStatus,
     failure: str | None,
 ) -> None:
-    item_id, revision_id, _instance_id = _seed(database)
+    item_id, revision_id = _seed(database)
     commands, queries, releases, client = _services(database)
     client.timeout = True
     client.lookup = lookup
@@ -269,7 +260,7 @@ def test_real_sql_idempotency_race_creates_and_submits_once(tmp_path: Path) -> N
     engine = create_database(url)
     sessions = session_factory(engine)
     with sessions() as database:
-        item_id, revision_id, _instance_id = _seed(database)
+        item_id, revision_id = _seed(database)
 
     barrier = Barrier(2)
     contexts: list[tuple[AcquisitionCommands, ReleaseSelectionService, _DownloadClient]] = []

@@ -19,9 +19,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 ROOT = Path(__file__).parents[3]
 PLATFORM = ROOT / "packages" / "core" / "src" / "media_finder_core" / "platform"
-SERVER_MAINTENANCE_STATE = (
-    ROOT / "apps" / "server" / "src" / "media_finder" / "maintenance_state.py"
-)
 
 
 def _target(module: str, *names: str) -> tuple[Any, ...]:
@@ -149,27 +146,35 @@ def test_savepoint_rolls_back_only_its_failure_and_requires_an_outer_write(
         engine.dispose()
 
 
-def test_maintenance_state_adapter_delegates_write_transaction_ownership() -> None:
-    tree = ast.parse(
-        SERVER_MAINTENANCE_STATE.read_text(encoding="utf-8"),
-        filename=str(SERVER_MAINTENANCE_STATE),
+def test_maintenance_state_is_persisted_by_the_platform_context(tmp_path: Path) -> None:
+    create_database, session_factory, migrate_to_head = _target(
+        "database",
+        "create_database",
+        "session_factory",
+        "migrate_to_head",
     )
-    imported_names = {
-        alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom)
-        for alias in node.names
-    }
-    direct_commits = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "commit"
-    ]
+    MaintenanceExecutionStateRecord, SqlAlchemyMaintenanceState = _target(
+        "persistence",
+        "MaintenanceExecutionStateRecord",
+        "SqlAlchemyMaintenanceState",
+    )
+    url = f"sqlite:///{tmp_path / 'maintenance-state.db'}"
+    engine = cast(Engine, create_database(url))
+    migrate_to_head(url)
+    sessions = cast(sessionmaker[Session], session_factory(engine))
+    completed_at = datetime(2026, 8, 16, 9, tzinfo=UTC)
 
-    assert "SqlAlchemyTransactionOwner" in imported_names
-    assert direct_commits == []
+    try:
+        state = SqlAlchemyMaintenanceState(sessions)
+        assert state.last_completed_at() is None
+        state.record_completed(completed_at)
+        assert state.last_completed_at() == completed_at
+        with sessions() as session:
+            row = session.get(MaintenanceExecutionStateRecord, "metadata-retention")
+            assert row is not None
+            assert row.last_completed_at.replace(tzinfo=UTC) == completed_at
+    finally:
+        engine.dispose()
 
 
 @dataclass
@@ -407,6 +412,7 @@ def test_platform_boundary_has_no_delivery_or_concrete_module_dependencies() -> 
         "configuration.py",
         "cache.py",
         "clock.py",
+        "persistence.py",
     }
     assert expected <= {path.name for path in PLATFORM.glob("*.py")}
     forbidden = (

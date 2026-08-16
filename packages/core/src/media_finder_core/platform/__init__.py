@@ -6,6 +6,7 @@ from .configuration import ConfigurationError, CoreConfiguration
 from .database import (
     Base,
     MigrationState,
+    UnsupportedMigrationState,
     create_database,
     migrate_to_head,
     migration_state,
@@ -13,6 +14,7 @@ from .database import (
 )
 from .errors import SafeError, redact, safe_code
 from .maintenance import MaintenanceRunner, MaintenanceStatePort
+from .persistence import MaintenanceExecutionStateRecord, SqlAlchemyMaintenanceState
 from .transactions import SqlAlchemyTransactionOwner, nested_savepoint
 
 __all__ = [
@@ -22,12 +24,15 @@ __all__ = [
     "CoreConfiguration",
     "EphemeralCache",
     "EphemeralTokenExpired",
+    "MaintenanceExecutionStateRecord",
     "MaintenanceRunner",
     "MaintenanceStatePort",
     "MigrationState",
     "SafeError",
+    "SqlAlchemyMaintenanceState",
     "SqlAlchemyTransactionOwner",
     "SystemClock",
+    "UnsupportedMigrationState",
     "create_database",
     "migrate_to_head",
     "migration_state",

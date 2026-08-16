@@ -158,7 +158,10 @@ Acquisition history; that case requires a separately specified migration.
 For a disposable test deployment, remove or move aside the existing `/data`
 volume and let the new image create an empty database. Never point the modular
 image at an older Alembic revision and never restore a pre-reset database into
-it. Keep any moved volume until the new deployment has been verified.
+it. Startup rejects that state with
+`unsupported_database_revision_recreate_disposable_data`; it does not attempt
+an in-place conversion. Keep any moved volume until the new deployment has
+been verified.
 
 ### Normal release procedure
 

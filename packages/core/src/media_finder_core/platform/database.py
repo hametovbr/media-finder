@@ -52,8 +52,25 @@ def _migration_root() -> Path:
     raise RuntimeError("migration_resources_unavailable")
 
 
+class UnsupportedMigrationState(RuntimeError):
+    """The database predates the clean pre-release persistence boundary."""
+
+    def __init__(self) -> None:
+        super().__init__("unsupported_database_revision_recreate_disposable_data")
+
+
 def migrate_to_head(url: str) -> None:
-    command.upgrade(_alembic_config(url), "head")
+    config = _alembic_config(url)
+    head = ScriptDirectory.from_config(config).get_current_head()
+    probe = create_database(url)
+    try:
+        with probe.connect() as connection:
+            current = MigrationContext.configure(connection).get_current_revision()
+    finally:
+        probe.dispose()
+    if current is not None and current != head:
+        raise UnsupportedMigrationState
+    command.upgrade(config, "head")
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +91,7 @@ def migration_state(engine: Engine) -> MigrationState:
 __all__ = [
     "Base",
     "MigrationState",
+    "UnsupportedMigrationState",
     "create_database",
     "migrate_to_head",
     "migration_state",

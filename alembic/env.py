@@ -1,9 +1,18 @@
 from logging.config import fileConfig
 
+from media_finder_core.acquisition import persistence as acquisition_persistence
+from media_finder_core.catalog import persistence as catalog_persistence
+from media_finder_core.platform import persistence as platform_persistence
+from media_finder_core.platform.database import Base
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
-from media_finder.models import Base
+
+_CONTEXT_PERSISTENCE = (
+    acquisition_persistence,
+    catalog_persistence,
+    platform_persistence,
+)
 
 config = context.config
 if config.config_file_name is not None:

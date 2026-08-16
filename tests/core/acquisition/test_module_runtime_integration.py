@@ -14,7 +14,6 @@ import pytest
 from media_finder.control_gateway import BackendControlGateway
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.integration_runtime import RuntimeResolver
-from media_finder.models import DownloadClientInstance
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
 from media_finder_control import ControlFailure
 from media_finder_control.models import AcquisitionSubmissionRequest, ReleaseSearchRequest
@@ -29,7 +28,6 @@ from media_finder_core.acquisition.persistence import (
 )
 from media_finder_sdk import SafeReleaseSnapshot
 from media_finder_server import create_runtime_factory
-from sqlalchemy import delete
 from sqlalchemy.orm import Session, sessionmaker
 
 ROOT = Path(__file__).parents[3]
@@ -139,11 +137,6 @@ def _seed_item(database: Session):
     return item
 
 
-def _remove_legacy_client_rows(database: Session) -> None:
-    database.execute(delete(DownloadClientInstance))
-    database.commit()
-
-
 def _gateway(
     database: Session,
     runtime: RuntimeResolver,
@@ -162,7 +155,6 @@ def test_first_party_round_trip_uses_only_typed_module_runtime_and_exact_version
     database: Session,
 ) -> None:
     item = _seed_item(database)
-    _remove_legacy_client_rows(database)
     transport = _FirstPartyTransport()
     factory = create_runtime_factory(
         environment=FIRST_PARTY_ENVIRONMENT,
@@ -232,7 +224,6 @@ def test_manual_reconcile_uses_persisted_download_module_without_release_provide
     database: Session,
 ) -> None:
     item = _seed_item(database)
-    _remove_legacy_client_rows(database)
     sessions = sessionmaker(bind=database.get_bind(), expire_on_commit=False)
     draft = AcquisitionDraft(
         id=PENDING_ID,

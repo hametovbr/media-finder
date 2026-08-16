@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from media_finder.models import Acquisition, DownloadClientInstance, MediaItem
+from media_finder.models import Acquisition, MediaItem
 from media_finder_core.platform.database import migrate_to_head, session_factory
 from media_finder_server import create_ui_app
 from sqlalchemy import select
@@ -75,9 +75,6 @@ def test_failed_acquisition_fragment_localizes_status_and_failure_code(feedback_
     with sessions() as database:
         item = database.scalar(select(MediaItem).where(MediaItem.id == item_id))
         assert item is not None and item.current_revision_id is not None
-        instance = DownloadClientInstance(name="failure", module_key="fixture", config_payload={})
-        database.add(instance)
-        database.flush()
         database.add(
             Acquisition(
                 id=(acquisition_id := uuid4()),
@@ -88,7 +85,6 @@ def test_failed_acquisition_fragment_localizes_status_and_failure_code(feedback_
                 download_client_module_version="1.0.0",
                 media_item_id=item.id,
                 metadata_revision_id=item.current_revision_id,
-                download_client_instance_id=instance.id,
                 idempotency_key="failed-feedback",
                 naming_profile="jellyfin-v1",
                 status="failed",
