@@ -46,18 +46,28 @@ When deploying from a Git-backed stack in an orchestrator such as Komodo, keep `
 | `MEDIA_FINDER_PORT` | Compose only | `8080` | Local host port in the example |
 | `MEDIA_FINDER_IMAGE_TAG` | Compose only | `latest` | GHCR tag; pin `vX.Y.Z` for production |
 
-First-party integrations have one fixed environment contract:
+The checked-in first-party `module.toml` manifests are the source of truth for
+module environment contracts. Delivery validation keeps this table and the
+marked Compose block synchronized with those statically selected manifests:
 
-| Integration | Variable | Required for that integration | Secret |
-| --- | --- | --- | --- |
-| TMDB | `TMDB_TOKEN` | Yes | Yes |
-| Prowlarr | `PROWLARR_URL` | Yes | No |
-| Prowlarr | `PROWLARR_API_KEY` | Yes | Yes |
-| qBittorrent | `QBITTORRENT_URL` | Yes | No |
-| qBittorrent | `QBITTORRENT_USERNAME` | Yes | Yes |
-| qBittorrent | `QBITTORRENT_PASSWORD` | Yes | Yes |
+<!-- BEGIN FIRST-PARTY MODULE ENVIRONMENT -->
+| Module ID | Kind | Variable | Required for module | Secret |
+| --- | --- | --- | --- | --- |
+| `manual` | `metadata-provider` | Configuration-free | — | — |
+| `tmdb` | `metadata-provider` | `TMDB_TOKEN` | Yes | Yes |
+| `prowlarr` | `release-provider` | `PROWLARR_URL` | Yes | No |
+| `prowlarr` | `release-provider` | `PROWLARR_API_KEY` | Yes | Yes |
+| `qbittorrent` | `download-client` | `QBITTORRENT_URL` | Yes | No |
+| `qbittorrent` | `download-client` | `QBITTORRENT_USERNAME` | Yes | Yes |
+| `qbittorrent` | `download-client` | `QBITTORRENT_PASSWORD` | Yes | Yes |
+<!-- END FIRST-PARTY MODULE ENVIRONMENT -->
 
-Manual-only catalog use needs none of these integration variables. To enable an integration, set every variable in its row group before recreating the container. Empty values are treated as missing. The Settings page reports only exact variable names, required/secret classifications, and safe states; it cannot edit environment configuration and never displays values.
+Manual is explicitly configuration-free. To enable any other module, set every
+variable in its row group before recreating the container. Empty values are
+treated as missing. The Settings page reports only exact variable names,
+required/secret classifications, and safe states; it cannot edit environment
+configuration and never displays values. Neither resolved values nor their
+environment-variable names are persisted as integration configuration.
 
 For example:
 

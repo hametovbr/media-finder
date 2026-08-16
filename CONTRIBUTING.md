@@ -22,9 +22,13 @@ Do not manually edit generated `.agents/skills/openspec-*` files. Regenerate the
 
 ## Extension modules
 
-Before adding a metadata provider, use `.agents/skills/adding-metadata-provider`. Before adding a download client, use `.agents/skills/adding-download-client`. Before changing normalized metadata, use `.agents/skills/evolving-metadata-schema`.
+Before adding a metadata provider, use `.agents/skills/adding-metadata-provider`. Before adding a download client, use `.agents/skills/adding-download-client`. Release-provider changes follow the same OpenSpec, manifest, fixture, and conformance workflow. Before changing normalized metadata, use `.agents/skills/evolving-metadata-schema`.
 
-Modules are statically packaged through a pull request. They must use public contracts, include typed configuration, translations, fixtures, and shared conformance tests, and must not access application database sessions or UI templates.
+The [module-authoring guide](docs/module-authoring.md) describes the package,
+manifest, registration, lifecycle, conformance, and review boundaries shared by
+all three module kinds.
+
+Modules are statically packaged through a pull request. They use specialized public SDK contracts and include a value-free `module.toml`, exact environment declarations, translations, fixtures, and shared capability conformance tests. Manual declares an empty environment contract. Registration factories receive only immutable values declared by their own manifest; integration values and environment references are never persisted. Modules must not access core services, database sessions, HTTP routes, or UI templates.
 
 ## Baseline checks
 

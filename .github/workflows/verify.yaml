@@ -103,6 +103,7 @@ jobs:
         run: >-
           uv run pytest
           tests/core
+          tests/test_architecture_documentation.py
           tests/test_control_contracts.py
           tests/test_documentation_language.py
           tests/test_ephemeral_cache.py

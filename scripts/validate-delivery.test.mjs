@@ -25,6 +25,16 @@ function copyDeliveryFixture() {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.cpSync(path.join(sourceRoot, entry), target, { recursive: true });
   }
+  for (const entry of [
+    "packages/modules/download-qbittorrent/src/media_finder_download_qbittorrent/module.toml",
+    "packages/modules/metadata-manual/src/media_finder_metadata_manual/module.toml",
+    "packages/modules/metadata-tmdb/src/media_finder_metadata_tmdb/module.toml",
+    "packages/modules/release-prowlarr/src/media_finder_release_prowlarr/module.toml",
+  ]) {
+    const target = path.join(root, entry);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(sourceRoot, entry), target);
+  }
   fs.mkdirSync(path.join(root, "scripts"));
   fs.copyFileSync(
     path.join(sourceRoot, "scripts/smoke-container.sh"),
@@ -139,6 +149,59 @@ test("all exact first-party integration variables are required in deployment art
   );
 
   assert.match(validateDelivery(root).join("\n"), /QBITTORRENT_PASSWORD/);
+});
+
+test("compose integration variables follow statically selected module manifests", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(
+    root,
+    "packages/modules/metadata-tmdb/src/media_finder_metadata_tmdb/module.toml",
+    (value) => value.replace('name = "TMDB_TOKEN"', 'name = "TMDB_ACCESS_TOKEN"'),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /TMDB_ACCESS_TOKEN/);
+});
+
+test("operator environment table follows manifest classifications", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(
+    root,
+    "packages/modules/metadata-tmdb/src/media_finder_metadata_tmdb/module.toml",
+    (value) => value.replace("secret = true", "secret = false"),
+  );
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /module environment documentation must match first-party manifests/,
+  );
+});
+
+test("configuration-free modules are explicit in manifest-derived documentation", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(
+    root,
+    "packages/modules/metadata-manual/src/media_finder_metadata_manual/module.toml",
+    (value) =>
+      `${value}\n[[environment]]\nname = "MANUAL_TOKEN"\nrequired = true\nsecret = true\ndescription_key = "module.manual.environment.token"\n`,
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /MANUAL_TOKEN/);
+});
+
+test("operator environment table cannot omit a manifest declaration", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, "docs/operations.md", (value) =>
+    value.replace(/^\| `qbittorrent` \| `download-client` \| `QBITTORRENT_PASSWORD`.*\n/m, ""),
+  );
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /module environment documentation must match first-party manifests/,
+  );
 });
 
 test("compose must keep the built-in UI enabled by default", (context) => {

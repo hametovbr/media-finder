@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { parse as parseToml } from "smol-toml";
 import YAML from "yaml";
 
 function requireValue(failures, condition, message) {
@@ -58,6 +59,17 @@ const WORKSPACE_DISTRIBUTIONS = [
   "media-finder-release-prowlarr",
   "media-finder-download-qbittorrent",
 ];
+
+const FIRST_PARTY_MODULE_MANIFESTS = [
+  "packages/modules/metadata-manual/src/media_finder_metadata_manual/module.toml",
+  "packages/modules/metadata-tmdb/src/media_finder_metadata_tmdb/module.toml",
+  "packages/modules/release-prowlarr/src/media_finder_release_prowlarr/module.toml",
+  "packages/modules/download-qbittorrent/src/media_finder_download_qbittorrent/module.toml",
+];
+const COMPOSE_MODULE_ENVIRONMENT_BEGIN = "# BEGIN FIRST-PARTY MODULE ENVIRONMENT";
+const COMPOSE_MODULE_ENVIRONMENT_END = "# END FIRST-PARTY MODULE ENVIRONMENT";
+const DOCS_MODULE_ENVIRONMENT_BEGIN = "<!-- BEGIN FIRST-PARTY MODULE ENVIRONMENT -->";
+const DOCS_MODULE_ENVIRONMENT_END = "<!-- END FIRST-PARTY MODULE ENVIRONMENT -->";
 
 function stepByName(job, name) {
   return (job?.steps ?? []).find((step) => step.name === name);
@@ -153,8 +165,66 @@ function validateActionPins(workflows, failures) {
   }
 }
 
+function firstPartyModuleManifests(root, failures) {
+  const manifests = [];
+  for (const relativePath of FIRST_PARTY_MODULE_MANIFESTS) {
+    const content = readText(root, relativePath, failures);
+    if (!content) continue;
+    try {
+      manifests.push(parseToml(content));
+    } catch (error) {
+      failures.push(`${relativePath}: invalid TOML (${error.message})`);
+    }
+  }
+  return manifests;
+}
+
+function manifestEnvironmentNames(manifests) {
+  return manifests.flatMap((manifest) =>
+    (Array.isArray(manifest.environment) ? manifest.environment : []).map((declaration) =>
+      String(declaration.name),
+    ),
+  );
+}
+
+function markedBlock(content, begin, end) {
+  const start = content.indexOf(begin);
+  if (start === -1) return undefined;
+  const finish = content.indexOf(end, start + begin.length);
+  if (finish === -1) return undefined;
+  return content.slice(start, finish + end.length).replaceAll("\r\n", "\n").trim();
+}
+
+function expectedModuleEnvironmentDocumentation(manifests) {
+  const rows = [];
+  for (const manifest of manifests) {
+    const declarations = Array.isArray(manifest.environment) ? manifest.environment : [];
+    if (declarations.length === 0) {
+      rows.push(
+        `| \`${manifest.module_id}\` | \`${manifest.module_kind}\` | Configuration-free | — | — |`,
+      );
+      continue;
+    }
+    for (const declaration of declarations) {
+      rows.push(
+        `| \`${manifest.module_id}\` | \`${manifest.module_kind}\` | \`${declaration.name}\` | ${declaration.required === true ? "Yes" : "No"} | ${declaration.secret === true ? "Yes" : "No"} |`,
+      );
+    }
+  }
+  return [
+    DOCS_MODULE_ENVIRONMENT_BEGIN,
+    "| Module ID | Kind | Variable | Required for module | Secret |",
+    "| --- | --- | --- | --- | --- |",
+    ...rows,
+    DOCS_MODULE_ENVIRONMENT_END,
+  ].join("\n");
+}
+
 function validateCompose(root, failures) {
+  const manifests = firstPartyModuleManifests(root, failures);
+  const integrationVariables = manifestEnvironmentNames(manifests);
   const compose = loadYaml(root, "compose.example.yaml", failures);
+  const composeText = readText(root, "compose.example.yaml", failures);
   const services = compose.services ?? {};
   const serviceNames = Object.keys(services);
   requireValue(
@@ -169,14 +239,6 @@ function validateCompose(root, failures) {
     typeof service.image === "string" && service.image.startsWith("ghcr.io/"),
     "compose.example.yaml: service must use a GHCR image",
   );
-  const integrationVariables = [
-    "TMDB_TOKEN",
-    "PROWLARR_URL",
-    "PROWLARR_API_KEY",
-    "QBITTORRENT_URL",
-    "QBITTORRENT_USERNAME",
-    "QBITTORRENT_PASSWORD",
-  ];
   for (const name of integrationVariables) {
     requireValue(
       failures,
@@ -184,6 +246,19 @@ function validateCompose(root, failures) {
       `compose.example.yaml: exact integration variable ${name} is required`,
     );
   }
+  const composeEnvironmentBlock = markedBlock(
+    composeText,
+    COMPOSE_MODULE_ENVIRONMENT_BEGIN,
+    COMPOSE_MODULE_ENVIRONMENT_END,
+  );
+  const markedVariableNames = [...(composeEnvironmentBlock ?? "").matchAll(/^\s*([A-Z][A-Z0-9_]+):/gm)].map(
+    (match) => match[1],
+  );
+  requireValue(
+    failures,
+    JSON.stringify(markedVariableNames) === JSON.stringify(integrationVariables),
+    `compose.example.yaml: first-party module environment block must match manifests (expected: ${integrationVariables.join(", ")})`,
+  );
   requireValue(
     failures,
     Object.hasOwn(environment, "MEDIA_FINDER_UI_MODE") &&
@@ -197,16 +272,19 @@ function validateCompose(root, failures) {
       `compose.example.yaml: obsolete integration variable ${obsolete} is forbidden`,
     );
   }
-  const operatorDocumentation = ["README.md", "docs/operations.md"]
-    .map((file) => readText(root, file, failures))
-    .join("\n");
-  for (const name of integrationVariables) {
-    requireValue(
-      failures,
-      operatorDocumentation.includes(name),
-      `operator documentation: exact integration variable ${name} is required`,
-    );
-  }
+  const operationsDocumentation = readText(root, "docs/operations.md", failures);
+  const operatorDocumentation = [readText(root, "README.md", failures), operationsDocumentation].join(
+    "\n",
+  );
+  requireValue(
+    failures,
+    markedBlock(
+      operationsDocumentation,
+      DOCS_MODULE_ENVIRONMENT_BEGIN,
+      DOCS_MODULE_ENVIRONMENT_END,
+    ) === expectedModuleEnvironmentDocumentation(manifests),
+    "docs/operations.md: module environment documentation must match first-party manifests",
+  );
   requireValue(
     failures,
     !operatorDocumentation.includes("Store the corresponding `env:VARIABLE_NAME` reference"),
@@ -240,11 +318,11 @@ function validateCompose(root, failures) {
       `compose.example.yaml: forbidden media mount ${target}`,
     );
   }
-  const composeText = readText(root, "compose.example.yaml", failures).toLowerCase();
+  const normalizedComposeText = composeText.toLowerCase();
   for (const forbidden of ["traefik", "tinyauth", "hametov.uk"]) {
     requireValue(
       failures,
-      !composeText.includes(forbidden),
+      !normalizedComposeText.includes(forbidden),
       `compose.example.yaml: forbidden private assumption ${forbidden}`,
     );
   }

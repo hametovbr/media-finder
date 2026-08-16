@@ -7,7 +7,7 @@
 - The service is a catalog and acquisition control plane. It does not scan, mux, move, or monitor media files and does not invoke Jellyfin.
 - Metadata retention belongs to provider modules. Core contains only a provider-agnostic maintenance runner.
 - Media naming is container-format independent; MKV is never assumed.
-- Secrets enter through environment variables, are persisted only as `env:NAME` references, and are never returned or logged.
+- Integration configuration enters through exact module-declared environment variables. Neither resolved values nor environment-variable references are persisted, returned, or logged.
 - Production behavior is developed test-first. Each completed task is independently reviewed, committed, and pushed.
 
 ## Task 1: Spec-first repository bootstrap
