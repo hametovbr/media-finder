@@ -272,7 +272,9 @@ def test_manual_reconcile_uses_persisted_download_module_without_release_provide
 
 
 def test_server_acquisition_path_has_no_concrete_or_parallel_runtime_branch() -> None:
-    gateway_path = SERVER_LEGACY / "control_gateway.py"
+    gateway_path = (
+        ROOT / "packages" / "core" / "src" / "media_finder_core" / "control" / "acquisition.py"
+    )
     gateway_tree = ast.parse(gateway_path.read_text(encoding="utf-8"), filename=str(gateway_path))
     acquisition_methods = {
         "search_releases",
@@ -299,15 +301,15 @@ def test_server_acquisition_path_has_no_concrete_or_parallel_runtime_branch() ->
     for method in selected:
         for node in ast.walk(method):
             if isinstance(node, ast.Name) and node.id in forbidden_identifiers:
-                violations.append(f"control_gateway.py:{method.name}:{node.lineno}:{node.id}")
+                violations.append(f"acquisition.py:{method.name}:{node.lineno}:{node.id}")
             if isinstance(node, ast.Attribute) and node.attr in forbidden_identifiers:
-                violations.append(f"control_gateway.py:{method.name}:{node.lineno}:{node.attr}")
+                violations.append(f"acquisition.py:{method.name}:{node.lineno}:{node.attr}")
             if (
                 isinstance(node, ast.Constant)
                 and isinstance(node.value, str)
                 and any(name in node.value.casefold() for name in ("prowlarr", "qbittorrent"))
             ):
-                violations.append(f"control_gateway.py:{method.name}:{node.lineno}:{node.value}")
+                violations.append(f"acquisition.py:{method.name}:{node.lineno}:{node.value}")
 
     runtime_path = SERVER_LEGACY / "integration_runtime.py"
     runtime_tree = ast.parse(runtime_path.read_text(encoding="utf-8"), filename=str(runtime_path))

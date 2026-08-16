@@ -86,11 +86,11 @@ APPLICATION_FORBIDDEN_IMPORTS = (
 )
 SESSION_IDENTIFIERS = {"Session", "AsyncSession", "sessionmaker", "scoped_session"}
 CONTROL_CONTEXT_IMPORTS = {
-    "catalog": {"commands", "queries", "ports"},
-    "acquisition": {"commands", "queries", "ports"},
+    "catalog": {"commands", "manual", "metadata", "models", "queries", "ports"},
+    "acquisition": {"commands", "models", "queries", "ports"},
     "exports": {"metadata", "naming", "nfo", "ports"},
     "module_runtime": {"diagnostics"},
-    "platform": {"errors"},
+    "platform": {"cache", "errors"},
 }
 
 

@@ -49,8 +49,8 @@
 
 ## 6. Decompose Control Orchestration and Build the Server Host
 
-- [ ] 6.1 Add RED tests requiring context-specific catalog, metadata, acquisition, and diagnostic control services plus a small `ControlGateway` facade that has no ORM, concrete module, environment, or FastAPI imports.
-- [ ] 6.2 Decompose the existing backend gateway into those core control services and facade, preserve control DTO/error/pagination/token semantics, make real-gateway and HTTP-adapter conformance tests GREEN, and delete superseded gateway internals.
+- [x] 6.1 Add RED tests requiring context-specific catalog, metadata, acquisition, and diagnostic control services plus a small `ControlGateway` facade that has no ORM, concrete module, environment, or FastAPI imports.
+- [x] 6.2 Decompose the existing backend gateway into those core control services and facade, preserve control DTO/error/pagination/token semantics, make real-gateway and HTTP-adapter conformance tests GREEN, and delete superseded gateway internals.
 - [ ] 6.3 Add RED composition tests requiring `apps/server` to be the only concrete composition root and requiring child factories to receive rather than create shared engine, sessions, services, caches, security, modules, and maintenance resources.
 - [ ] 6.4 Move FastAPI control, processor, health, browser-session, migration/startup, and CLI adapters into `media_finder_server`; explicitly assemble core, first-party registrations, and optional built-in UI, then make route and composition tests GREEN.
 - [ ] 6.5 Implement one root lifespan with dependency-order startup and reverse-order shutdown for database, module instances, maintenance, and HTTP resources; cover successful reuse, partial construction failure, concurrent attempts, and both `builtin` and `disabled` UI modes.
