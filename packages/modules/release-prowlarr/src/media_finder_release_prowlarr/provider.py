@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ipaddress
 import json
 import re
 from collections.abc import Mapping
@@ -18,14 +17,14 @@ from media_finder_sdk import (
     ReleaseSearchQuery,
     SafeReleaseSnapshot,
     TorrentArtifact,
+    is_safe_public_source_page,
+    is_safe_release_guid,
 )
 from pydantic import HttpUrl
 
 from .transport import ProwlarrTransport
 
-_SAFE_GUID = re.compile(r"^[A-Za-z0-9._:-]{1,255}$")
 _INFOHASH = re.compile(r"^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$")
-_SUSPECT_SECRET = re.compile(r"^[A-Za-z0-9_-]{24,}$")
 
 
 class ProwlarrProvider:
@@ -107,13 +106,7 @@ def _filters(query: ReleaseSearchQuery) -> dict[str, str]:
 
 def _snapshot(raw: Mapping[str, object]) -> SafeReleaseSnapshot:
     guid_value = _string(raw.get("guid"))
-    guid = (
-        guid_value
-        if guid_value
-        and _SAFE_GUID.fullmatch(guid_value)
-        and _SUSPECT_SECRET.fullmatch(guid_value) is None
-        else None
-    )
+    guid = guid_value if guid_value and is_safe_release_guid(guid_value) else None
     hash_value = _string(raw.get("infoHash"))
     infohash = hash_value.casefold() if hash_value and _INFOHASH.fullmatch(hash_value) else None
     return SafeReleaseSnapshot(
@@ -140,7 +133,6 @@ def _safe_public_page(value: str | None) -> str | None:
             or not host
             or parsed.username is not None
             or parsed.password is not None
-            or not _public_host(host)
         ):
             return None
         port = parsed.port
@@ -149,17 +141,8 @@ def _safe_public_page(value: str | None) -> str | None:
     netloc = f"[{host}]" if ":" in host else host
     if port is not None:
         netloc = f"{netloc}:{port}"
-    return urlunsplit((parsed.scheme, netloc, "/", "", ""))
-
-
-def _public_host(host: str) -> bool:
-    if host.casefold() == "localhost":
-        return False
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        return "." in host
-    return address.is_global
+    safe_page = urlunsplit((parsed.scheme, netloc, "/", "", ""))
+    return safe_page if is_safe_public_source_page(safe_page) else None
 
 
 def _string(value: object) -> str | None:

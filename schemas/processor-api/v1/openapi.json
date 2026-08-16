@@ -183,6 +183,7 @@
       },
       "NormalizedMetadata": {
         "additionalProperties": false,
+        "description": "Processor API v1 projection of normalized module metadata.",
         "properties": {
           "artwork": {
             "default": [],
@@ -429,6 +430,7 @@
       },
       "Provenance": {
         "additionalProperties": false,
+        "description": "Stable processor wire provenance retained from API v1.",
         "properties": {
           "external_id": {
             "title": "External Id",
@@ -450,8 +452,8 @@
             "title": "Locale",
             "type": "string"
           },
-          "provider_id": {
-            "title": "Provider Id",
+          "provider_key": {
+            "title": "Provider Key",
             "type": "string"
           },
           "source_label": {
@@ -467,7 +469,7 @@
           }
         },
         "required": [
-          "provider_id",
+          "provider_key",
           "external_id",
           "locale"
         ],

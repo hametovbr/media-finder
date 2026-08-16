@@ -57,9 +57,13 @@ from .serialized_conformance import (
     SerializedSafeReleaseSnapshot,
     StableFailureCase,
     is_safe_public_source_page,
+    is_safe_release_guid,
     parse_serialized_conformance_fixture,
 )
 from .types import (
+    MAX_PROVIDER_PAYLOAD_BYTES,
+    MAX_PROVIDER_PAYLOAD_DEPTH,
+    MAX_PROVIDER_PAYLOAD_NODES,
     Artwork,
     CorrelationResult,
     DownloadArtifact,
@@ -95,6 +99,9 @@ from .types import (
 )
 
 __all__ = [
+    "MAX_PROVIDER_PAYLOAD_BYTES",
+    "MAX_PROVIDER_PAYLOAD_DEPTH",
+    "MAX_PROVIDER_PAYLOAD_NODES",
     "SDK_VERSION",
     "SEMVER_PATTERN",
     "SUPPORTED_CONTRACT_VERSION",
@@ -177,6 +184,7 @@ __all__ = [
     "assert_release_registration_conforms",
     "generate_schema_artifacts",
     "is_safe_public_source_page",
+    "is_safe_release_guid",
     "load_manifest",
     "parse_manifest",
     "parse_serialized_conformance_fixture",

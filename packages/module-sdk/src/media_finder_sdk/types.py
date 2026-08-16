@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
+from math import isfinite
 from types import MappingProxyType
 from typing import Annotated, Literal, Self
 
@@ -18,16 +20,66 @@ MAX_PRIVATE_SELECTION_BYTES = 64 * 1024
 MAX_TORRENT_ARTIFACT_BYTES = 20 * 1024 * 1024
 MAX_METADATA_IMPORT_BYTES = 1024 * 1024
 MAX_EPISODE_TABLE_BYTES = 1024 * 1024
+MAX_PROVIDER_PAYLOAD_BYTES = 2 * 1024 * 1024
+MAX_PROVIDER_PAYLOAD_DEPTH = 32
+MAX_PROVIDER_PAYLOAD_NODES = 100_000
 
 
-def _freeze_json(value: object) -> JsonValue:
-    if value is None or isinstance(value, str | int | float | bool):
+def _freeze_json(
+    value: object,
+    *,
+    depth: int = 0,
+    budget: list[int] | None = None,
+) -> JsonValue:
+    if depth > MAX_PROVIDER_PAYLOAD_DEPTH:
+        raise ValueError("provider_payload_too_deep")
+    if budget is None:
+        budget = [0, 0]
+    budget[0] += 1
+    if budget[0] > MAX_PROVIDER_PAYLOAD_NODES:
+        raise ValueError("provider_payload_too_large")
+    if isinstance(value, float) and not isfinite(value):
+        raise ValueError("provider_payload_not_json")
+    if isinstance(value, str):
+        _charge_json(value, budget)
+        return value
+    if value is None or isinstance(value, int | float | bool):
+        _charge_json(value, budget)
         return value
     if isinstance(value, Mapping):
-        return MappingProxyType({str(key): _freeze_json(item) for key, item in value.items()})
+        budget[1] += 2 + max(0, len(value) - 1) + len(value)
+        frozen: dict[str, JsonValue] = {}
+        for key, item in value.items():
+            text_key = str(key)
+            _charge_json(text_key, budget)
+            frozen[text_key] = _freeze_json(item, depth=depth + 1, budget=budget)
+        _require_json_budget(budget)
+        return MappingProxyType(frozen)
     if isinstance(value, list | tuple):
-        return tuple(_freeze_json(item) for item in value)
+        budget[1] += 2 + max(0, len(value) - 1)
+        _require_json_budget(budget)
+        return tuple(_freeze_json(item, depth=depth + 1, budget=budget) for item in value)
     raise ValueError("provider_payload_not_json")
+
+
+def _charge_json(value: JsonValue, budget: list[int]) -> None:
+    try:
+        budget[1] += len(
+            json.dumps(
+                value,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+    except (TypeError, ValueError):
+        raise ValueError("provider_payload_not_json") from None
+    _require_json_budget(budget)
+
+
+def _require_json_budget(budget: list[int]) -> None:
+    if budget[1] > MAX_PROVIDER_PAYLOAD_BYTES:
+        raise ValueError("provider_payload_too_large")
 
 
 def _thaw_json(value: JsonValue) -> JsonValue:
@@ -73,7 +125,13 @@ class MetadataSearchResult(PublicModel):
 class ProviderPayload(PublicModel):
     """Provider-private JSON payload crossing only the module/core boundary."""
 
-    data: Mapping[str, JsonValue]
+    data: Mapping[str, JsonValue] = Field(
+        json_schema_extra={
+            "x-media-finder-max-canonical-json-bytes": MAX_PROVIDER_PAYLOAD_BYTES,
+            "x-media-finder-max-depth": MAX_PROVIDER_PAYLOAD_DEPTH,
+            "x-media-finder-max-nodes": MAX_PROVIDER_PAYLOAD_NODES,
+        }
+    )
 
     @field_validator("data", mode="before")
     @classmethod
@@ -391,6 +449,9 @@ __all__ = [
     "MAX_EPISODE_TABLE_BYTES",
     "MAX_METADATA_IMPORT_BYTES",
     "MAX_PRIVATE_SELECTION_BYTES",
+    "MAX_PROVIDER_PAYLOAD_BYTES",
+    "MAX_PROVIDER_PAYLOAD_DEPTH",
+    "MAX_PROVIDER_PAYLOAD_NODES",
     "MAX_TORRENT_ARTIFACT_BYTES",
     "Artwork",
     "CorrelationResult",

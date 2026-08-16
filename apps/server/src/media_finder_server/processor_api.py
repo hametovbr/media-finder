@@ -26,7 +26,8 @@ from media_finder_core.exports import (
     NfoExportService,
 )
 from media_finder_core.platform import migration_state
-from media_finder_sdk import NormalizedMetadata
+from media_finder_sdk import NormalizedMetadata as SdkNormalizedMetadata
+from media_finder_sdk import Provenance as SdkProvenance
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -40,6 +41,18 @@ class ProcessorModel(BaseModel):
     """Strict serialized value published by the processor API."""
 
     model_config = ConfigDict(extra="forbid")
+
+
+class Provenance(SdkProvenance):
+    """Stable processor wire provenance retained from API v1."""
+
+    provider_id: str = Field(serialization_alias="provider_key")
+
+
+class NormalizedMetadata(SdkNormalizedMetadata):
+    """Processor API v1 projection of normalized module metadata."""
+
+    provenance: Provenance
 
 
 class ProcessorError(ProcessorModel):

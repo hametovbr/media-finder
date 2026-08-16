@@ -70,6 +70,9 @@ def test_schemas_preserve_semantic_module_boundaries() -> None:
     assert metadata_definitions["MetadataImportDocument"]["writeOnly"] is True
     assert metadata_definitions["EpisodeTableDocument"]["writeOnly"] is True
     provider_data = metadata_definitions["ProviderPayload"]["properties"]["data"]
+    assert provider_data["x-media-finder-max-canonical-json-bytes"] == 2 * 1024 * 1024
+    assert provider_data["x-media-finder-max-depth"] == 32
+    assert provider_data["x-media-finder-max-nodes"] == 100_000
     assert provider_data["type"] == "object"
     assert provider_data["additionalProperties"] == {"$ref": "#/$defs/JsonValue"}
     release_definitions = schemas["release.schema.json"]["$defs"]

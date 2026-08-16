@@ -587,7 +587,10 @@
             "$ref": "#/$defs/JsonValue"
           },
           "title": "Data",
-          "type": "object"
+          "type": "object",
+          "x-media-finder-max-canonical-json-bytes": 2097152,
+          "x-media-finder-max-depth": 32,
+          "x-media-finder-max-nodes": 100000
         }
       },
       "required": [

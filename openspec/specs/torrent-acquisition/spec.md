@@ -7,26 +7,30 @@ Define a deliberate torrent-selection and submission workflow that is idempotent
 ## Requirements
 
 ### Requirement: Manual torrent discovery
-The system SHALL search Prowlarr only after a user supplies or confirms a free-form query and optional filters. It SHALL accept only BitTorrent results and SHALL present results for explicit user selection.
+The system SHALL delegate release discovery to the statically selected registered release-provider module only after a user supplies or confirms a free-form query and optional filters. It SHALL accept only BitTorrent results and SHALL present results for explicit user selection. The default first-party composition SHALL use Prowlarr through that release-provider contract.
 
 #### Scenario: Prowlarr returns mixed protocols
-- **WHEN** a Prowlarr response contains torrent and Usenet results
+- **WHEN** the first-party Prowlarr release-provider response contains torrent and non-torrent results
 - **THEN** the system presents only torrent results
 
+#### Scenario: Replace the first-party release provider
+- **WHEN** a conforming release provider replaces Prowlarr through an explicit repository and host-composition change
+- **THEN** acquisition uses the same core search, opaque-selection, snapshot, and submission workflow without provider-specific core branches
+
 ### Requirement: Ephemeral release artifacts
-Search results SHALL live only in a bounded in-memory TTL cache, and the browser SHALL receive a safe opaque token. Prowlarr JSON payloads, returned result counts, UI form bodies, and resolved torrent bytes SHALL have enforced bounds with stable safe errors. Magnet URIs, torrent bytes, complete download URLs, and passkey-bearing URL components SHALL NOT be persisted or logged, including by underlying HTTP client loggers.
+Search results SHALL live only in a core-owned bounded in-memory TTL cache, and the browser SHALL receive a safe opaque token. Release-provider payloads, returned result counts, UI form bodies, and resolved torrent bytes SHALL have enforced bounds with stable safe errors. Magnet URIs, torrent bytes, complete download URLs, and passkey-bearing URL components SHALL NOT be persisted or logged, including by underlying HTTP client loggers.
 
 #### Scenario: Search token expires
 - **WHEN** a user submits an expired opaque result token
-- **THEN** the system rejects it and requires a fresh search without revealing the underlying download URL
+- **THEN** the system rejects it and requires a fresh search without revealing the underlying resolution data
 
 #### Scenario: Resolve a selected torrent
 - **WHEN** a valid result token is selected
-- **THEN** the Prowlarr adapter resolves a magnet URI or torrent bytes in memory and does not write the artifact to disk or the database
+- **THEN** core consumes it once and asks the owning release-provider module to resolve a magnet URI or torrent bytes in memory without writing the artifact to disk or the database
 
 #### Scenario: Reject oversized integration input
-- **WHEN** a UI form, Prowlarr response, result set, or torrent artifact exceeds its declared bound
-- **THEN** the system rejects it with a stable safe code without persisting or logging sensitive content and a selected release token remains one-use
+- **WHEN** a UI form, release-provider response, result set, or torrent artifact exceeds its declared bound
+- **THEN** the system rejects it with a stable safe code without persisting or logging sensitive content and the selected release token remains one-use
 
 ### Requirement: Live destination selection
 The system SHALL use one environment-owned qBittorrent instance for new acquisitions and SHALL reload its categories immediately before submission. The user SHALL explicitly select a current destination but SHALL NOT select, create, edit, archive, or restore a download-client instance.
@@ -40,11 +44,15 @@ The system SHALL use one environment-owned qBittorrent instance for new acquisit
 - **THEN** release submission is unavailable without affecting catalog or metadata operations
 
 ### Requirement: Idempotent acquisition creation
-Before submitting, the system SHALL create a `pending` Acquisition with a UUID, idempotency key, pinned metadata revision, the stable environment-owned qBittorrent client record, destination, release snapshot, and naming-profile identifier. Reusing the same idempotency key SHALL return the same Acquisition.
+Before submitting, the system SHALL create a `pending` Acquisition with a UUID, idempotency key, pinned metadata revision, release-provider identity and version, download-client identity and version, destination, safe release snapshot, and naming-profile identifier. It SHALL NOT persist integration configuration, an environment reference, or a mutable client-instance record. Reusing the same idempotency key SHALL return the same Acquisition.
 
 #### Scenario: Duplicate form submission
 - **WHEN** the same idempotency key is submitted twice
 - **THEN** both responses identify the same Acquisition and at most one client task is created
+
+#### Scenario: Inspect historical module identity
+- **WHEN** an Acquisition is read after the application has upgraded one of its statically packaged modules
+- **THEN** its immutable snapshot still identifies the release-provider and download-client module versions used for the original submission
 
 ### Requirement: Safe release snapshot
 An Acquisition SHALL persist only the release title, indexer, a validated safe GUID or canonical infohash when available, and an optional sanitized public source-page URL. A safe GUID SHALL be a 1–255 character ASCII opaque identifier restricted to letters, digits, `.`, `_`, `-`, and `:`, without whitespace, percent encoding, `://`, or path/query/fragment delimiters, and SHALL be explicitly classified as non-sensitive by the adapter. It SHALL NOT be a URL, path, credential, or unclassified token. A canonical infohash SHALL be lowercase hexadecimal with exactly 40 characters for BitTorrent v1 or 64 characters for BitTorrent v2. An uncertain or invalid GUID or infohash SHALL be omitted.
@@ -68,22 +76,23 @@ A source-page URL SHALL be accepted only from a dedicated public-page field with
 - **THEN** the snapshot may persist both normalized identifiers without persisting the release artifact or resolution URL
 
 ### Requirement: Exact client correlation
-The system SHALL submit the exact correlation token `mf-acq-<acquisition-uuid>`. The environment-owned qBittorrent module SHALL store the chosen destination as category and the exact correlation token as a tag. Authenticated HTTP sessions SHALL be isolated between TMDB, Prowlarr, and qBittorrent so a cookie from one service or port cannot reach another.
+The system SHALL submit the exact correlation token `mf-acq-<acquisition-uuid>`. The environment-owned qBittorrent module SHALL store the chosen destination as category and the exact correlation token as a tag. Authenticated HTTP sessions SHALL be isolated between metadata providers, release providers, and download clients so cookies or authorization state from one integration or port cannot reach another.
 
 #### Scenario: Submit to qBittorrent
 - **WHEN** qBittorrent accepts a selected artifact
 - **THEN** the torrent uses the selected category and an exact `mf-acq-<uuid>` tag, and the Acquisition becomes `submitted`
 
 #### Scenario: Live integration construction fails
-- **WHEN** Prowlarr validation or a metadata-provider or qBittorrent builder fails after creating one or more HTTP clients
-- **THEN** the runtime validates before caching, immediately closes and forgets every client created by that failed attempt, including across repeated failures, and leaves unrelated successful cached integrations open
+- **WHEN** a release-provider, metadata-provider, or download-client construction or live validation attempt fails after allocating one or more resources
+- **THEN** the module lifecycle immediately closes and forgets every resource owned by that failed attempt and leaves unrelated successful cached modules open
 
-### Requirement: Preserve historical client references
-The system SHALL retain download-client rows referenced by existing Acquisitions while preventing legacy persisted configurations from being used for new discovery, submission, or reconciliation. It SHALL maintain one stable system-owned qBittorrent client identity for new Acquisitions.
+#### Scenario: Reconcile after a compatible download-client upgrade
+- **WHEN** a pending Acquisition is reconciled after the statically selected download-client module has been upgraded while retaining the same stable module ID
+- **THEN** the currently packaged module performs the exact-correlation lookup, the Acquisition retains its original immutable module-version snapshot, and no release provider is required
 
-#### Scenario: Upgrade a database with client history
-- **WHEN** an existing deployment containing named client instances is upgraded
-- **THEN** historical Acquisition records remain readable and new Acquisitions reference only the system-owned qBittorrent identity
+#### Scenario: Reconcile after download-client replacement or removal
+- **WHEN** a pending Acquisition identifies a download-client module ID that is missing or differs from the statically selected download-client module
+- **THEN** reconciliation returns a stable safe unavailable-or-mismatch result, performs no lookup through the foreign client, and leaves the Acquisition pending for a future compatible reconcile
 
 ### Requirement: Bounded acquisition states
 The MVP SHALL expose only `pending`, `submitted`, and `failed` acquisition states and SHALL NOT track progress after successful submission.

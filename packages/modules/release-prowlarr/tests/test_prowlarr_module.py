@@ -642,6 +642,21 @@ def test_torrent_download_url_is_redacted_from_httpx_info_logs(
     assert f"{BASE_URL}/download/fixture.torrent" not in caplog.text
 
 
+def test_live_validation_rejects_an_oversized_status_response() -> None:
+    def oversized(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/api/v1/system/status")
+        return httpx.Response(200, text="{}" + " " * (2 * 1024 * 1024))
+
+    provider = _module(RecordingClientFactory(oversized)).build(
+        resolve_module_environment(_module().manifest, _environment())
+    )
+    try:
+        with pytest.raises(ModuleError, match="prowlarr_configuration_invalid"):
+            provider.validate()
+    finally:
+        provider.close()
+
+
 def test_source_page_snapshot_never_persists_untrusted_paths_or_queries() -> None:
     opaque_path = "opaque-release-secret-1234567890"
 
@@ -666,3 +681,49 @@ def test_source_page_snapshot_never_persists_untrusted_paths_or_queries() -> Non
     rendered = candidate.snapshot.model_dump_json()
     assert opaque_path not in rendered
     assert DOWNLOAD_SECRET not in rendered
+
+
+@pytest.mark.parametrize(
+    "source_page_url",
+    [
+        "http://printer.local/private?passkey=secret",
+        "http://localhost/private",
+        "http://127.0.0.1/private",
+    ],
+)
+def test_source_page_snapshot_rejects_non_public_hosts(source_page_url: str) -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/api/v1/search"):
+            payload = _search_payload()
+            payload[0]["infoUrl"] = source_page_url
+            return httpx.Response(200, json=payload[:1])
+        return httpx.Response(200, json={})
+
+    provider = _module(RecordingClientFactory(respond)).build(
+        resolve_module_environment(_module().manifest, _environment())
+    )
+    try:
+        candidate = provider.search(ReleaseSearchQuery(query="Fixture", limit=10))[0]
+    finally:
+        provider.close()
+
+    assert candidate.snapshot.source_page_url is None
+
+
+def test_release_snapshot_rejects_credential_like_guid() -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/api/v1/search"):
+            payload = _search_payload()
+            payload[0]["guid"] = "token-123"
+            return httpx.Response(200, json=payload[:1])
+        return httpx.Response(200, json={})
+
+    provider = _module(RecordingClientFactory(respond)).build(
+        resolve_module_environment(_module().manifest, _environment())
+    )
+    try:
+        candidate = provider.search(ReleaseSearchQuery(query="Fixture", limit=10))[0]
+    finally:
+        provider.close()
+
+    assert candidate.snapshot.guid is None

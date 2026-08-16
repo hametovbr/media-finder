@@ -16,6 +16,7 @@ from media_finder_sdk import (
     PrivateReleaseSelection,
     Provenance,
     ProviderPayload,
+    Rating,
     ReleaseProvider,
     TorrentArtifact,
 )
@@ -97,3 +98,23 @@ def test_metadata_dtos_are_strict_and_deeply_immutable() -> None:
             media_kind=MediaKind.MOVIE,
             locale="en",
         )
+
+
+def test_provider_payload_is_bounded_before_core_consumes_it() -> None:
+    with pytest.raises(ValidationError, match="provider_payload_too_large"):
+        ProviderPayload(data={"value": "x" * (2 * 1024 * 1024 + 1)})
+    with pytest.raises(ValidationError, match="provider_payload_too_large"):
+        ProviderPayload(data={"values": [10**100] * 99_900})
+
+    nested: dict[str, object] = {}
+    for _ in range(40):
+        nested = {"nested": nested}
+    with pytest.raises(ValidationError, match="provider_payload_too_deep"):
+        ProviderPayload(data=nested)
+
+
+def test_public_dtos_reject_non_finite_numbers() -> None:
+    with pytest.raises(ValidationError):
+        Rating(source="fixture", value=float("nan"))
+    with pytest.raises(ValidationError, match="provider_payload_not_json"):
+        ProviderPayload(data={"value": float("inf")})

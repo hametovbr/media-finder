@@ -13,6 +13,9 @@ from .errors import ModuleErrorData
 from .manifest import ModuleManifest
 from .serialized_conformance import SERIALIZED_CONFORMANCE_ADAPTER
 from .types import (
+    MAX_PROVIDER_PAYLOAD_BYTES,
+    MAX_PROVIDER_PAYLOAD_DEPTH,
+    MAX_PROVIDER_PAYLOAD_NODES,
     CorrelationResult,
     DownloadDestination,
     EpisodeTableDocument,
@@ -145,6 +148,9 @@ def _restore_provider_payload_input_shape(schema: dict[str, object]) -> None:
         "additionalProperties": {"$ref": "#/$defs/JsonValue"},
         "title": "Data",
         "type": "object",
+        "x-media-finder-max-canonical-json-bytes": MAX_PROVIDER_PAYLOAD_BYTES,
+        "x-media-finder-max-depth": MAX_PROVIDER_PAYLOAD_DEPTH,
+        "x-media-finder-max-nodes": MAX_PROVIDER_PAYLOAD_NODES,
     }
 
 

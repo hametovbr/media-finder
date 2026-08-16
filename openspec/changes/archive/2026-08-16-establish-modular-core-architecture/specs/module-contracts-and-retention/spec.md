@@ -69,6 +69,8 @@ A release-provider module SHALL expose exact environment requirements, resolved-
 ### Requirement: Public module SDK artifacts
 The module SDK SHALL publish only capability DTOs, specialized protocols, manifest schemas, registration contracts, stable error categories, and conformance fixtures required by module authors. Specialized protocols SHALL include metadata retrieval, optional metadata editing within a metadata-provider registration, release discovery, and download-client behavior. It SHALL NOT expose core persistence, repositories, application services, framework routers, or a general dependency-injection container. Deterministic JSON Schemas and fixtures SHALL accompany the Python binding.
 
+Provider-owned JSON SHALL use finite JSON scalar values, SHALL contain at most 100,000 nodes and 32 nesting levels, and its canonical compact UTF-8 representation SHALL NOT exceed 2,097,152 bytes. These exact limits SHALL be published in the deterministic metadata schema and enforced before core copies or persists a provider payload.
+
 #### Scenario: Build a module against the SDK
 - **WHEN** a contributor builds a metadata, release, or download module in isolation
 - **THEN** the module imports only the public SDK and implementation libraries and can run its conformance suite without installing core
@@ -76,6 +78,10 @@ The module SDK SHALL publish only capability DTOs, specialized protocols, manife
 #### Scenario: Detect contract drift
 - **WHEN** a public SDK DTO, manifest field, error category, or fixture changes without the corresponding versioned schema artifact and OpenSpec change
 - **THEN** required CI verification fails
+
+#### Scenario: Reject an oversized provider payload
+- **WHEN** a metadata provider returns JSON that exceeds the byte, node, or nesting bound or contains a non-finite number
+- **THEN** SDK validation rejects it before core persistence and the published metadata schema reports the same exact bounds
 
 ### Requirement: Capability-specific registration
 The static registry SHALL maintain separate typed registrations for metadata providers, release providers, and download clients. A metadata-provider registration MAY expose a typed metadata-editor factory only when its manifest declares the matching capability. Each registration SHALL match its manifest kind and SHALL expose only the factory and lifecycle operations needed for that capability. There SHALL NOT be a universal callback, priority-ordered hook chain, module-to-module lookup facility, or shared mutable context object.

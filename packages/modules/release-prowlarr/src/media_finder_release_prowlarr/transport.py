@@ -14,6 +14,7 @@ from media_finder_sdk import ModuleError, ModuleFailureCategory, ResolvedModuleE
 _SAFE_PATH = re.compile(r"^/[A-Za-z0-9._~/-]*$")
 _SECRET_MARKERS = ("credential", "passkey", "secret", "session", "token")
 _LOG_URL = re.compile(r"https?://[^\s\"']+", re.IGNORECASE)
+_MAX_STATUS_BYTES = 64 * 1024
 
 
 class _HttpUrlRedactionFilter(logging.Filter):
@@ -68,14 +69,16 @@ class ProwlarrTransport:
 
     def validate(self) -> None:
         try:
-            response = self._client.get(
+            with self._client.stream(
+                "GET",
                 f"{self._base_url}/api/v1/system/status",
                 headers=self._headers(),
                 follow_redirects=False,
-            )
-            if response.is_redirect:
-                raise RuntimeError
-            response.raise_for_status()
+            ) as response:
+                if response.is_redirect:
+                    raise RuntimeError
+                response.raise_for_status()
+                _read_bounded(response, _MAX_STATUS_BYTES, "release_response_too_large")
         except Exception:
             raise _error(
                 ModuleFailureCategory.CONFIGURATION,

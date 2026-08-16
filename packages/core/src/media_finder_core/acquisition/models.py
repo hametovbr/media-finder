@@ -8,7 +8,12 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from media_finder_sdk import DownloadDestination, SafeReleaseSnapshot
+from media_finder_sdk import (
+    DownloadDestination,
+    SafeReleaseSnapshot,
+    is_safe_public_source_page,
+    is_safe_release_guid,
+)
 
 _MODULE_ID = re.compile(r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$")
 
@@ -112,16 +117,11 @@ class DestinationUnavailable(ValueError):
 def safe_release_snapshot(value: SafeReleaseSnapshot) -> SafeReleaseSnapshot:
     copied = SafeReleaseSnapshot.model_validate(value.model_dump(mode="json"))
     guid = copied.guid
-    if guid is not None and (len(guid) > 255 or re.fullmatch(r"[A-Za-z0-9._:-]+", guid) is None):
+    if guid is not None and not is_safe_release_guid(guid):
         guid = None
     infohash = copied.infohash.lower() if copied.infohash is not None else None
     source_page_url = copied.source_page_url
-    if source_page_url is not None and (
-        source_page_url.username is not None
-        or source_page_url.password is not None
-        or source_page_url.query is not None
-        or source_page_url.fragment is not None
-    ):
+    if source_page_url is not None and not is_safe_public_source_page(str(source_page_url)):
         source_page_url = None
     return SafeReleaseSnapshot(
         title=copied.title,

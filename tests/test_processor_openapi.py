@@ -70,6 +70,10 @@ def test_processor_openapi_is_current_and_semantically_complete() -> None:
             "$ref": "#/components/schemas/NormalizedMetadata"
         }
 
+    provenance = schema["components"]["schemas"]["Provenance"]
+    assert "provider_key" in provenance["properties"]
+    assert "provider_id" not in provenance["properties"]
+
     for path in naming_paths:
         operation = _operation(schema, path)
         assert operation["security"] == [{"HTTPBearer": []}]

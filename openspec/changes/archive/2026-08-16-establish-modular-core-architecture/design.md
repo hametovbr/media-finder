@@ -169,6 +169,13 @@ Alternative rejected: retaining legacy tables solely for rollback would make an 
 - capability-specific conformance fixtures and runners;
 - deterministic JSON Schema generators.
 
+Provider-owned JSON crossing the SDK boundary has one portable resource contract:
+canonical UTF-8 JSON is limited to 2,097,152 bytes, nesting is limited to 32
+levels, the value graph is limited to 100,000 nodes, and non-finite numbers are
+rejected. The Python binding and generated metadata schema publish the same
+values so another implementation can enforce them before copying or persisting
+module output.
+
 It does not depend on FastAPI, SQLAlchemy, Jinja, core, control contracts, or concrete HTTP libraries. It exposes no service container, database abstraction, router registration, generic callback, or module lookup API.
 
 The Python v1 operations remain synchronous because current provider/client implementations, SQLAlchemy transaction flow, and tests are synchronous. Core invokes blocking external operations through its existing bounded thread-execution boundary. A future SDK major may become async if measured concurrency or cancellation requirements justify the compatibility cost; async is not necessary to establish module ownership.

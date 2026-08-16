@@ -86,6 +86,8 @@ def test_metadata_endpoints_return_current_and_pinned_validated_snapshots(
     for payload in (current.json(), pinned_response.json()):
         assert payload["schema_version"] == "1"
         assert payload["provenance"]["locale"] == "en-US"
+        assert payload["provenance"]["provider_key"] == "manual"
+        assert "provider_id" not in payload["provenance"]
         assert payload["completeness"] == 0.95
         assert payload["structural_quality"] == 1.0
         assert "raw_payload" not in payload

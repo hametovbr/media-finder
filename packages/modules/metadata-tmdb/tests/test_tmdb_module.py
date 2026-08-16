@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import email
+import json
 import os
 import shutil
 import subprocess
@@ -453,6 +454,62 @@ def test_tmdb_series_fetch_normalizes_season_zero_specials() -> None:
     assert all(client.is_closed for client in clients.clients)
 
 
+def test_tmdb_series_fetch_bounds_and_deduplicates_season_requests() -> None:
+    identity = MetadataIdentity(
+        provider_id="tmdb",
+        external_id="900",
+        media_kind=MediaKind.SERIES,
+        locale="en-US",
+    )
+
+    over_limit = {
+        **SERIES_DETAILS,
+        "seasons": [{"season_number": number} for number in range(101)],
+    }
+
+    def oversized_response(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/3/tv/900"
+        return httpx.Response(200, json=over_limit)
+
+    oversized_clients = RecordingClientFactory(oversized_response)
+    oversized_provider = _module(oversized_clients).build(
+        resolve_module_environment(_module().manifest, {"TMDB_TOKEN": TOKEN})
+    )
+    try:
+        with pytest.raises(ModuleError) as captured:
+            oversized_provider.fetch(identity)
+    finally:
+        oversized_provider.close()
+
+    assert captured.value.code == "metadata_provider_unavailable"
+    assert [request.url.path for request in oversized_clients.requests] == ["/3/tv/900"]
+
+    duplicate_summaries = {
+        **SERIES_DETAILS,
+        "seasons": [{"season_number": 0}, {"season_number": 0}],
+    }
+
+    def duplicate_response(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/3/tv/900":
+            return httpx.Response(200, json=duplicate_summaries)
+        assert request.url.path == "/3/tv/900/season/0"
+        return httpx.Response(200, json=SEASON_ZERO)
+
+    duplicate_clients = RecordingClientFactory(duplicate_response)
+    duplicate_provider = _module(duplicate_clients).build(
+        resolve_module_environment(_module().manifest, {"TMDB_TOKEN": TOKEN})
+    )
+    try:
+        duplicate_provider.fetch(identity)
+    finally:
+        duplicate_provider.close()
+
+    assert [request.url.path for request in duplicate_clients.requests] == [
+        "/3/tv/900",
+        "/3/tv/900/season/0",
+    ]
+
+
 def test_tmdb_typed_endpoints_reject_untrusted_paths_before_http_or_secret_use() -> None:
     module = _module()
     environment = resolve_module_environment(module.manifest, {"TMDB_TOKEN": TOKEN})
@@ -547,6 +604,27 @@ def test_tmdb_malformed_search_results_raise_a_standardized_safe_failure() -> No
 
     assert captured.value.code == "metadata_provider_unavailable"
     assert str(captured.value) == "metadata_provider_unavailable"
+
+
+def test_tmdb_rejects_an_oversized_json_response_before_provider_validation() -> None:
+    oversized = json.dumps({"overview": "x" * (2 * 1024 * 1024 + 1)}).encode()
+
+    def respond(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=oversized,
+            headers={"content-type": "application/json"},
+        )
+
+    module = _module(RecordingClientFactory(respond))
+    provider = module.build(resolve_module_environment(module.manifest, {"TMDB_TOKEN": TOKEN}))
+    try:
+        with pytest.raises(ModuleError) as captured:
+            provider.fetch(_movie_identity())
+    finally:
+        provider.close()
+
+    assert captured.value.code == "metadata_provider_unavailable"
 
 
 def test_tmdb_retention_is_configuration_free_and_uses_calendar_month_boundaries() -> None:

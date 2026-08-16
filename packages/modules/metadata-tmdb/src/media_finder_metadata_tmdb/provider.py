@@ -20,6 +20,8 @@ from pydantic import ValidationError
 from .normalization import normalize_payload
 from .transport import TmdbEndpoint, TmdbTransport
 
+_MAX_SERIES_SEASONS = 100
+
 
 class TmdbProvider:
     def __init__(self, transport: TmdbTransport, clock: Callable[[], datetime]) -> None:
@@ -89,12 +91,24 @@ class TmdbProvider:
             details: list[dict[str, object]] = []
             summaries = payload.get("seasons", ())
             if isinstance(summaries, Sequence) and not isinstance(summaries, str | bytes):
+                season_numbers: list[int] = []
+                seen_numbers: set[int] = set()
                 for summary in summaries:
                     if not isinstance(summary, Mapping):
                         continue
                     number = summary.get("season_number")
                     if not isinstance(number, int) or number < 0 or number > 9999:
                         continue
+                    if number in seen_numbers:
+                        continue
+                    seen_numbers.add(number)
+                    season_numbers.append(number)
+                if len(season_numbers) > _MAX_SERIES_SEASONS:
+                    raise ModuleError(
+                        category=ModuleFailureCategory.UNAVAILABLE,
+                        code="metadata_provider_unavailable",
+                    )
+                for number in season_numbers:
                     details.append(
                         self._request(
                             TmdbEndpoint.season(identity.external_id, number),

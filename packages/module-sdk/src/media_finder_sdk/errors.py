@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from enum import StrEnum
+from math import isfinite
 from types import MappingProxyType
 from typing import Annotated
 
@@ -33,6 +34,8 @@ class ModuleFailureCategory(StrEnum):
 
 
 def _freeze(value: object) -> JsonValue:
+    if isinstance(value, float) and not isfinite(value):
+        raise TypeError("module_error_safe_detail_invalid")
     if value is None or isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, Mapping):

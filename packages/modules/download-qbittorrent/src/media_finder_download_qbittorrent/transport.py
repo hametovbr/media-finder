@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from urllib.parse import urlsplit
 
@@ -10,6 +11,9 @@ from media_finder_sdk import ModuleError, ModuleFailureCategory, ResolvedModuleE
 
 _SAFE_PATH = re.compile(r"^/[A-Za-z0-9._~/-]*$")
 _SECRET_MARKERS = ("credential", "passkey", "secret", "session", "token")
+_MAX_ACK_RESPONSE_BYTES = 4096
+_MAX_JSON_RESPONSE_BYTES = 2 * 1024 * 1024
+_MAX_RESULTS = 1000
 
 
 class QbittorrentTransport:
@@ -32,27 +36,16 @@ class QbittorrentTransport:
         self._closed = False
 
     def authenticate(self) -> None:
-        response = self._client.post(
-            self._url("/api/v2/auth/login"),
+        response_text = self._post_text(
+            "/api/v2/auth/login",
             data={"username": self._username, "password": self._password},
-            follow_redirects=False,
         )
-        if response.is_redirect:
-            raise RuntimeError
-        response.raise_for_status()
-        if response.text.strip() != "Ok.":
+        if response_text.strip() != "Ok.":
             raise RuntimeError
 
     def list_categories(self) -> dict[str, str]:
-        response = self._client.get(
-            self._url("/api/v2/torrents/categories"),
-            follow_redirects=False,
-        )
-        if response.is_redirect:
-            raise RuntimeError
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
+        payload = self._get_json("/api/v2/torrents/categories")
+        if not isinstance(payload, dict) or len(payload) > _MAX_RESULTS:
             raise RuntimeError
         return {
             str(name): str(details.get("savePath", ""))
@@ -61,33 +54,23 @@ class QbittorrentTransport:
         }
 
     def add_magnet(self, uri: str, category: str, correlation: str) -> None:
-        response = self._client.post(
-            self._url("/api/v2/torrents/add"),
+        response_text = self._post_text(
+            "/api/v2/torrents/add",
             data={"urls": uri, "category": category, "tags": correlation},
-            follow_redirects=False,
         )
-        self._require_accepted(response)
+        self._require_accepted(response_text)
 
     def add_torrent(self, content: bytes, category: str, correlation: str) -> None:
-        response = self._client.post(
-            self._url("/api/v2/torrents/add"),
+        response_text = self._post_text(
+            "/api/v2/torrents/add",
             data={"category": category, "tags": correlation},
             files={"torrents": ("release.torrent", content, "application/x-bittorrent")},
-            follow_redirects=False,
         )
-        self._require_accepted(response)
+        self._require_accepted(response_text)
 
     def find_by_tag(self, correlation: str) -> list[dict[str, str]]:
-        response = self._client.get(
-            self._url("/api/v2/torrents/info"),
-            params={"tag": correlation},
-            follow_redirects=False,
-        )
-        if response.is_redirect:
-            raise RuntimeError
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, list):
+        payload = self._get_json("/api/v2/torrents/info", params={"tag": correlation})
+        if not isinstance(payload, list) or len(payload) > _MAX_RESULTS:
             raise RuntimeError
         return [
             {"hash": str(item.get("hash", "")), "tags": str(item.get("tags", ""))}
@@ -103,12 +86,48 @@ class QbittorrentTransport:
     def _url(self, path: str) -> str:
         return f"{self._base_url}{path}"
 
+    def _get_json(self, path: str, *, params: dict[str, str] | None = None) -> object:
+        with self._client.stream(
+            "GET",
+            self._url(path),
+            params=params,
+            follow_redirects=False,
+        ) as response:
+            if response.is_redirect:
+                raise RuntimeError
+            response.raise_for_status()
+            content = _read_bounded(response, _MAX_JSON_RESPONSE_BYTES)
+        try:
+            return json.loads(content)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise RuntimeError from None
+
+    def _post_text(
+        self,
+        path: str,
+        *,
+        data: dict[str, str],
+        files: dict[str, tuple[str, bytes, str]] | None = None,
+    ) -> str:
+        with self._client.stream(
+            "POST",
+            self._url(path),
+            data=data,
+            files=files,
+            follow_redirects=False,
+        ) as response:
+            if response.is_redirect:
+                raise RuntimeError
+            response.raise_for_status()
+            content = _read_bounded(response, _MAX_ACK_RESPONSE_BYTES)
+        try:
+            return content.decode("utf-8")
+        except UnicodeDecodeError:
+            raise RuntimeError from None
+
     @staticmethod
-    def _require_accepted(response: httpx.Response) -> None:
-        if response.is_redirect:
-            raise RuntimeError
-        response.raise_for_status()
-        if response.text.strip() not in {"", "Ok."}:
+    def _require_accepted(response_text: str) -> None:
+        if response_text.strip() not in {"", "Ok."}:
             raise RuntimeError
 
     def __repr__(self) -> str:
@@ -144,6 +163,23 @@ def _validated_base_url(value: str) -> str:
 
 def _error(category: ModuleFailureCategory, code: str) -> ModuleError:
     return ModuleError(category=category, code=code)
+
+
+def _read_bounded(response: httpx.Response, limit: int) -> bytes:
+    declared = response.headers.get("content-length")
+    try:
+        if declared is not None and int(declared) > limit:
+            raise RuntimeError
+    except ValueError:
+        raise RuntimeError from None
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in response.iter_bytes():
+        total += len(chunk)
+        if total > limit:
+            raise RuntimeError
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 __all__: list[str] = []

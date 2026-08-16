@@ -203,7 +203,7 @@ class SerializedSafeReleaseSnapshot(PublicModel):
     @field_validator("guid")
     @classmethod
     def reject_credential_like_guid(cls, value: str | None) -> str | None:
-        if value is not None and _CREDENTIAL_MARKER.search(value) is not None:
+        if value is not None and not is_safe_release_guid(value):
             raise ValueError("serialized_release_guid_sensitive")
         return value
 
@@ -250,6 +250,16 @@ def is_safe_public_source_page(value: str) -> bool:
     except (UnicodeError, ValueError):
         return False
     return True
+
+
+def is_safe_release_guid(value: str) -> bool:
+    """Validate the language-neutral safe release GUID contract."""
+
+    return (
+        0 < len(value) <= 255
+        and re.fullmatch(r"[A-Za-z0-9._:-]+", value) is not None
+        and _CREDENTIAL_MARKER.search(value) is None
+    )
 
 
 def _is_public_host(host: str) -> bool:
@@ -430,5 +440,6 @@ __all__ = [
     "SerializedSafeReleaseSnapshot",
     "StableFailureCase",
     "is_safe_public_source_page",
+    "is_safe_release_guid",
     "parse_serialized_conformance_fixture",
 ]

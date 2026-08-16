@@ -70,7 +70,7 @@ def _release_snapshot(title: str = "Fixture.Release.2026") -> SafeReleaseSnapsho
         indexer="Fixture Indexer",
         guid="fixture:release-1",
         infohash="a" * 40,
-        source_page_url="https://indexer.example/releases/1",
+        source_page_url="https://indexer.example.test/releases/1",
     )
 
 
@@ -421,7 +421,7 @@ def test_safe_snapshot_is_persisted_without_private_selection_or_artifact() -> N
         "indexer": "Fixture Indexer",
         "guid": "fixture:release-1",
         "infohash": "a" * 40,
-        "source_page_url": "https://indexer.example/releases/1",
+        "source_page_url": "https://indexer.example.test/releases/1",
     }
     assert field_names.isdisjoint(
         {"artifact", "magnet", "torrent", "private_selection", "download_url"}
@@ -622,6 +622,28 @@ def test_release_selection_sanitizes_snapshot_and_enforces_the_query_result_limi
     provider.candidates = (unsafe, unsafe)
     with pytest.raises(ModuleError, match="release_result_limit_exceeded"):
         service.search(ReleaseSearchQuery(query="Too many", limit=1))
+
+
+def test_release_selection_uses_the_serialized_safe_snapshot_policy() -> None:
+    api = _api()
+    unsafe = ReleaseCandidate(
+        snapshot=SafeReleaseSnapshot(
+            title="Unsafe.Release",
+            indexer="Fixture Indexer",
+            guid="token-123",
+            source_page_url="http://printer.local/private",
+        ),
+        selection=PrivateReleaseSelection.from_bytes(b"private:unsafe-policy"),
+    )
+    service = api.ReleaseSelectionService(
+        provider=_ReleaseProvider((unsafe,)),
+        cache=api.ReleaseSelectionCache(),
+    )
+
+    selected = service.search(ReleaseSearchQuery(query="Unsafe"))[0]
+
+    assert selected.snapshot.guid is None
+    assert selected.snapshot.source_page_url is None
 
 
 def test_acquisition_ports_are_explicit_and_application_files_are_framework_free() -> None:

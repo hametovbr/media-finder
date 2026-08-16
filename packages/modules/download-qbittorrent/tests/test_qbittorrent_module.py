@@ -565,6 +565,86 @@ def test_qbittorrent_failures_and_logs_never_disclose_credentials_or_artifacts(
         assert secret not in rendered
 
 
+def test_qbittorrent_bounds_destination_and_task_responses() -> None:
+    def oversized(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/auth/login"):
+            return httpx.Response(200, text="Ok.")
+        if request.url.path.endswith("/torrents/categories"):
+            return httpx.Response(
+                200,
+                json={f"category-{index}": {"savePath": "/downloads"} for index in range(1001)},
+            )
+        if request.url.path.endswith("/torrents/info"):
+            return httpx.Response(
+                200,
+                json=[{"hash": str(index), "tags": "other"} for index in range(1001)],
+            )
+        return httpx.Response(404)
+
+    client = _client(RecordingClientFactory(oversized))
+    try:
+        with pytest.raises(ModuleError, match="download_client_destinations_unavailable"):
+            client.list_destinations()
+        with pytest.raises(ModuleError, match="correlation_lookup_inconclusive"):
+            client.find_by_correlation(CORRELATION)
+    finally:
+        client.close()
+
+
+def test_qbittorrent_rejects_an_oversized_json_response() -> None:
+    def oversized(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/auth/login"):
+            return httpx.Response(200, text="Ok.")
+        if request.url.path.endswith("/torrents/categories"):
+            return httpx.Response(
+                200,
+                json={"anime": {"savePath": "x" * (2 * 1024 * 1024 + 1)}},
+            )
+        return httpx.Response(404)
+
+    client = _client(RecordingClientFactory(oversized))
+    try:
+        with pytest.raises(ModuleError, match="download_client_destinations_unavailable"):
+            client.list_destinations()
+    finally:
+        client.close()
+
+
+def test_qbittorrent_bounds_authentication_and_submission_acknowledgements() -> None:
+    oversized_ok = "Ok." + " " * (64 * 1024)
+
+    auth_client = _client(
+        RecordingClientFactory(
+            lambda request: (
+                httpx.Response(200, text=oversized_ok)
+                if request.url.path.endswith("/auth/login")
+                else httpx.Response(404)
+            )
+        )
+    )
+    try:
+        with pytest.raises(ModuleError, match="download_client_authentication_failed"):
+            auth_client.validate()
+    finally:
+        auth_client.close()
+
+    def oversized_submission(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/auth/login"):
+            return httpx.Response(200, text="Ok.")
+        if request.url.path.endswith("/torrents/categories"):
+            return httpx.Response(200, json={"anime": {"savePath": "/downloads"}})
+        if request.url.path.endswith("/torrents/add"):
+            return httpx.Response(200, text=oversized_ok)
+        return httpx.Response(404)
+
+    submission_client = _client(RecordingClientFactory(oversized_submission))
+    try:
+        with pytest.raises(ModuleError, match="download_client_submission_failed"):
+            submission_client.submit(MagnetArtifact(uri=MAGNET), "anime", CORRELATION)
+    finally:
+        submission_client.close()
+
+
 def test_qbittorrent_serialized_redaction_probes_cross_credentials_artifact_and_correlation(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
