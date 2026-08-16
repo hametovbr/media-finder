@@ -136,12 +136,12 @@ jobs:
         run: >-
           uv run pytest
           tests/test_tmdb_retention.py
-          tests/test_qbittorrent.py
           tests/test_control_api_acquisition.py
           tests/test_control_api_catalog.py
           tests/test_control_api_metadata.py
           tests/test_control_api_security.py
           tests/test_control_openapi.py
+          tests/test_processor_openapi.py
           tests/test_module_registry_composition.py
           tests/test_module_runtime_transport_hardening.py
           tests/test_wheel_isolation.py

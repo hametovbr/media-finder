@@ -1,0 +1,1433 @@
+{
+  "components": {
+    "schemas": {
+      "Artwork": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "url": {
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url"
+        ],
+        "title": "Artwork",
+        "type": "object"
+      },
+      "Episode": {
+        "additionalProperties": false,
+        "properties": {
+          "air_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Air Date"
+          },
+          "number": {
+            "minimum": 1.0,
+            "title": "Number",
+            "type": "integer"
+          },
+          "ordering": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ordering"
+          },
+          "plot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plot"
+          },
+          "provider_ids": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Provider Ids",
+            "type": "object"
+          },
+          "runtime_minutes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Minutes"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "title"
+        ],
+        "title": "Episode",
+        "type": "object"
+      },
+      "HealthStatus": {
+        "additionalProperties": false,
+        "description": "Liveness or readiness state.",
+        "properties": {
+          "status": {
+            "enum": [
+              "live",
+              "ready"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "HealthStatus",
+        "type": "object"
+      },
+      "JsonValue": {},
+      "MediaKind": {
+        "enum": [
+          "movie",
+          "series"
+        ],
+        "title": "MediaKind",
+        "type": "string"
+      },
+      "NamingResult": {
+        "additionalProperties": false,
+        "properties": {
+          "basename": {
+            "title": "Basename",
+            "type": "string"
+          },
+          "nfo_filename": {
+            "title": "Nfo Filename",
+            "type": "string"
+          },
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          },
+          "relative_directory": {
+            "title": "Relative Directory",
+            "type": "string"
+          },
+          "relative_path": {
+            "title": "Relative Path",
+            "type": "string"
+          },
+          "target_extension": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Extension"
+          }
+        },
+        "required": [
+          "profile",
+          "relative_directory",
+          "basename",
+          "target_extension",
+          "relative_path",
+          "nfo_filename"
+        ],
+        "title": "NamingResult",
+        "type": "object"
+      },
+      "NormalizedMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "artwork": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Artwork"
+            },
+            "title": "Artwork",
+            "type": "array"
+          },
+          "completeness": {
+            "default": 0.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Completeness",
+            "type": "number"
+          },
+          "countries": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Countries",
+            "type": "array"
+          },
+          "genres": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Genres",
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MediaKind"
+          },
+          "original_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Title"
+          },
+          "people": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Person"
+            },
+            "title": "People",
+            "type": "array"
+          },
+          "plot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plot"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/Provenance"
+          },
+          "provider_ids": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Provider Ids",
+            "type": "object"
+          },
+          "ratings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Rating"
+            },
+            "title": "Ratings",
+            "type": "array"
+          },
+          "release_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Date"
+          },
+          "runtime_minutes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Minutes"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "seasons": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Season"
+            },
+            "title": "Seasons",
+            "type": "array"
+          },
+          "structural_quality": {
+            "default": 0.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Structural Quality",
+            "type": "number"
+          },
+          "studios": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Studios",
+            "type": "array"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "titles": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Titles",
+            "type": "object"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "maximum": 3000.0,
+                "minimum": 1800.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "kind",
+          "titles",
+          "provenance"
+        ],
+        "title": "NormalizedMetadata",
+        "type": "object"
+      },
+      "Person": {
+        "additionalProperties": false,
+        "properties": {
+          "character": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Character"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "role"
+        ],
+        "title": "Person",
+        "type": "object"
+      },
+      "ProcessorError": {
+        "additionalProperties": false,
+        "description": "Stable safe error details shared by every processor endpoint.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Details",
+            "type": "object"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "request_id"
+        ],
+        "title": "ProcessorError",
+        "type": "object"
+      },
+      "ProcessorErrorEnvelope": {
+        "additionalProperties": false,
+        "description": "Public processor error response envelope.",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ProcessorError"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ProcessorErrorEnvelope",
+        "type": "object"
+      },
+      "Provenance": {
+        "additionalProperties": false,
+        "properties": {
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "locale": {
+            "title": "Locale",
+            "type": "string"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "string"
+          },
+          "source_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Label"
+          }
+        },
+        "required": [
+          "provider_id",
+          "external_id",
+          "locale"
+        ],
+        "title": "Provenance",
+        "type": "object"
+      },
+      "Rating": {
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          },
+          "votes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Votes"
+          }
+        },
+        "required": [
+          "source",
+          "value"
+        ],
+        "title": "Rating",
+        "type": "object"
+      },
+      "Season": {
+        "additionalProperties": false,
+        "properties": {
+          "episodes": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Episode"
+            },
+            "title": "Episodes",
+            "type": "array"
+          },
+          "number": {
+            "minimum": 0.0,
+            "title": "Number",
+            "type": "integer"
+          },
+          "plot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plot"
+          },
+          "provider_ids": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Provider Ids",
+            "type": "object"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "number"
+        ],
+        "title": "Season",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "title": "Media Finder processor API",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/acquisitions/{acquisition_id}/exports/naming": {
+      "get": {
+        "operationId": "acquisition_naming_api_v1_acquisitions__acquisition_id__exports_naming_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "acquisition_id",
+            "required": true,
+            "schema": {
+              "title": "Acquisition Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entity_type",
+            "required": true,
+            "schema": {
+              "enum": [
+                "movie",
+                "tvshow",
+                "season",
+                "episode"
+              ],
+              "title": "Entity Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "season_number",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Season Number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "episode_numbers",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Episode Numbers"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_extension",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target Extension"
+            }
+          },
+          {
+            "in": "query",
+            "name": "profile",
+            "required": false,
+            "schema": {
+              "default": "jellyfin-v1",
+              "title": "Profile",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NamingResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "A valid processor integration bearer token is required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The requested catalog or acquisition resource does not exist."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The pinned metadata source has expired under its provider policy."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request selectors or parameters are invalid."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request could not be completed safely."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Acquisition Naming"
+      }
+    },
+    "/api/v1/acquisitions/{acquisition_id}/exports/nfo": {
+      "get": {
+        "operationId": "acquisition_nfo_api_v1_acquisitions__acquisition_id__exports_nfo_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "acquisition_id",
+            "required": true,
+            "schema": {
+              "title": "Acquisition Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entity_type",
+            "required": true,
+            "schema": {
+              "enum": [
+                "movie",
+                "tvshow",
+                "season",
+                "episode"
+              ],
+              "title": "Entity Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "season_number",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Season Number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "episode_numbers",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Episode Numbers"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Jellyfin/Kodi-compatible NFO XML.",
+            "headers": {
+              "Content-Disposition": {
+                "description": "Safe attachment filename for the exported NFO document.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Sunset": {
+                "description": "Provider-owned metadata expiry time when applicable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Warning": {
+                "description": "Provider-owned metadata expiry warning when applicable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Media-Finder-Metadata-Expires": {
+                "description": "Machine-readable metadata expiry time when applicable.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "A valid processor integration bearer token is required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The requested catalog or acquisition resource does not exist."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The pinned metadata source has expired under its provider policy."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request selectors or parameters are invalid."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request could not be completed safely."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Acquisition Nfo"
+      }
+    },
+    "/api/v1/acquisitions/{acquisition_id}/metadata": {
+      "get": {
+        "operationId": "acquisition_metadata_api_v1_acquisitions__acquisition_id__metadata_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "acquisition_id",
+            "required": true,
+            "schema": {
+              "title": "Acquisition Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NormalizedMetadata"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "A valid processor integration bearer token is required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The requested catalog or acquisition resource does not exist."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The pinned metadata source has expired under its provider policy."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request selectors or parameters are invalid."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request could not be completed safely."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Acquisition Metadata"
+      }
+    },
+    "/api/v1/media-items/{item_id}/exports/naming": {
+      "get": {
+        "operationId": "media_item_naming_api_v1_media_items__item_id__exports_naming_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entity_type",
+            "required": true,
+            "schema": {
+              "enum": [
+                "movie",
+                "tvshow",
+                "season",
+                "episode"
+              ],
+              "title": "Entity Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "season_number",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Season Number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "episode_numbers",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Episode Numbers"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_extension",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target Extension"
+            }
+          },
+          {
+            "in": "query",
+            "name": "profile",
+            "required": false,
+            "schema": {
+              "default": "jellyfin-v1",
+              "title": "Profile",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NamingResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "A valid processor integration bearer token is required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The requested catalog or acquisition resource does not exist."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The pinned metadata source has expired under its provider policy."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request selectors or parameters are invalid."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request could not be completed safely."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Media Item Naming"
+      }
+    },
+    "/api/v1/media-items/{item_id}/exports/nfo": {
+      "get": {
+        "operationId": "media_item_nfo_api_v1_media_items__item_id__exports_nfo_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entity_type",
+            "required": true,
+            "schema": {
+              "enum": [
+                "movie",
+                "tvshow",
+                "season",
+                "episode"
+              ],
+              "title": "Entity Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "season_number",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Season Number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "episode_numbers",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Episode Numbers"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Jellyfin/Kodi-compatible NFO XML.",
+            "headers": {
+              "Content-Disposition": {
+                "description": "Safe attachment filename for the exported NFO document.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Sunset": {
+                "description": "Provider-owned metadata expiry time when applicable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Warning": {
+                "description": "Provider-owned metadata expiry warning when applicable.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Media-Finder-Metadata-Expires": {
+                "description": "Machine-readable metadata expiry time when applicable.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "A valid processor integration bearer token is required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The requested catalog or acquisition resource does not exist."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The pinned metadata source has expired under its provider policy."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request selectors or parameters are invalid."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request could not be completed safely."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Media Item Nfo"
+      }
+    },
+    "/api/v1/media-items/{item_id}/metadata": {
+      "get": {
+        "operationId": "media_item_metadata_api_v1_media_items__item_id__metadata_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NormalizedMetadata"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "A valid processor integration bearer token is required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The requested catalog or acquisition resource does not exist."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The pinned metadata source has expired under its provider policy."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request selectors or parameters are invalid."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request could not be completed safely."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Media Item Metadata"
+      }
+    },
+    "/health/live": {
+      "get": {
+        "operationId": "live_health_live_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Live"
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "ready_health_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessorErrorEnvelope"
+                }
+              }
+            },
+            "description": "The database or migration state is not ready."
+          }
+        },
+        "summary": "Ready"
+      }
+    }
+  }
+}

@@ -58,7 +58,7 @@
 
 ## 7. Preserve Serialized and Browser Boundaries
 
-- [ ] 7.1 Generate a deterministic processor OpenAPI v1 artifact alongside the existing control OpenAPI snapshot; add RED drift tests, then preserve current paths, schemas, authentication, status codes, stable errors, naming/NFO behavior, and expiry warnings until both snapshots are GREEN.
+- [x] 7.1 Generate a deterministic processor OpenAPI v1 artifact alongside the existing control OpenAPI snapshot; add RED drift tests, then preserve current paths, schemas, authentication, status codes, stable errors, naming/NFO behavior, and expiry warnings until both snapshots are GREEN.
 - [ ] 7.2 Run built-in UI unit and browser suites solely with its fake gateway and control-contract wheel; prove it installs without core/modules/SQLAlchemy, preserves EN/RU, forms, HTML paths, keyboard/axe behavior, and loads no module HTML/JavaScript.
 - [ ] 7.3 Run the same browser control conformance scenarios against the real core facade and HTTP adapter, including CSRF replay/foreign-origin failures, opaque token expiry/eviction/single use, metadata/manual flows, release search, destinations, submission, and reconcile.
 - [ ] 7.4 Add serialized conformance fixtures for all three module kinds and validate them independently of Python core imports, including success, missing configuration, standardized failures, locale/identity, retention, release bounds, safe snapshots, artifact capabilities, correlation, and redaction.

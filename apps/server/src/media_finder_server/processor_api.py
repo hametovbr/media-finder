@@ -22,15 +22,84 @@ from media_finder_core.exports import (
     ExportWarningPolicy,
     MetadataExportService,
     NamingExportService,
+    NamingResult,
     NfoExportService,
 )
 from media_finder_core.platform import migration_state
+from media_finder_sdk import NormalizedMetadata
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 bearer = HTTPBearer(auto_error=False)
+
+
+class ProcessorModel(BaseModel):
+    """Strict serialized value published by the processor API."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ProcessorError(ProcessorModel):
+    """Stable safe error details shared by every processor endpoint."""
+
+    code: str
+    request_id: str
+    details: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class ProcessorErrorEnvelope(ProcessorModel):
+    """Public processor error response envelope."""
+
+    error: ProcessorError
+
+
+class HealthStatus(ProcessorModel):
+    """Liveness or readiness state."""
+
+    status: Literal["live", "ready"]
+
+
+PROCESSOR_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    status_code: {
+        "model": ProcessorErrorEnvelope,
+        "description": description,
+    }
+    for status_code, description in {
+        401: "A valid processor integration bearer token is required.",
+        404: "The requested catalog or acquisition resource does not exist.",
+        410: "The pinned metadata source has expired under its provider policy.",
+        422: "The request selectors or parameters are invalid.",
+        500: "The request could not be completed safely.",
+    }.items()
+}
+
+NFO_RESPONSE_HEADERS: dict[str, dict[str, Any]] = {
+    "Content-Disposition": {
+        "description": "Safe attachment filename for the exported NFO document.",
+        "schema": {"type": "string"},
+    },
+    "Warning": {
+        "description": "Provider-owned metadata expiry warning when applicable.",
+        "schema": {"type": "string"},
+    },
+    "Sunset": {
+        "description": "Provider-owned metadata expiry time when applicable.",
+        "schema": {"type": "string"},
+    },
+    "X-Media-Finder-Metadata-Expires": {
+        "description": "Machine-readable metadata expiry time when applicable.",
+        "schema": {"type": "string"},
+    },
+}
+
+NFO_SUCCESS_RESPONSE: dict[str, Any] = {
+    "description": "Jellyfin/Kodi-compatible NFO XML.",
+    "headers": NFO_RESPONSE_HEADERS,
+    "content": {"application/xml": {"schema": {"type": "string"}}},
+}
 
 
 class APIError(Exception):
@@ -110,7 +179,7 @@ def create_processor_app(
     engine = database_engine
     integration_token_bytes = integration_token.encode()
 
-    app = FastAPI()
+    app = FastAPI(title="Media Finder processor API", version="1")
     app.state.engine = engine
     app.state.owns_engine = False
     app.state.sessions = sessions
@@ -183,11 +252,20 @@ def create_processor_app(
             APIError(error.status_code, code, headers=response_headers),
         )
 
-    @app.get("/health/live")
+    @app.get("/health/live", response_model=HealthStatus)
     def live() -> dict[str, str]:
         return {"status": "live"}
 
-    @app.get("/health/ready")
+    @app.get(
+        "/health/ready",
+        response_model=HealthStatus,
+        responses={
+            503: {
+                "model": ProcessorErrorEnvelope,
+                "description": "The database or migration state is not ready.",
+            }
+        },
+    )
     def ready() -> dict[str, str]:
         try:
             state = migration_state(engine)
@@ -209,7 +287,11 @@ def create_processor_app(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-    router = APIRouter(prefix="/api/v1", dependencies=[Depends(authenticate)])
+    router = APIRouter(
+        prefix="/api/v1",
+        dependencies=[Depends(authenticate)],
+        responses=PROCESSOR_ERROR_RESPONSES,
+    )
 
     def export_failure(error: ValueError) -> APIError:
         code = str(error)
@@ -231,14 +313,14 @@ def create_processor_app(
             details={"issues": [{"field": "selector", "type": code}]},
         )
 
-    @router.get("/media-items/{item_id}/metadata")
+    @router.get("/media-items/{item_id}/metadata", response_model=NormalizedMetadata)
     def media_item_metadata(item_id: str) -> dict[str, Any]:
         try:
             return metadata_exports.current(item_id).metadata.model_dump(mode="json")
         except ValueError as error:
             raise export_failure(error) from None
 
-    @router.get("/acquisitions/{acquisition_id}/metadata")
+    @router.get("/acquisitions/{acquisition_id}/metadata", response_model=NormalizedMetadata)
     def acquisition_metadata(acquisition_id: str) -> dict[str, Any]:
         try:
             return metadata_exports.pinned(acquisition_id).metadata.model_dump(mode="json")
@@ -268,7 +350,7 @@ def create_processor_app(
             raise export_failure(error) from None
         return result.model_dump(mode="json")
 
-    @router.get("/media-items/{item_id}/exports/naming")
+    @router.get("/media-items/{item_id}/exports/naming", response_model=NamingResult)
     def media_item_naming(
         item_id: str,
         entity_type: Literal["movie", "tvshow", "season", "episode"],
@@ -287,7 +369,7 @@ def create_processor_app(
             profile,
         )
 
-    @router.get("/acquisitions/{acquisition_id}/exports/naming")
+    @router.get("/acquisitions/{acquisition_id}/exports/naming", response_model=NamingResult)
     def acquisition_naming(
         acquisition_id: str,
         entity_type: Literal["movie", "tvshow", "season", "episode"],
@@ -343,7 +425,11 @@ def create_processor_app(
             return f"attachment; filename=\"metadata.nfo\"; filename*=UTF-8''{encoded}"
         return f'attachment; filename="{filename}"'
 
-    @router.get("/media-items/{item_id}/exports/nfo")
+    @router.get(
+        "/media-items/{item_id}/exports/nfo",
+        response_class=Response,
+        responses={200: NFO_SUCCESS_RESPONSE},
+    )
     def media_item_nfo(
         item_id: str,
         entity_type: Literal["movie", "tvshow", "season", "episode"],
@@ -352,7 +438,11 @@ def create_processor_app(
     ) -> Response:
         return nfo_response(item_id, False, entity_type, season_number, episode_numbers or [])
 
-    @router.get("/acquisitions/{acquisition_id}/exports/nfo")
+    @router.get(
+        "/acquisitions/{acquisition_id}/exports/nfo",
+        response_class=Response,
+        responses={200: NFO_SUCCESS_RESPONSE},
+    )
     def acquisition_nfo(
         acquisition_id: str,
         entity_type: Literal["movie", "tvshow", "season", "episode"],
@@ -365,4 +455,10 @@ def create_processor_app(
     return app
 
 
-__all__ = ["APIError", "create_processor_app"]
+__all__ = [
+    "APIError",
+    "HealthStatus",
+    "ProcessorError",
+    "ProcessorErrorEnvelope",
+    "create_processor_app",
+]
