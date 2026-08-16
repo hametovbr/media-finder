@@ -397,11 +397,12 @@ def test_server_runtime_uses_the_typed_registry_as_its_single_module_lifecycle()
     from media_finder_server import create_runtime_factory
 
     factory = create_runtime_factory(environment={})
-    lifecycle = factory._lifecycle
-    assert isinstance(lifecycle, ModuleRuntime)
-    assert set(lifecycle.registry.metadata) == {"manual", "tmdb"}
-    assert set(lifecycle.registry.release) == {"prowlarr"}
-    assert set(lifecycle.registry.download) == {"qbittorrent"}
+    runtime = factory.module_runtime
+    assert isinstance(runtime, ModuleRuntime)
+    assert factory._lifecycle is not runtime
+    assert set(runtime.registry.metadata) == {"manual", "tmdb"}
+    assert set(runtime.registry.release) == {"prowlarr"}
+    assert set(runtime.registry.download) == {"qbittorrent"}
 
     factory.close()
     factory.close()

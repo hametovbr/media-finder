@@ -1,7 +1,6 @@
 import threading
 
 import httpx
-from media_finder.integration_runtime import DefaultRuntimeFactory
 from media_finder.sdk.registration import (
     MetadataProviderRegistration,
     StaticModuleRegistry,
@@ -10,6 +9,7 @@ from media_finder_server import (
     create_legacy_module_registry,
     create_runtime_factory,
 )
+from media_finder_server.integration_runtime import DefaultRuntimeFactory
 from pydantic import BaseModel
 
 LEGACY_REGISTRY = create_legacy_module_registry()

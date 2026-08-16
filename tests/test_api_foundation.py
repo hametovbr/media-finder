@@ -2,8 +2,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from media_finder.api import APIError, create_app
 from media_finder_core.platform.database import migrate_to_head
+from media_finder_server.processor_api import APIError
+from media_finder_server.runtime import create_standalone_processor_app as create_app
 
 
 def test_health_is_public_and_readiness_requires_alembic_head(tmp_path: Path, monkeypatch) -> None:
@@ -43,7 +44,8 @@ def test_api_auth_uses_constant_time_comparison_and_safe_error_envelope(
         assert "correct horse" not in missing.text
 
         with patch(
-            "media_finder.api.hmac.compare_digest", wraps=__import__("hmac").compare_digest
+            "media_finder_server.processor_api.hmac.compare_digest",
+            wraps=__import__("hmac").compare_digest,
         ) as compared:
             denied = client.get(
                 "/api/v1/media-items/not-present/metadata",

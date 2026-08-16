@@ -4,10 +4,10 @@ from time import sleep
 
 import pytest
 from fastapi.testclient import TestClient
-from media_finder.runtime import ui_mode
 from media_finder_core.platform import ConfigurationError
 from media_finder_core.platform.database import migrate_to_head
 from media_finder_server import create_application
+from media_finder_server.runtime import ui_mode
 
 
 def _environment(
@@ -59,7 +59,7 @@ def test_builtin_mode_composes_html_control_processor_and_health(
         assert client.get("/api/control/openapi.json").status_code == 200
         assert client.get("/health/live").status_code == 200
         assert client.get("/api/v1/media-items/missing/metadata").status_code == 401
-    assert app.state.engine is app.state.processor.state.engine
+        assert app.state.engine is app.state.processor.state.engine
 
 
 def test_disabled_mode_omits_html_but_keeps_both_apis_and_health(
@@ -80,25 +80,28 @@ def test_root_lifespan_is_the_only_owner_and_closes_shared_resources_once(
     tmp_path: Path,
 ) -> None:
     _environment(monkeypatch, tmp_path, "builtin")
-    monkeypatch.setattr("media_finder.runtime._execute_maintenance", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "media_finder_server.runtime._execute_maintenance",
+        lambda *_args, **_kwargs: None,
+    )
     app = create_application()
     closed = {"runtime": 0, "engine": 0}
-    original_runtime_close = app.state.runtime_factory.close
-    original_engine_dispose = app.state.engine.dispose
-
-    def close_runtime() -> None:
-        closed["runtime"] += 1
-        original_runtime_close()
-
-    def dispose_engine() -> None:
-        closed["engine"] += 1
-        original_engine_dispose()
-
-    monkeypatch.setattr(app.state.runtime_factory, "close", close_runtime)
-    monkeypatch.setattr(app.state.engine, "dispose", dispose_engine)
-
-    assert app.state.processor.state.owns_engine is False
     with TestClient(app) as client:
+        resources = app.state.resources
+        original_runtime_close = resources.module_runtime.close
+        original_engine_dispose = resources.engine.dispose
+
+        def close_runtime() -> None:
+            closed["runtime"] += 1
+            original_runtime_close()
+
+        def dispose_engine() -> None:
+            closed["engine"] += 1
+            original_engine_dispose()
+
+        monkeypatch.setattr(resources.module_runtime, "close", close_runtime)
+        monkeypatch.setattr(resources.engine, "dispose", dispose_engine)
+        assert app.state.processor.state.owns_engine is False
         assert client.get("/api/control/v1/session").status_code == 200
 
     assert closed == {"runtime": 1, "engine": 1}
@@ -120,15 +123,8 @@ def test_shutdown_waits_for_inflight_maintenance_before_disposing_resources(
         assert allow_finish.wait(timeout=2)
         completed.set()
 
-    monkeypatch.setattr("media_finder.runtime._execute_maintenance", slow_maintenance)
+    monkeypatch.setattr("media_finder_server.runtime._execute_maintenance", slow_maintenance)
     app = create_application()
-    original_dispose = app.state.engine.dispose
-
-    def dispose_engine() -> None:
-        disposed_after_completion.append(completed.is_set())
-        original_dispose()
-
-    monkeypatch.setattr(app.state.engine, "dispose", dispose_engine)
 
     def run_lifespan() -> None:
         with TestClient(app):
@@ -138,6 +134,13 @@ def test_shutdown_waits_for_inflight_maintenance_before_disposing_resources(
     thread = Thread(target=run_lifespan)
     thread.start()
     assert started.wait(timeout=1)
+    original_dispose = app.state.engine.dispose
+
+    def dispose_engine() -> None:
+        disposed_after_completion.append(completed.is_set())
+        original_dispose()
+
+    monkeypatch.setattr(app.state.engine, "dispose", dispose_engine)
     sleep(0.05)
     try:
         assert not exited.is_set()

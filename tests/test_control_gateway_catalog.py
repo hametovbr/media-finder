@@ -2,12 +2,13 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
-from media_finder.control_gateway import BackendControlGateway, CursorCodec
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.models import Collection
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
 from media_finder_control import ControlFailure, Locale, PageRequest
+from media_finder_core.platform import EphemeralCache
 from media_finder_server import create_legacy_module_registry
+from media_finder_server.control_gateway import BackendControlGateway, CursorCodec
 from sqlalchemy.orm import Session, sessionmaker
 
 REGISTRY = create_legacy_module_registry()
@@ -50,6 +51,8 @@ def test_gateway_pages_collections_with_default_limit_and_no_repeats(database: S
     gateway = BackendControlGateway(
         sessions=_sessions(database),
         cursor_secret=b"cursor-secret-for-tests",
+        metadata_selections=EphemeralCache(),
+        manual_drafts=EphemeralCache(),
         registry=REGISTRY,
     )
 
@@ -95,6 +98,8 @@ def test_gateway_pages_catalog_in_stable_order(database: Session) -> None:
     gateway = BackendControlGateway(
         sessions=_sessions(database),
         cursor_secret=b"cursor-secret-for-tests",
+        metadata_selections=EphemeralCache(),
+        manual_drafts=EphemeralCache(),
         registry=REGISTRY,
     )
 

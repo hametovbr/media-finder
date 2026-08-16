@@ -9,6 +9,7 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
+    "ApplicationResources",
     "create_application",
     "create_legacy_module_registry",
     "create_module_registry",
@@ -24,7 +25,13 @@ _MODULE_EXPORTS = frozenset(
     }
 )
 _RUNTIME_EXPORTS = frozenset(
-    {"create_application", "create_runtime_factory", "create_ui_app", "run"}
+    {
+        "ApplicationResources",
+        "create_application",
+        "create_runtime_factory",
+        "create_ui_app",
+        "run",
+    }
 )
 
 

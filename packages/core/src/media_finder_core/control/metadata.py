@@ -105,16 +105,16 @@ class MetadataControlService:
         modules: MetadataControlModules,
         projector: CatalogViewProjector,
         clock: Callable[[], datetime],
-        metadata_selections: EphemeralCache[CoreMetadataSearchResult] | None = None,
-        manual_drafts: EphemeralCache[ManualDraft] | None = None,
+        metadata_selections: EphemeralCache[CoreMetadataSearchResult],
+        manual_drafts: EphemeralCache[ManualDraft],
     ) -> None:
         self._queries = query_port
         self._uow = unit_of_work
         self._modules = modules
         self._projector = projector
         self._clock = clock
-        self._metadata_selections = metadata_selections or EphemeralCache()
-        self._manual_drafts = manual_drafts or EphemeralCache()
+        self._metadata_selections = metadata_selections
+        self._manual_drafts = manual_drafts
 
     async def metadata_providers(self) -> tuple[MetadataProviderView, ...]:
         return await invoke(self._metadata_providers, fallback="metadata_provider_unavailable")

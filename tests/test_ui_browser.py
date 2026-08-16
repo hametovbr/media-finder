@@ -14,8 +14,6 @@ import uvicorn
 from acquisition_fakes import StaticAcquisitionModules
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, Response
-from media_finder.control_api import create_control_app
-from media_finder.control_security import BackendBrowserSecurity
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.models import Acquisition, MediaItem
 from media_finder.sdk.types import (
@@ -45,6 +43,8 @@ from media_finder_sdk import (
     SafeReleaseSnapshot,
 )
 from media_finder_server import create_legacy_module_registry, create_ui_app
+from media_finder_server.control_api import create_control_app
+from media_finder_server.control_security import BackendBrowserSecurity
 from playwright.sync_api import Browser, Page, Playwright, sync_playwright
 from pydantic import BaseModel
 from sqlalchemy import func, select

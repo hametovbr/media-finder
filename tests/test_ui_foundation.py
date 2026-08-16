@@ -4,10 +4,10 @@ from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
-from media_finder.ui import error_message, resolve_locale
 from media_finder_builtin_ui.forms import decode_form
 from media_finder_core.platform.database import migrate_to_head
 from media_finder_server import create_ui_app
+from media_finder_server.ui import error_message, resolve_locale
 from starlette.requests import Request
 
 MAX_UI_FORM_BYTES = 1024 * 1024

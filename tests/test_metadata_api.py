@@ -3,12 +3,12 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
-from media_finder.api import create_app
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.models import Acquisition
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance, RetentionPolicy
 from media_finder_core.catalog.persistence import SqlAlchemyCatalogRepository
 from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
+from media_finder_server.runtime import create_standalone_processor_app as create_app
 
 
 def _headers() -> dict[str, str]:

@@ -3,14 +3,13 @@ from uuid import UUID, uuid4
 
 import pytest
 from acquisition_fakes import StaticAcquisitionModules
-from media_finder.control_gateway import BackendControlGateway
 from media_finder.domain import CatalogService, RevisionInput
-from media_finder.integration_runtime import RuntimeResolver
 from media_finder.models import Acquisition
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
 from media_finder_control import ControlFailure
 from media_finder_control.models import AcquisitionSubmissionRequest, ReleaseSearchRequest
 from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
+from media_finder_core.platform import EphemeralCache
 from media_finder_sdk import (
     MagnetArtifact,
     PrivateReleaseSelection,
@@ -20,6 +19,8 @@ from media_finder_sdk import (
     SafeReleaseSnapshot,
 )
 from media_finder_server import create_legacy_module_registry
+from media_finder_server.control_gateway import BackendControlGateway
+from media_finder_server.integration_runtime import RuntimeResolver
 from sqlalchemy.orm import Session, sessionmaker
 
 REGISTRY = create_legacy_module_registry()
@@ -92,6 +93,8 @@ def _gateway(
         sessions=sessions,
         cursor_secret=b"cursor-secret-for-tests",
         runtime=runtime,
+        metadata_selections=EphemeralCache(),
+        manual_drafts=EphemeralCache(),
         registry=REGISTRY,
     )
 

@@ -3,10 +3,11 @@ import json
 from typing import cast
 
 from acquisition_fakes import StaticAcquisitionModules
-from media_finder.control_gateway import BackendControlGateway
-from media_finder.integration_runtime import RuntimeResolver, RuntimeResult
 from media_finder_control import ReadinessStatus
+from media_finder_core.platform import EphemeralCache
 from media_finder_server import create_legacy_module_registry
+from media_finder_server.control_gateway import BackendControlGateway
+from media_finder_server.integration_runtime import RuntimeResolver, RuntimeResult
 from sqlalchemy.orm import Session, sessionmaker
 
 REGISTRY = create_legacy_module_registry()
@@ -68,6 +69,8 @@ def test_diagnostics_publish_only_declarations_and_safe_states(
     gateway = BackendControlGateway(
         sessions=sessionmaker(bind=database.get_bind(), expire_on_commit=False),
         cursor_secret=b"cursor-secret-for-tests",
+        metadata_selections=EphemeralCache(),
+        manual_drafts=EphemeralCache(),
         runtime=cast(RuntimeResolver, DiagnosticRuntime(fake_provider, fake_client)),
         registry=REGISTRY,
         build_version="1.2.3",

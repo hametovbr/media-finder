@@ -6,8 +6,7 @@ import json
 from unittest.mock import patch
 
 from media_finder_control import Locale
-
-from media_finder.control_security import BackendBrowserSecurity
+from media_finder_server.control_security import BackendBrowserSecurity
 
 
 def _encode(secret: bytes, values: dict[str, str]) -> str:
@@ -65,7 +64,8 @@ def test_csrf_comparison_is_constant_time_and_reusable() -> None:
     async def scenario() -> None:
         session = await security.load_session(cookie=None, accept_language="en")
         with patch(
-            "media_finder.control_security.hmac.compare_digest", wraps=hmac.compare_digest
+            "media_finder_server.control_security.hmac.compare_digest",
+            wraps=hmac.compare_digest,
         ) as compared:
             assert await security.validate_csrf(session=session, token=session.csrf_token)
             assert await security.validate_csrf(session=session, token=session.csrf_token)

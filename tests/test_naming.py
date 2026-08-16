@@ -3,13 +3,13 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from media_finder.api import create_app
 from media_finder.domain import CatalogService
 from media_finder.models import Acquisition
 from media_finder.sdk.types import NormalizedMetadata as LegacyNormalizedMetadata
 from media_finder_core.exports import EntityType, render_naming
 from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
 from media_finder_sdk import Episode, MediaKind, NormalizedMetadata, Provenance, Season
+from media_finder_server.runtime import create_standalone_processor_app as create_app
 
 
 def _legacy(metadata: NormalizedMetadata) -> LegacyNormalizedMetadata:

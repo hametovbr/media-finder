@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from media_finder.integration_runtime import RuntimeResult
 from media_finder_core.acquisition import ReleaseSelectionService
 from media_finder_sdk import (
     CorrelationResult,
@@ -14,6 +13,7 @@ from media_finder_sdk import (
     ModuleManifest,
     SubmissionResult,
 )
+from media_finder_server.integration_runtime import RuntimeResult
 
 
 def _manifest(module_id: str, kind: ModuleKind, version: str) -> ModuleManifest:

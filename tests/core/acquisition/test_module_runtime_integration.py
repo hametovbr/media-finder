@@ -13,7 +13,6 @@ import httpx
 import pytest
 from media_finder.control_gateway import BackendControlGateway
 from media_finder.domain import CatalogService, RevisionInput
-from media_finder.integration_runtime import RuntimeResolver
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
 from media_finder_control import ControlFailure
 from media_finder_control.models import AcquisitionSubmissionRequest, ReleaseSearchRequest
@@ -26,8 +25,10 @@ from media_finder_core.acquisition.persistence import (
     SqlAlchemyAcquisitionQueries,
     SqlAlchemyAcquisitionUnitOfWork,
 )
+from media_finder_core.platform import EphemeralCache
 from media_finder_sdk import SafeReleaseSnapshot
 from media_finder_server import create_runtime_factory
+from media_finder_server.integration_runtime import RuntimeResolver
 from sqlalchemy.orm import Session, sessionmaker
 
 ROOT = Path(__file__).parents[3]
@@ -145,6 +146,8 @@ def _gateway(
     return BackendControlGateway(
         sessions=sessionmaker(bind=database.get_bind(), expire_on_commit=False),
         cursor_secret=b"typed-module-runtime-test-secret",
+        metadata_selections=EphemeralCache(),
+        manual_drafts=EphemeralCache(),
         runtime=runtime,
         registry=factory.registry,
         metadata_capabilities=_UnusedMetadataCapabilities(),

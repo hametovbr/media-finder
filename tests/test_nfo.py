@@ -5,7 +5,6 @@ from xml.etree import ElementTree
 
 import pytest
 from fastapi.testclient import TestClient
-from media_finder.api import create_app
 from media_finder.domain import CatalogService
 from media_finder.models import Acquisition
 from media_finder.sdk.types import NormalizedMetadata as LegacyNormalizedMetadata
@@ -25,6 +24,7 @@ from media_finder_sdk import (
     Season,
 )
 from media_finder_server import create_legacy_module_registry
+from media_finder_server.runtime import create_standalone_processor_app as create_app
 
 LEGACY_REGISTRY = create_legacy_module_registry()
 

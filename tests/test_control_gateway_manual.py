@@ -2,8 +2,6 @@ import asyncio
 from uuid import uuid4
 
 import pytest
-from media_finder.control_gateway import BackendControlGateway
-from media_finder.integration_runtime import RuntimeResolver
 from media_finder.models import MetadataRevision
 from media_finder_control import ControlFailure, Locale
 from media_finder_control.manual import (
@@ -16,6 +14,8 @@ from media_finder_control.manual import (
 from media_finder_control.models import EpisodeImportRequest, ManualImportRequest
 from media_finder_core.platform import EphemeralCache
 from media_finder_server import create_legacy_module_registry
+from media_finder_server.control_gateway import BackendControlGateway
+from media_finder_server.integration_runtime import RuntimeResolver
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -32,6 +32,7 @@ def _gateway(database: Session) -> BackendControlGateway:
         sessions=sessions,
         cursor_secret=b"cursor-secret-for-tests",
         runtime=runtime,
+        metadata_selections=EphemeralCache(),
         manual_drafts=EphemeralCache(),
         registry=LEGACY_REGISTRY,
     )
