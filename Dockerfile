@@ -5,8 +5,7 @@ FROM python:3.13.14-slim-bookworm AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.12.5 /uv /uvx /bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy \
-    UV_PROJECT_ENVIRONMENT=/opt/venv
+    UV_LINK_MODE=copy
 WORKDIR /build
 
 COPY pyproject.toml uv.lock README.md ./
@@ -19,6 +18,8 @@ COPY packages/modules/metadata-manual/pyproject.toml packages/modules/metadata-m
 COPY packages/modules/metadata-tmdb/pyproject.toml packages/modules/metadata-tmdb/pyproject.toml
 COPY packages/modules/release-prowlarr/pyproject.toml packages/modules/release-prowlarr/pyproject.toml
 COPY packages/modules/download-qbittorrent/pyproject.toml packages/modules/download-qbittorrent/pyproject.toml
+COPY alembic.ini ./alembic.ini
+COPY alembic ./alembic
 COPY apps/server/src ./apps/server/src
 COPY packages/core/src ./packages/core/src
 COPY packages/module-sdk/src ./packages/module-sdk/src
@@ -28,7 +29,25 @@ COPY packages/modules/metadata-manual/src ./packages/modules/metadata-manual/src
 COPY packages/modules/metadata-tmdb/src ./packages/modules/metadata-tmdb/src
 COPY packages/modules/release-prowlarr/src ./packages/modules/release-prowlarr/src
 COPY packages/modules/download-qbittorrent/src ./packages/modules/download-qbittorrent/src
-RUN uv sync --frozen --no-dev --no-editable
+RUN mkdir /wheels \
+    && for distribution in \
+        media-finder \
+        media-finder-core \
+        media-finder-module-sdk \
+        media-finder-control-contracts \
+        media-finder-builtin-ui \
+        media-finder-metadata-manual \
+        media-finder-metadata-tmdb \
+        media-finder-release-prowlarr \
+        media-finder-download-qbittorrent \
+    ; do \
+        uv build --wheel --package "$distribution" --out-dir /wheels; \
+    done \
+    && uv export --locked --package media-finder --no-dev \
+        --no-emit-project --no-emit-workspace --output-file /tmp/runtime-requirements.txt \
+    && uv venv --python /usr/local/bin/python /opt/venv \
+    && uv pip install --python /opt/venv/bin/python --require-hashes -r /tmp/runtime-requirements.txt \
+    && uv pip install --python /opt/venv/bin/python --no-deps /wheels/*.whl
 
 FROM python:3.13.14-slim-bookworm AS runtime
 
@@ -44,8 +63,6 @@ RUN groupadd --gid 10001 media-finder \
 
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
-COPY --chown=10001:10001 alembic ./alembic
-COPY --chown=10001:10001 alembic.ini ./alembic.ini
 
 USER 10001:10001
 EXPOSE 8000

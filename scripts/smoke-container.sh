@@ -74,8 +74,7 @@ assert_response \
 
 test "$(docker exec "$container_name" id -u)" = "10001"
 test "$(docker exec "$container_name" id -g)" = "10001"
-docker exec "$container_name" python -c \
-  "import media_finder_server, media_finder_core, media_finder_sdk, media_finder_builtin_ui, media_finder_control"
+docker exec -i "$container_name" python -I - < scripts/verify-image.py
 
 docker rm --force "$container_name"
 docker run --detach --name "$container_name" \

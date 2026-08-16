@@ -250,40 +250,274 @@ function validateCompose(root, failures) {
   }
 }
 
+function dockerStages(dockerfile) {
+  const stages = [];
+  let currentStage;
+  const lines = dockerfile.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^\s*(?:#|$)/.test(line)) continue;
+    const match = line.match(/^\s*(?<keyword>[A-Z]+)\s+(?<command>.*)$/);
+    if (!match) continue;
+    let command = match.groups.command;
+    while (/\\\s*$/.test(command) && index + 1 < lines.length) {
+      command = command.replace(/\\\s*$/, " ");
+      index += 1;
+      command += lines[index].trim();
+    }
+    if (match.groups.keyword === "FROM") {
+      const stageName = command.match(/\s+AS\s+(?<name>[A-Za-z][A-Za-z0-9_-]*)$/i)?.groups.name;
+      currentStage = { name: stageName, command, instructions: [] };
+      stages.push(currentStage);
+    } else if (currentStage) {
+      currentStage.instructions.push({ keyword: match.groups.keyword, command });
+    }
+  }
+  return stages;
+}
+
+function shellTokens(line) {
+  const tokens = [];
+  let lineContinuation = false;
+  let index = 0;
+  while (index < line.length) {
+    if (/\s/.test(line[index])) {
+      index += 1;
+      continue;
+    }
+    if (line[index] === "#") break;
+    const operator = shellOperatorAt(line, index);
+    if (operator) {
+      tokens.push({ kind: "operator", value: operator });
+      index += operator.length;
+      continue;
+    }
+    let quoted = false;
+    let value = "";
+    while (index < line.length && !/\s/.test(line[index]) && !shellOperatorAt(line, index)) {
+      const character = line[index];
+      if (character === "\\") {
+        if (index + 1 < line.length) {
+          value += line[index + 1];
+          index += 2;
+        } else {
+          lineContinuation = true;
+          index += 1;
+        }
+        continue;
+      }
+      if (character === "'" || character === '"') {
+        quoted = true;
+        const quote = character;
+        index += 1;
+        while (index < line.length && line[index] !== quote) {
+          if (quote === '"' && line[index] === "\\") {
+            if (index + 1 < line.length) {
+              value += line[index + 1];
+              index += 2;
+            } else {
+              lineContinuation = true;
+              index += 1;
+            }
+          } else {
+            value += line[index];
+            index += 1;
+          }
+        }
+        if (index < line.length) index += 1;
+        continue;
+      }
+      value += character;
+      index += 1;
+    }
+    if (value.length > 0 || quoted) tokens.push({ kind: "word", value, quoted });
+  }
+  return { lineContinuation, tokens };
+}
+
+function functionBody(tokens, index) {
+  let cursor = index;
+  const first = tokens[cursor];
+  if (first?.kind !== "word" || first.quoted) return undefined;
+  if (first.value === "function") {
+    cursor += 1;
+    const name = tokens[cursor];
+    if (name?.kind !== "word" || name.quoted || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name.value)) {
+      return undefined;
+    }
+    cursor += 1;
+    if (tokens[cursor]?.value === "(" && tokens[cursor + 1]?.value === ")") cursor += 2;
+  } else {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(first.value)) return undefined;
+    if (tokens[cursor + 1]?.value !== "(" || tokens[cursor + 2]?.value !== ")") return undefined;
+    cursor += 3;
+  }
+  const opener = tokens[cursor]?.value;
+  if (opener !== "{" && opener !== "(") return undefined;
+  return { bodyIndex: cursor, closing: opener === "{" ? "}" : ")" };
+}
+
+function executableHereDocuments(script) {
+  const documents = [];
+  const blocks = [];
+  const lines = script.split(/\r?\n/);
+  let incomingCommand = false;
+  let valid = true;
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
+    const { lineContinuation, tokens } = shellTokens(line);
+    const startedInIncomingCommand = incomingCommand;
+    let commandStart = true;
+    for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex += 1) {
+      const token = tokens[tokenIndex];
+      if (token.value === "<<" || token.value === "<<-") {
+        const delimiter = tokens[tokenIndex + 1];
+        if (delimiter?.kind !== "word" || delimiter.value.length === 0) {
+          valid = false;
+          break;
+        }
+        const body = [];
+        const stripTabs = token.value === "<<-";
+        lineIndex += 1;
+        while (lineIndex < lines.length) {
+          const candidate = stripTabs ? lines[lineIndex].replace(/^\t+/, "") : lines[lineIndex];
+          if (candidate === delimiter.value) break;
+          body.push(lines[lineIndex]);
+          lineIndex += 1;
+        }
+        if (lineIndex >= lines.length) {
+          valid = false;
+        } else if (blocks.length === 0 && !startedInIncomingCommand) {
+          documents.push({ header: line.trim(), body: body.join("\n") });
+        }
+        break;
+      }
+      if (commandStart) {
+        const definition = functionBody(tokens, tokenIndex);
+        if (definition) {
+          blocks.push(definition.closing);
+          tokenIndex = definition.bodyIndex;
+          commandStart = true;
+          continue;
+        }
+      }
+      if (token.kind === "operator") {
+        if (token.value === "{" || token.value === "(") {
+          blocks.push(token.value === "{" ? "}" : ")");
+          commandStart = true;
+        } else if (token.value === "}" || token.value === ")") {
+          if (blocks.at(-1) === token.value) blocks.pop();
+          commandStart = false;
+        } else if ([";", ";;", ";&", ";;&", "&&", "||", "&", "|"].includes(token.value)) {
+          commandStart = true;
+        }
+        continue;
+      }
+      if (!commandStart || token.quoted) {
+        commandStart = false;
+        continue;
+      }
+      if (["fi", "esac", "done"].includes(token.value)) {
+        if (blocks.at(-1) === token.value) blocks.pop();
+        else valid = false;
+        commandStart = false;
+      } else if (token.value === "if") {
+        blocks.push("fi");
+        commandStart = false;
+      } else if (token.value === "case") {
+        blocks.push("esac");
+        commandStart = false;
+      } else if (["for", "select", "while", "until"].includes(token.value)) {
+        blocks.push("done");
+        commandStart = false;
+      } else if (["then", "do", "else", "elif"].includes(token.value)) {
+        commandStart = true;
+      } else {
+        commandStart = false;
+      }
+    }
+    if (!valid) break;
+    if (tokens.length > 0) {
+      incomingCommand =
+        lineContinuation || ["&&", "||", "|"].includes(tokens.at(-1).value);
+    } else if (lineContinuation) {
+      incomingCommand = true;
+    }
+  }
+  return valid && blocks.length === 0 ? documents : [];
+}
+
 function validateImage(root, verify, verifyText, failures) {
   const dockerfile = readText(root, "Dockerfile", failures);
+  const stages = dockerStages(dockerfile);
+  const runtimeStage = stages.at(-1);
+  const runtimeVenvCopy = runtimeStage?.instructions.find(
+    (instruction) =>
+      instruction.keyword === "COPY" &&
+      /^--from=(?<source>[A-Za-z][A-Za-z0-9_-]*)\s+\/opt\/venv\s+\/opt\/venv$/.test(
+        instruction.command,
+      ),
+  );
+  const sourceStageName = runtimeVenvCopy?.command.match(/^--from=(?<source>[A-Za-z][A-Za-z0-9_-]*)/)?.groups
+    .source;
+  const builderStage = stages.find((stage) => stage.name === sourceStageName);
+  const builderRun = builderStage?.instructions.find(
+    (instruction) =>
+      instruction.keyword === "RUN" && instruction.command.includes("mkdir /wheels"),
+  )?.command;
   requireValue(
     failures,
-    (dockerfile.match(/^FROM /gm) ?? []).length >= 2,
+    stages.length >= 2,
     "Dockerfile: multi-stage build required",
   );
   requireValue(
     failures,
-    /^USER 10001:10001$/m.test(dockerfile),
+    runtimeStage?.instructions.some(
+      (instruction) => instruction.keyword === "USER" && instruction.command === "10001:10001",
+    ),
     "Dockerfile: runtime must use UID/GID 10001",
   );
   requireValue(
     failures,
-    /ENTRYPOINT \["python", "-m", "media_finder_server"\]/.test(dockerfile),
+    runtimeStage?.instructions.some(
+      (instruction) =>
+        instruction.keyword === "ENTRYPOINT" &&
+        instruction.command === '["python", "-m", "media_finder_server"]',
+    ),
     "Dockerfile: runtime entrypoint must gate startup",
   );
   requireValue(
     failures,
-    dockerfile.includes("uv sync --frozen --no-dev --no-editable"),
-    "Dockerfile: workspace packages must be installed non-editably for the runtime stage",
+    /for distribution in\s+media-finder\s+media-finder-core\s+media-finder-module-sdk\s+media-finder-control-contracts\s+media-finder-builtin-ui\s+media-finder-metadata-manual\s+media-finder-metadata-tmdb\s+media-finder-release-prowlarr\s+media-finder-download-qbittorrent\s+; do\s+uv build --wheel --package "\$distribution" --out-dir \/wheels/.test(
+      builderRun,
+    ),
+    "Dockerfile: production image must build every workspace package as wheels",
   );
-  for (const packageName of [
-    "media_finder_server",
-    "media_finder_builtin_ui",
-    "media_finder_control",
-  ]) {
-    requireValue(
-      failures,
-      dockerfile.includes("uv sync --frozen --no-dev") &&
-        readText(root, "scripts/smoke-container.sh", failures).includes(packageName),
-      `Dockerfile: production image must install and smoke ${packageName}`,
-    );
-  }
+  requireValue(
+    failures,
+    builderRun?.includes("uv venv --python /usr/local/bin/python /opt/venv") &&
+      builderRun.includes("uv export --locked --package media-finder") &&
+      builderRun.includes("--no-emit-project") &&
+      builderRun.includes("--no-emit-workspace") &&
+      !builderRun.includes("--no-hashes") &&
+      builderRun.includes(
+        "uv pip install --python /opt/venv/bin/python --require-hashes -r /tmp/runtime-requirements.txt",
+      ) &&
+      builderRun.includes("uv pip install --python /opt/venv/bin/python --no-deps /wheels/*.whl") &&
+      sourceStageName === "builder" &&
+      runtimeVenvCopy?.command === "--from=builder /opt/venv /opt/venv" &&
+      !builderStage?.instructions.some(
+        (instruction) => instruction.keyword === "RUN" && instruction.command.includes("uv sync --frozen"),
+      ),
+    "Dockerfile: production image must install every workspace wheel into a fresh runtime venv",
+  );
+  requireValue(
+    failures,
+    builderRun?.includes("uv export --locked --package media-finder") &&
+      !builderRun.includes("--no-hashes") &&
+      builderRun.includes("--require-hashes -r /tmp/runtime-requirements.txt"),
+    "Dockerfile: production image must install locked requirements with hashes",
+  );
 
   const imageJob = verify.jobs?.image;
   const smokeStep = (imageJob?.steps ?? []).find(
@@ -295,6 +529,50 @@ function validateImage(root, verify, verifyText, failures) {
     ".github/workflows/verify.yaml: image job must run the production smoke script",
   );
   const smoke = readText(root, "scripts/smoke-container.sh", failures);
+  const runtimeProbe = executableHereDocuments(smoke).find(
+    (document) => document.header === 'docker exec -i "$container_name" python -I - <<\'PY\'',
+  )?.body;
+  for (const distribution of WORKSPACE_DISTRIBUTIONS) {
+    requireValue(
+      failures,
+      runtimeProbe?.includes(`"${distribution}"`),
+      `scripts/smoke-container.sh: image smoke must import ${distribution}`,
+    );
+  }
+  requireValue(
+    failures,
+    runtimeProbe?.includes("/opt/venv/lib/python3.13/site-packages") &&
+      runtimeProbe.includes("assert len(versions) == 1") &&
+      runtimeProbe.includes('assert not Path("/build").exists()') &&
+      runtimeProbe.includes('assert not Path("/app/packages").exists()'),
+    "scripts/smoke-container.sh: image smoke must validate installed distribution origins, lockstep versions, and source-path exclusion",
+  );
+  for (const resource of [
+    "media_finder_builtin_ui/templates/base.html",
+    "media_finder_builtin_ui/static/ui.js",
+    "media_finder_builtin_ui/locales/en/LC_MESSAGES/messages.mo",
+    "media_finder_builtin_ui/locales/ru/LC_MESSAGES/messages.mo",
+    "media_finder_metadata_manual/module.toml",
+    "media_finder_metadata_manual/fixtures/conformance.json",
+    "media_finder_metadata_tmdb/module.toml",
+    "media_finder_metadata_tmdb/fixtures/conformance.json",
+    "media_finder_release_prowlarr/module.toml",
+    "media_finder_release_prowlarr/fixtures/conformance.json",
+    "media_finder_download_qbittorrent/module.toml",
+    "media_finder_download_qbittorrent/fixtures/conformance.json",
+    "media_finder_core/_migration_resources/alembic/versions/0001_clean_core.py",
+  ]) {
+    requireValue(
+      failures,
+      runtimeProbe?.includes(resource),
+      "scripts/smoke-container.sh: image smoke must validate complete packaged runtime resources",
+    );
+  }
+  requireValue(
+    failures,
+    runtimeProbe?.includes("assert len(application_processes) == 1"),
+    "scripts/smoke-container.sh: image smoke must validate exactly one application process",
+  );
   const expectations = [
     ["UI root", /assert_response\s+"UI root"\s+"\$base_url\/"\s+"200"\s+"<!doctype html>"/],
     [
