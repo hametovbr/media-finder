@@ -102,6 +102,32 @@ def test_about_keeps_tmdb_attribution_during_live_outage(tmp_path: Path) -> None
     )
 
 
+def test_prowlarr_outage_is_reported_without_affecting_readiness(tmp_path: Path) -> None:
+    url = f"sqlite:///{tmp_path / 'prowlarr-outage.db'}"
+    migrate_to_head(url)
+
+    def client_factory() -> httpx.Client:
+        def prowlarr_outage(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "prowlarr.example.test":
+                raise httpx.ReadTimeout("upstream unavailable", request=request)
+            return _handler(request)
+
+        return httpx.Client(transport=httpx.MockTransport(prowlarr_outage))
+
+    application = _application(
+        url,
+        module_environment=ENVIRONMENT,
+        client_factory=client_factory,
+    )
+    with TestClient(application) as client:
+        ready = client.get("/health/ready")
+        settings = client.get("/settings")
+
+    assert ready.status_code == 200
+    assert ready.json() == {"status": "ready"}
+    assert 'data-integration="prowlarr" data-integration-state="unavailable"' in settings.text
+
+
 def test_about_uses_environment_presence_with_root_owned_maintenance(tmp_path: Path) -> None:
     url = f"sqlite:///{tmp_path / 'about-no-probe.db'}"
     migrate_to_head(url)
