@@ -2,6 +2,10 @@ import asyncio
 from uuid import uuid4
 
 import pytest
+from media_finder.control_gateway import BackendControlGateway
+from media_finder.ephemeral import EphemeralCache
+from media_finder.integration_runtime import RuntimeResolver
+from media_finder.models import MetadataRevision
 from media_finder_control import ControlFailure, Locale
 from media_finder_control.manual import (
     ArtworkDocument,
@@ -11,27 +15,18 @@ from media_finder_control.manual import (
     SeasonDocument,
 )
 from media_finder_control.models import EpisodeImportRequest, ManualImportRequest
-from media_finder_server import create_legacy_module_registry, create_runtime_factory
+from media_finder_server import create_legacy_module_registry
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from media_finder.control_gateway import BackendControlGateway
-from media_finder.ephemeral import EphemeralCache
-from media_finder.integration_runtime import RuntimeResolver
-from media_finder.models import MetadataRevision
-
 LEGACY_REGISTRY = create_legacy_module_registry()
-RELEASE_INTEGRATION = create_runtime_factory(environment={}).release_integration
 
 
 def _gateway(database: Session) -> BackendControlGateway:
     sessions = sessionmaker(bind=database.get_bind(), expire_on_commit=False)
     provider = LEGACY_REGISTRY.retention_providers()["manual"]
     runtime = RuntimeResolver(
-        factory=None,
         providers={"manual": provider},
-        prowlarr=None,
-        client_loader=None,
     )
     return BackendControlGateway(
         sessions=sessions,
@@ -39,7 +34,6 @@ def _gateway(database: Session) -> BackendControlGateway:
         runtime=runtime,
         manual_drafts=EphemeralCache(),
         registry=LEGACY_REGISTRY,
-        release_integration=RELEASE_INTEGRATION,
     )
 
 

@@ -213,6 +213,10 @@ Core, not the release module, owns cache capacity, TTL, eviction, token generati
 
 The default host statically selects Prowlarr as its sole release provider and qBittorrent as its sole download client, preserving current UI behavior. The typed registries support additional implementations, but multi-provider release aggregation and runtime client selection require a later product change because their ambiguity and UX are not justified now.
 
+The host creates exactly one process-wide release-selection service backed by the selected release-provider registration. The service owns only its bounded ephemeral cache and borrows the provider capability from `ModuleRuntime`; the runtime remains the sole owner and closer of provider and download-client resources. Search, destination discovery, submission, diagnostics, and reconciliation consume one typed acquisition-module access seam rather than provider-specific runtime branches.
+
+Manual reconciliation is keyed by the Acquisition's immutable download-client module ID, not by its historical version. A newly packaged version with the same stable module ID may perform the exact-correlation lookup while the stored version snapshot remains unchanged. A missing module or a different selected module ID cannot safely query that correlation, so reconciliation returns a stable safe error and leaves the Acquisition pending. Reconciliation never requires the release provider because the artifact has already been submitted or its outcome is ambiguous.
+
 ### 7. Preserve the UI and HTTP seams while splitting backend orchestration
 
 The built-in UI package and control-contract package remain as completed by `decouple-builtin-ui`. UI dependency rules do not change. `BackendControlGateway` is decomposed into context-specific control services plus a small facade implementing the existing `ControlGateway` protocol. The facade coordinates stable DTOs; it does not query ORM records or build integrations directly.

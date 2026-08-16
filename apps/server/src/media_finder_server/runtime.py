@@ -15,7 +15,6 @@ from media_finder.ui import create_ui_app as _create_ui_app
 
 from .modules import (
     create_legacy_module_registry,
-    create_release_registration,
     create_runtime_module_composition,
 )
 
@@ -33,10 +32,12 @@ def create_runtime_factory(
     return DefaultRuntimeFactory(
         http_client_factory=http_client_factory,
         registry=composition.legacy_registry,
-        release_registration_factory=composition.release_registration_factory,
         environment=snapshot,
         lifecycle=composition.runtime,
         module_runtime=composition.runtime,
+        release_manifest=composition.release_manifest,
+        download_manifest=composition.download_manifest,
+        release_selections=composition.release_selections,
     )
 
 
@@ -56,7 +57,7 @@ def create_ui_app(database_url: str, **options: Any) -> FastAPI:
     runtime_factory = options.pop("runtime_factory", None)
     owns_runtime_factory = False
     uses_explicit_test_capabilities = any(
-        options.get(name) is not None for name in ("providers", "prowlarr", "client_loader")
+        options.get(name) is not None for name in ("providers", "acquisition")
     )
     if runtime_factory is None and not uses_explicit_test_capabilities:
         runtime_factory = create_runtime_factory(
@@ -73,7 +74,6 @@ def create_ui_app(database_url: str, **options: Any) -> FastAPI:
         return _create_ui_app(
             database_url,
             registry=registry,
-            release_registration_factory=create_release_registration,
             runtime_factory=runtime_factory,
             **options,
         )

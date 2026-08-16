@@ -10,7 +10,6 @@ import httpx
 from fastapi import FastAPI
 from media_finder_builtin_ui import BuiltinUIOptions, create_builtin_ui
 from media_finder_builtin_ui.i18n import message_for
-from media_finder_core.acquisition import ReleaseSelectionService
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -19,37 +18,15 @@ from .control_gateway import BackendControlGateway
 from .control_security import BackendBrowserSecurity
 from .db import create_database, session_factory
 from .integration_runtime import (
-    ClientLoader,
+    AcquisitionModuleAccess,
     DefaultRuntimeFactory,
-    ReleaseRegistrationFactory,
     RuntimeFactory,
     RuntimeResolver,
 )
 from .sdk.protocols import MetadataProvider
-from .sdk.registration import IntegrationDescriptor, StaticModuleRegistry
-from .sdk.types import EnvironmentVariableSpec
-from .system_clients import ensure_system_qbittorrent
+from .sdk.registration import StaticModuleRegistry
 
 __all__ = ["create_ui_app", "error_message", "resolve_locale"]
-
-
-def _release_descriptor(
-    factory: ReleaseRegistrationFactory,
-) -> IntegrationDescriptor:
-    manifest = factory(httpx.Client).manifest
-    return IntegrationDescriptor(
-        key=manifest.module_id,
-        version=manifest.module_version,
-        environment=tuple(
-            EnvironmentVariableSpec(
-                name=value.name,
-                required=value.required,
-                secret=value.secret,
-                description_key=value.description_key,
-            )
-            for value in manifest.environment
-        ),
-    )
 
 
 def resolve_locale(override: str | None, accept_language: str | None) -> str:
@@ -72,12 +49,9 @@ def create_ui_app(
     session_secret_reference: str,
     secure_cookie: bool = False,
     providers: dict[str, MetadataProvider] | None = None,
-    prowlarr: ReleaseSelectionService | None = None,
-    client_loader: ClientLoader | None = None,
-    download_client_versions: Mapping[str, str] | None = None,
+    acquisition: AcquisitionModuleAccess | None = None,
     runtime_factory: RuntimeFactory | None = None,
     registry: StaticModuleRegistry,
-    release_registration_factory: ReleaseRegistrationFactory,
     http_client_factory: Callable[[], httpx.Client] = httpx.Client,
     environment: Mapping[str, str] | None = None,
     **_: Any,
@@ -94,12 +68,9 @@ def create_ui_app(
             session_secret_reference=session_secret_reference,
             secure_cookie=secure_cookie,
             providers=providers,
-            prowlarr=prowlarr,
-            client_loader=client_loader,
-            download_client_versions=download_client_versions,
+            acquisition=acquisition,
             runtime_factory=runtime_factory,
             registry=registry,
-            release_registration_factory=release_registration_factory,
             http_client_factory=http_client_factory,
             environment=environment,
         )
@@ -116,17 +87,12 @@ def _compose_ui_app(
     session_secret_reference: str,
     secure_cookie: bool,
     providers: dict[str, MetadataProvider] | None,
-    prowlarr: ReleaseSelectionService | None,
-    client_loader: ClientLoader | None,
-    download_client_versions: Mapping[str, str] | None,
+    acquisition: AcquisitionModuleAccess | None,
     runtime_factory: RuntimeFactory | None,
     registry: StaticModuleRegistry,
-    release_registration_factory: ReleaseRegistrationFactory,
     http_client_factory: Callable[[], httpx.Client],
     environment: Mapping[str, str] | None,
 ) -> FastAPI:
-    with sessions() as database:
-        ensure_system_qbittorrent(database)
     secret = (
         resolve_env_reference(EnvReference(value=session_secret_reference))
         .get_secret_value()
@@ -134,35 +100,22 @@ def _compose_ui_app(
     )
     selected_factory = runtime_factory
     provider_registry = dict(providers or registry.retention_providers())
-    if (
-        selected_factory is None
-        and providers is None
-        and prowlarr is None
-        and client_loader is None
-    ):
+    if selected_factory is None and providers is None and acquisition is None:
         selected_factory = DefaultRuntimeFactory(
             environment=environment,
             http_client_factory=http_client_factory,
             registry=registry,
-            release_registration_factory=release_registration_factory,
         )
     runtime = RuntimeResolver(
         factory=selected_factory,
         providers=provider_registry,
-        prowlarr=prowlarr,
-        client_loader=client_loader,
-        download_client_versions=download_client_versions,
+        acquisition=acquisition,
     )
     gateway = BackendControlGateway(
         sessions=sessions,
         cursor_secret=secret,
         runtime=runtime,
         registry=registry,
-        release_integration=(
-            selected_factory.release_integration
-            if isinstance(selected_factory, DefaultRuntimeFactory)
-            else _release_descriptor(release_registration_factory)
-        ),
         metadata_capabilities=(
             selected_factory.module_runtime
             if isinstance(selected_factory, DefaultRuntimeFactory)

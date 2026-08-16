@@ -11,6 +11,7 @@ from uuid import uuid4
 import httpx
 import pytest
 import uvicorn
+from acquisition_fakes import StaticAcquisitionModules
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, Response
 from media_finder.control_api import create_control_app
@@ -214,9 +215,6 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "a sufficiently long browser test secret")
     clients = {"qBittorrent": BrowserClient("second")}
 
-    def load_client(instance: DownloadClientInstance) -> BrowserClient:
-        return clients.setdefault(instance.name, BrowserClient(instance.name.casefold()))
-
     app = create_ui_app(
         database_url,
         session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
@@ -225,11 +223,14 @@ def browser_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             "provider-b": BrowserProvider("provider-b"),
             "manual": LEGACY_REGISTRY.retention_providers()["manual"],
         },
-        prowlarr=ReleaseSelectionService(
-            provider=BrowserReleaseProvider(), cache=ReleaseSelectionCache()
+        acquisition=StaticAcquisitionModules(
+            releases=ReleaseSelectionService(
+                provider=BrowserReleaseProvider(), cache=ReleaseSelectionCache()
+            ),
+            download_client=clients["qBittorrent"],
+            release_id="prowlarr",
+            download_id="qbittorrent",
         ),
-        client_loader=load_client,
-        download_client_versions={"qbittorrent": "9.8.7"},
     )
     app.state.browser_clients = clients
 

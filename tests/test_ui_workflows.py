@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 import pytest
+from acquisition_fakes import StaticAcquisitionModules
 from fastapi.testclient import TestClient
 from media_finder.db import migrate_to_head, session_factory
 from media_finder.models import Acquisition, DownloadClientInstance, MediaItem, MetadataRevision
@@ -77,9 +78,12 @@ def workflow_app(
             fake_provider.manifest.key: fake_provider,
             "manual": LEGACY_REGISTRY.retention_providers()["manual"],
         },
-        prowlarr=prowlarr,
-        client_loader=lambda _: fake_client,
-        download_client_versions={"qbittorrent": "9.8.7"},
+        acquisition=StaticAcquisitionModules(
+            releases=prowlarr,
+            download_client=fake_client,
+            release_id="prowlarr",
+            download_id="qbittorrent",
+        ),
     )
     sessions = session_factory(app.state.engine)
     with sessions() as session:

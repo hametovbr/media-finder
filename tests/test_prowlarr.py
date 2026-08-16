@@ -106,7 +106,7 @@ def test_release_selection_cache_enforces_ttl_lru_eviction_and_process_locality(
         service.inspect(third.token)
 
 
-def test_release_selection_resolves_torrent_bytes_in_memory_and_closes_provider() -> None:
+def test_release_selection_resolves_torrent_bytes_and_only_clears_its_cache() -> None:
     provider = FixtureReleaseProvider()
     service = ReleaseSelectionService(provider=provider, cache=ReleaseSelectionCache())
     selected = service.search(ReleaseSearchQuery(query="torrent"))[0]
@@ -116,4 +116,4 @@ def test_release_selection_resolves_torrent_bytes_in_memory_and_closes_provider(
 
     assert isinstance(resolved.artifact, TorrentArtifact)
     assert resolved.artifact.content() == b"fixture torrent bytes"
-    assert provider.closed is True
+    assert provider.closed is False

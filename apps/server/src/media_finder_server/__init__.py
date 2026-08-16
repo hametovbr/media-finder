@@ -12,7 +12,6 @@ __all__ = [
     "create_application",
     "create_legacy_module_registry",
     "create_module_registry",
-    "create_release_registration",
     "create_runtime_factory",
     "create_ui_app",
     "run",
@@ -22,7 +21,6 @@ _MODULE_EXPORTS = frozenset(
     {
         "create_legacy_module_registry",
         "create_module_registry",
-        "create_release_registration",
     }
 )
 _RUNTIME_EXPORTS = frozenset(

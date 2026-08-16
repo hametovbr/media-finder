@@ -2,16 +2,12 @@ import threading
 
 import httpx
 from media_finder.integration_runtime import DefaultRuntimeFactory
-from media_finder.models import DownloadClientInstance
 from media_finder.sdk.registration import (
-    DownloadClientRegistration,
     MetadataProviderRegistration,
     StaticModuleRegistry,
 )
-from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 from media_finder_server import (
     create_legacy_module_registry,
-    create_release_registration,
     create_runtime_factory,
 )
 from pydantic import BaseModel
@@ -26,16 +22,6 @@ ENVIRONMENT = {
     "QBITTORRENT_USERNAME": "operator",
     "QBITTORRENT_PASSWORD": "qb-secret",
 }
-
-
-def system_client(module_key: str = "qbittorrent") -> DownloadClientInstance:
-    return DownloadClientInstance(
-        id=SYSTEM_QBITTORRENT_ID,
-        name="qBittorrent",
-        module_key=module_key,
-        config_payload={},
-        system_owned=True,
-    )
 
 
 def test_runtime_http_sessions_are_isolated_per_service_and_qb_instance() -> None:
@@ -62,8 +48,8 @@ def test_runtime_http_sessions_are_isolated_per_service_and_qb_instance() -> Non
     factory = create_runtime_factory(environment=ENVIRONMENT, http_client_factory=clients)
     provider = factory.metadata_provider("tmdb").value
     assert provider is not None
-    assert factory.prowlarr().value is not None
-    client = factory.download_client(system_client()).value
+    assert factory.release_selections().value is not None
+    client = factory.selected_download_client().value
     assert client is not None
 
     authentication_requests = [
@@ -84,7 +70,7 @@ def test_runtime_closes_release_provider_through_its_owned_lifecycle() -> None:
         return client
 
     factory = create_runtime_factory(environment=ENVIRONMENT, http_client_factory=clients)
-    service = factory.prowlarr().value
+    service = factory.release_selections().value
     assert service is not None
     assert len(created) == 1 and not created[0].is_closed
 
@@ -119,30 +105,20 @@ def test_failed_runtime_construction_closes_and_forgets_every_created_http_clien
                 build=fail_builder,
             )
         },
-        download_clients={
-            "broken": DownloadClientRegistration(
-                key="broken", config_model=EmptyIntegrationConfig, build=fail_builder
-            )
-        },
+        download_clients={},
     )
     factory = DefaultRuntimeFactory(
         environment=ENVIRONMENT,
         http_client_factory=clients,
         registry=registry,
-        release_registration_factory=create_release_registration,
     )
 
     for _ in range(2):
-        assert factory.prowlarr().error_code == "prowlarr_configuration_invalid"
         assert factory.metadata_provider("broken").error_code == (
             "metadata_provider_configuration_invalid"
         )
-        instance = system_client("broken")
-        assert factory.download_client(instance).error_code == (
-            "download_client_configuration_invalid"
-        )
 
-    assert len(created) == 6
+    assert len(created) == 2
     assert all(client.is_closed for client in created)
     assert factory._http_clients == []
 
@@ -171,9 +147,9 @@ def test_first_party_validation_owns_only_successful_cached_http_clients() -> No
             == "metadata_provider_configuration_invalid"
         )
     for _ in range(2):
-        instance = system_client()
-        assert failed_factory.download_client(instance).error_code == (
-            "download_client_configuration_invalid"
+        assert (
+            failed_factory.selected_download_client().error_code
+            == "download_client_authentication_failed"
         )
     assert len(failed) == 4
     assert all(client.is_closed for client in failed)
@@ -199,11 +175,10 @@ def test_first_party_validation_owns_only_successful_cached_http_clients() -> No
     first_tmdb = success_factory.metadata_provider("tmdb").value
     assert first_tmdb is not None
     assert success_factory.metadata_provider("tmdb").value is first_tmdb
-    good_instance = system_client()
-    first_qb = success_factory.download_client(good_instance).value
+    first_qb = success_factory.selected_download_client().value
     assert first_qb is not None
-    assert success_factory.download_client(good_instance).value is first_qb
-    assert success_factory.prowlarr().error_code == "prowlarr_configuration_invalid"
+    assert success_factory.selected_download_client().value is first_qb
+    assert success_factory.release_selections().error_code == "prowlarr_configuration_invalid"
     assert len(retained) == 3
     assert not retained[0].is_closed and not retained[1].is_closed
     assert retained[2].is_closed
@@ -240,8 +215,7 @@ def test_failed_interleaved_attempt_cannot_close_a_later_successful_client() -> 
     worker = threading.Thread(target=fail_tmdb)
     worker.start()
     assert tmdb_started.wait(timeout=5)
-    instance = system_client()
-    successful = factory.download_client(instance).value
+    successful = factory.selected_download_client().value
     assert successful is not None
     release_tmdb.set()
     worker.join(timeout=5)
@@ -252,7 +226,7 @@ def test_failed_interleaved_attempt_cannot_close_a_later_successful_client() -> 
     assert len(created) == 2
     assert created[0].is_closed
     assert not created[1].is_closed
-    assert factory.download_client(instance).value is successful
+    assert factory.selected_download_client().value is successful
     assert factory._http_clients == []
     factory.close()
     assert created[1].is_closed

@@ -121,52 +121,24 @@ def test_environment_resolution_reports_only_missing_names() -> None:
     assert "must-never-escape" not in str(rejected.value)
 
 
-def test_prowlarr_publishes_the_same_public_descriptor_type() -> None:
-    descriptor = getattr(sdk, "IntegrationDescriptor", None)
-    assert descriptor is not None
-    release_integration = create_runtime_factory(environment={}).release_integration
+def test_selected_modules_publish_typed_manifests_with_exact_environment() -> None:
+    factory = create_runtime_factory(environment={})
+    release_manifest = factory.release_manifest
+    download_manifest = factory.download_manifest
 
-    assert isinstance(release_integration, descriptor)
-    assert [item.name for item in release_integration.environment] == [
+    assert [item.name for item in release_manifest.environment] == [
         "PROWLARR_URL",
         "PROWLARR_API_KEY",
     ]
-    assert [item.secret for item in release_integration.environment] == [False, True]
-
-
-def test_release_descriptor_requires_and_preserves_the_manifest_version() -> None:
-    from types import SimpleNamespace
-
-    from media_finder.ui import _release_descriptor
-
-    descriptor = sdk.IntegrationDescriptor
-    with pytest.raises(TypeError):
-        descriptor(key="fixture-release", environment=())
-
-    value = _release_descriptor(
-        lambda _: SimpleNamespace(
-            manifest=SimpleNamespace(
-                module_id="fixture-release",
-                module_version="9.8.7",
-                environment=(),
-            )
-        )
-    )
-    assert value.version == "9.8.7"
-
-
-def test_unregistered_download_client_version_is_never_fabricated() -> None:
-    from types import SimpleNamespace
-
-    from media_finder.integration_runtime import RuntimeResolver
-
-    resolver = RuntimeResolver(
-        factory=None,
-        providers={},
-        prowlarr=None,
-        client_loader=lambda _: object(),
-    )
-    assert resolver.download_client_version(SimpleNamespace(module_key="fixture-download")) is None
+    assert [item.secret for item in release_manifest.environment] == [False, True]
+    assert [item.name for item in download_manifest.environment] == [
+        "QBITTORRENT_URL",
+        "QBITTORRENT_USERNAME",
+        "QBITTORRENT_PASSWORD",
+    ]
+    assert release_manifest.module_version == "0.1.0"
+    assert download_manifest.module_version == "0.1.0"
+    factory.close()
 
 
 def test_shared_conformance_exercises_declared_and_missing_environment() -> None:

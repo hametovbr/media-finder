@@ -2,22 +2,26 @@ import asyncio
 import json
 from typing import cast
 
-from media_finder_control import ReadinessStatus
-from media_finder_server import create_legacy_module_registry, create_runtime_factory
-from sqlalchemy.orm import Session, sessionmaker
-
+from acquisition_fakes import StaticAcquisitionModules
 from media_finder.control_gateway import BackendControlGateway
 from media_finder.integration_runtime import RuntimeResolver, RuntimeResult
-from media_finder.system_clients import ensure_system_qbittorrent
+from media_finder_control import ReadinessStatus
+from media_finder_server import create_legacy_module_registry
+from sqlalchemy.orm import Session, sessionmaker
 
 REGISTRY = create_legacy_module_registry()
-RELEASE_INTEGRATION = create_runtime_factory(environment={}).release_integration
 
 
 class DiagnosticRuntime:
     def __init__(self, provider, client) -> None:
         self.provider = provider
         self.client = client
+        self.acquisition = StaticAcquisitionModules(
+            releases=None,
+            download_client=client,
+            release_id="prowlarr",
+            download_id="qbittorrent",
+        )
         self.set_names = {
             "TMDB_TOKEN",
             "QBITTORRENT_URL",
@@ -40,10 +44,18 @@ class DiagnosticRuntime:
     def configured_provider_attributions(self):
         return [self.provider.attribution()]
 
-    def prowlarr(self):
+    @property
+    def release_manifest(self):
+        return self.acquisition.release_manifest
+
+    @property
+    def download_manifest(self):
+        return self.acquisition.download_manifest
+
+    def release_selections(self):
         return RuntimeResult(None, "integration_environment_missing")
 
-    def download_client(self, instance):
+    def selected_download_client(self):
         return RuntimeResult(self.client)
 
     def environment_is_set(self, name: str) -> bool:
@@ -53,13 +65,11 @@ class DiagnosticRuntime:
 def test_diagnostics_publish_only_declarations_and_safe_states(
     database: Session, fake_provider, fake_client
 ) -> None:
-    ensure_system_qbittorrent(database)
     gateway = BackendControlGateway(
         sessions=sessionmaker(bind=database.get_bind(), expire_on_commit=False),
         cursor_secret=b"cursor-secret-for-tests",
         runtime=cast(RuntimeResolver, DiagnosticRuntime(fake_provider, fake_client)),
         registry=REGISTRY,
-        release_integration=RELEASE_INTEGRATION,
         build_version="1.2.3",
     )
 

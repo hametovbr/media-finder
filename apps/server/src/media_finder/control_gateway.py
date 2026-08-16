@@ -84,6 +84,7 @@ from media_finder_core.catalog.persistence import (
 from media_finder_sdk import (
     DownloadClient as CoreDownloadClient,
 )
+from media_finder_sdk import EnvironmentVariableSpec as CoreEnvironmentVariableSpec
 from media_finder_sdk import (
     EpisodeTableDocument,
     MetadataEditor,
@@ -109,11 +110,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .ephemeral import EphemeralCache, EphemeralTokenExpired
 from .integration_runtime import LegacyMetadataCapabilities, RuntimeResolver
-from .models import DownloadClientInstance, MediaItem, MetadataRevision
-from .sdk.protocols import DownloadClient
-from .sdk.registration import IntegrationDescriptor, StaticModuleRegistry
+from .models import MediaItem, MetadataRevision
+from .sdk.registration import StaticModuleRegistry
 from .sdk.types import EnvironmentVariableSpec, NormalizedMetadata
-from .system_clients import SYSTEM_QBITTORRENT_ID
 
 T = TypeVar("T")
 
@@ -212,7 +211,6 @@ class BackendControlGateway:
         metadata_selections: EphemeralCache[CoreMetadataSearchResult] | None = None,
         manual_drafts: EphemeralCache[_ManualDraft] | None = None,
         registry: StaticModuleRegistry,
-        release_integration: IntegrationDescriptor,
         metadata_capabilities: _MetadataCapabilities | None = None,
         build_version: str = "0.1.0",
     ) -> None:
@@ -222,7 +220,6 @@ class BackendControlGateway:
         self._metadata_selections = metadata_selections or EphemeralCache()
         self._manual_drafts = manual_drafts or EphemeralCache()
         self._registry = registry
-        self._release_integration = release_integration
         self._metadata_capabilities = metadata_capabilities or (
             LegacyMetadataCapabilities(runtime) if runtime is not None else None
         )
@@ -636,10 +633,10 @@ class BackendControlGateway:
             item = database.get(MediaItem, item_id)
             if item is None or item.current_revision_id is None:
                 raise ControlFailure(code="media_item_not_found", status=404)
-            resolved = runtime.prowlarr()
+            resolved = runtime.release_selections()
             if resolved.value is None:
                 raise ControlFailure(
-                    code=resolved.error_code or "prowlarr_not_configured",
+                    code=resolved.error_code or "release_provider_unavailable",
                     status=503,
                 )
             filters = (
@@ -657,7 +654,7 @@ class BackendControlGateway:
                     ModuleReleaseSearchQuery(query=request.query, filters=filters)
                 )
             except Exception as error:
-                raise self._failure_for(error, "prowlarr_search_failed") from None
+                raise self._failure_for(error, "release_search_failed") from None
             return tuple(
                 ReleaseSearchResult(
                     token=result.token,
@@ -670,12 +667,15 @@ class BackendControlGateway:
         return await self._run(operation)
 
     async def list_destinations(self) -> tuple[ControlDestination, ...]:
-        def operation(database: Session) -> tuple[ControlDestination, ...]:
-            instance = database.get(DownloadClientInstance, SYSTEM_QBITTORRENT_ID)
-            if instance is None:
-                raise ControlFailure(code="download_client_not_found", status=404)
+        def operation(_: Session) -> tuple[ControlDestination, ...]:
             try:
-                destinations = self._load_client(instance).list_destinations()
+                result = self._require_runtime().selected_download_client()
+                if result.value is None:
+                    raise ControlFailure(
+                        code=result.error_code or "download_client_unavailable",
+                        status=503,
+                    )
+                destinations = result.value.list_destinations()
                 return tuple(
                     ControlDestination(key=value.key, label=value.label) for value in destinations
                 )
@@ -693,48 +693,33 @@ class BackendControlGateway:
             item = database.get(MediaItem, request.media_item_id)
             if item is None or item.current_revision_id is None:
                 raise ControlFailure(code="media_item_not_found", status=404)
-            instance = database.get(DownloadClientInstance, SYSTEM_QBITTORRENT_ID)
-            if instance is None:
-                raise ControlFailure(code="download_client_not_found", status=404)
 
             def release_selections() -> ReleaseSelectionService:
-                result = runtime.prowlarr()
+                result = runtime.release_selections()
                 if result.value is None:
                     raise ValueError(result.error_code or "acquisition_unavailable")
                 return result.value
 
             def download_client() -> CoreDownloadClient:
-                result = runtime.core_download_client(instance)
+                result = runtime.selected_download_client()
                 if result.value is None:
                     raise ValueError(result.error_code or "download_client_unavailable")
                 return result.value
 
-            def download_client_module() -> ModuleVersionSnapshot:
-                version = runtime.download_client_version(instance)
-                if version is None:
-                    raise ValueError("download_client_version_unavailable")
-                return ModuleVersionSnapshot(
-                    module_id=instance.module_key,
-                    module_version=version,
-                )
-
             service = AcquisitionCommands(
-                query_port=SqlAlchemyAcquisitionQueries(
-                    self._sessions,
-                    legacy_download_client_instance_id=instance.id,
-                ),
-                unit_of_work=SqlAlchemyAcquisitionUnitOfWork(
-                    self._sessions,
-                    legacy_download_client_instance_id=instance.id,
-                ),
+                query_port=SqlAlchemyAcquisitionQueries(self._sessions),
+                unit_of_work=SqlAlchemyAcquisitionUnitOfWork(self._sessions),
                 catalog=SqlAlchemyCatalogQueries(self._sessions),
                 releases=release_selections,
                 download_client=download_client,
                 release_provider=ModuleVersionSnapshot(
-                    module_id=self._release_integration.key,
-                    module_version=self._release_integration.version,
+                    module_id=runtime.release_manifest.module_id,
+                    module_version=runtime.release_manifest.module_version,
                 ),
-                download_client_module=download_client_module,
+                download_client_module=ModuleVersionSnapshot(
+                    module_id=runtime.download_manifest.module_id,
+                    module_version=runtime.download_manifest.module_version,
+                ),
                 clock=lambda: datetime.now(UTC),
             )
             try:
@@ -770,32 +755,27 @@ class BackendControlGateway:
     async def reconcile_acquisition(self, *, acquisition_id: str) -> AcquisitionView:
         runtime = self._require_runtime()
 
-        def operation(database: Session) -> AcquisitionView:
-            instance = database.get(DownloadClientInstance, SYSTEM_QBITTORRENT_ID)
-            if instance is None:
-                raise ControlFailure(code="download_client_not_found", status=404)
+        def operation(_: Session) -> AcquisitionView:
             persisted = SqlAlchemyAcquisitionQueries(self._sessions).get(acquisition_id)
             if persisted is None:
                 raise ControlFailure(code="acquisition_not_found", status=404)
-            if persisted.download_client.module_id != instance.module_key:
+            try:
+                selected_manifest = runtime.download_manifest
+            except Exception:
+                raise ControlFailure(code="download_client_unavailable", status=503) from None
+            if persisted.download_client.module_id != selected_manifest.module_id:
                 raise ControlFailure(code="download_client_module_mismatch", status=422)
 
             def download_client() -> CoreDownloadClient:
-                result = runtime.core_download_client(instance)
+                result = runtime.selected_download_client()
                 if result.value is None:
                     raise ValueError(result.error_code or "download_client_unavailable")
                 return result.value
 
             try:
                 acquisition = AcquisitionCommands(
-                    query_port=SqlAlchemyAcquisitionQueries(
-                        self._sessions,
-                        legacy_download_client_instance_id=instance.id,
-                    ),
-                    unit_of_work=SqlAlchemyAcquisitionUnitOfWork(
-                        self._sessions,
-                        legacy_download_client_instance_id=instance.id,
-                    ),
+                    query_port=SqlAlchemyAcquisitionQueries(self._sessions),
+                    unit_of_work=SqlAlchemyAcquisitionUnitOfWork(self._sessions),
                     catalog=SqlAlchemyCatalogQueries(self._sessions),
                     releases=None,
                     download_client=download_client,
@@ -836,7 +816,7 @@ class BackendControlGateway:
     async def integration_diagnostics(self) -> tuple[IntegrationDiagnostic, ...]:
         runtime = self._require_runtime()
 
-        def operation(database: Session) -> tuple[IntegrationDiagnostic, ...]:
+        def operation(_: Session) -> tuple[IntegrationDiagnostic, ...]:
             diagnostics: list[IntegrationDiagnostic] = []
             for key, registration in sorted(self._registry.metadata_providers.items()):
                 provider_result = runtime.metadata_provider(key)
@@ -849,41 +829,26 @@ class BackendControlGateway:
                         error_code=provider_result.error_code,
                     )
                 )
-            prowlarr_result = runtime.prowlarr()
+            release_result = runtime.release_selections()
+            release_manifest = runtime.release_manifest
             diagnostics.append(
                 self._diagnostic(
-                    key=self._release_integration.key,
+                    key=release_manifest.module_id,
                     kind="release_search",
-                    declarations=self._release_integration.environment,
-                    result_value=prowlarr_result.value,
-                    error_code=prowlarr_result.error_code,
+                    declarations=self._environment_specs(release_manifest.environment),
+                    result_value=release_result.value,
+                    error_code=release_result.error_code,
                 )
             )
-            instance = database.get(DownloadClientInstance, SYSTEM_QBITTORRENT_ID)
-            client_value: object | None
-            client_error: str | None
-            if instance is None:
-                client_value = None
-                client_error = "download_client_not_found"
-            else:
-                client_result = runtime.download_client(instance)
-                client_value = client_result.value
-                client_error = client_result.error_code
-            client_key = (
-                instance.module_key
-                if instance is not None
-                else next(iter(self._registry.download_clients), "download-client")
-            )
-            client_registration = self._registry.download_clients.get(client_key)
+            client_result = runtime.selected_download_client()
+            client_manifest = runtime.download_manifest
             diagnostics.append(
                 self._diagnostic(
-                    key=client_key,
+                    key=client_manifest.module_id,
                     kind="download_client",
-                    declarations=(
-                        client_registration.environment if client_registration is not None else ()
-                    ),
-                    result_value=client_value,
-                    error_code=client_error,
+                    declarations=self._environment_specs(client_manifest.environment),
+                    result_value=client_result.value,
+                    error_code=client_result.error_code,
                 )
             )
             return tuple(diagnostics)
@@ -971,16 +936,19 @@ class BackendControlGateway:
             raise ControlFailure(code="metadata_editor_unavailable", status=503)
         return self._metadata_editor_key
 
-    def _load_client(self, instance: DownloadClientInstance) -> DownloadClient:
-        if instance.archived_at is not None:
-            raise ControlFailure(code="download_client_archived", status=422)
-        resolved = self._require_runtime().download_client(instance)
-        if resolved.value is None:
-            raise ControlFailure(
-                code=resolved.error_code or "download_client_unavailable",
-                status=503,
+    @staticmethod
+    def _environment_specs(
+        declarations: tuple[CoreEnvironmentVariableSpec, ...],
+    ) -> tuple[EnvironmentVariableSpec, ...]:
+        return tuple(
+            EnvironmentVariableSpec(
+                name=value.name,
+                required=value.required,
+                secret=value.secret,
+                description_key=value.description_key,
             )
-        return resolved.value
+            for value in declarations
+        )
 
     def _diagnostic(
         self,

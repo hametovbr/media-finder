@@ -35,7 +35,6 @@ from .integration_runtime import (
 from .maintenance import MaintenanceRunner
 from .sdk.protocols import MetadataProvider
 from .sdk.registration import StaticModuleRegistry
-from .system_clients import ensure_system_qbittorrent
 
 DEFAULT_DATABASE_URL = "sqlite:////data/media-finder.db"
 UI_SECRET_REFERENCE = "env:MEDIA_FINDER_UI_SECRET"
@@ -98,22 +97,17 @@ def _compose_application(
     registry: StaticModuleRegistry,
     runtime_factory: DefaultRuntimeFactory,
 ) -> FastAPI:
-    with sessions() as database:
-        ensure_system_qbittorrent(database)
     secret = resolve_env_reference(EnvReference(value=UI_SECRET_REFERENCE)).get_secret_value()
     secret_bytes = secret.encode()
     runtime = RuntimeResolver(
         factory=runtime_factory,
         providers=registry.retention_providers(),
-        prowlarr=None,
-        client_loader=None,
     )
     gateway = BackendControlGateway(
         sessions=sessions,
         cursor_secret=secret_bytes,
         runtime=runtime,
         registry=registry,
-        release_integration=runtime_factory.release_integration,
         metadata_capabilities=runtime_factory.module_runtime,
     )
     security = BackendBrowserSecurity(secret=secret_bytes)

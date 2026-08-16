@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from acquisition_fakes import StaticAcquisitionModules
 from fastapi.testclient import TestClient
 from media_finder.db import migrate_to_head, session_factory
 from media_finder.models import Acquisition, MediaItem
@@ -82,11 +83,14 @@ def release_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     app = create_ui_app(
         database_url,
         session_secret_reference="env:MEDIA_FINDER_UI_SECRET",
-        prowlarr=ReleaseSelectionService(
-            provider=FakeReleaseProvider(), cache=ReleaseSelectionCache()
+        acquisition=StaticAcquisitionModules(
+            releases=ReleaseSelectionService(
+                provider=FakeReleaseProvider(), cache=ReleaseSelectionCache()
+            ),
+            download_client=qbittorrent,
+            release_id="prowlarr",
+            download_id="qbittorrent",
         ),
-        client_loader=lambda _: qbittorrent,
-        download_client_versions={"qbittorrent": "9.8.7"},
     )
     app.state.fake_client = qbittorrent
     return app
@@ -167,7 +171,7 @@ def test_destination_drift_returns_current_choices_and_keeps_release_token_reusa
     with sessions() as database:
         attempts = list(database.scalars(select(Acquisition)))
     assert len(attempts) == 1
-    assert attempts[0].download_client_instance_id == SYSTEM_QBITTORRENT_ID
+    assert attempts[0].download_client_instance_id is None
 
 
 def test_legacy_client_destination_route_is_absent_and_errors_remain_safe(release_app) -> None:
@@ -191,7 +195,7 @@ def test_legacy_client_destination_route_is_absent_and_errors_remain_safe(releas
     assert 'data-error-code="acquisition_not_found"' in missing.text
 
 
-def test_pending_system_reconcile_does_not_require_prowlarr(release_app) -> None:
+def test_pending_system_reconcile_does_not_require_release_provider(release_app) -> None:
     with TestClient(release_app) as client:
         csrf = _csrf(client.get("/").text)
         item_id, _ = _create_item_and_release(client, csrf)
@@ -219,8 +223,6 @@ def test_pending_system_reconcile_does_not_require_prowlarr(release_app) -> None
             acquisition_identity = acquisition.id
         correlation = f"mf-acq-{acquisition_identity}"
         release_app.state.fake_client.tasks[correlation] = "movies"
-        release_app.state.runtime._prowlarr = None
-
         reconciled = client.post(
             f"/ui/acquisitions/{acquisition_identity}/reconcile",
             data={"csrf": csrf},

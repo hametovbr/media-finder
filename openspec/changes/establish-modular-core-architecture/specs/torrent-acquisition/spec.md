@@ -48,6 +48,14 @@ The system SHALL submit the exact correlation token `mf-acq-<acquisition-uuid>`.
 - **WHEN** a release-provider, metadata-provider, or download-client construction or live validation attempt fails after allocating one or more resources
 - **THEN** the module lifecycle immediately closes and forgets every resource owned by that failed attempt and leaves unrelated successful cached modules open
 
+#### Scenario: Reconcile after a compatible download-client upgrade
+- **WHEN** a pending Acquisition is reconciled after the statically selected download-client module has been upgraded while retaining the same stable module ID
+- **THEN** the currently packaged module performs the exact-correlation lookup, the Acquisition retains its original immutable module-version snapshot, and no release provider is required
+
+#### Scenario: Reconcile after download-client replacement or removal
+- **WHEN** a pending Acquisition identifies a download-client module ID that is missing or differs from the statically selected download-client module
+- **THEN** reconciliation returns a stable safe unavailable-or-mismatch result, performs no lookup through the foreign client, and leaves the Acquisition pending for a future compatible reconcile
+
 ## REMOVED Requirements
 
 ### Requirement: Preserve historical client references

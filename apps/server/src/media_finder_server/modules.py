@@ -7,20 +7,20 @@ import httpx
 from media_finder.modules.registry import create_legacy_registry
 from media_finder.sdk.registration import StaticModuleRegistry as LegacyModuleRegistry
 from media_finder_core import ModuleRuntime
+from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder_download_qbittorrent import registration as qbittorrent_registration
 from media_finder_metadata_manual import registration as manual_registration
 from media_finder_metadata_tmdb import registration as tmdb_registration
 from media_finder_release_prowlarr import registration as prowlarr_registration
 from media_finder_sdk import (
-    DownloadArtifact,
     DownloadClientRegistration,
     MetadataProviderRegistration,
-    PrivateReleaseSelection,
-    ReleaseCandidate,
-    ReleaseProviderRegistration,
-    ReleaseSearchQuery,
+    ModuleManifest,
     StaticModuleRegistry,
 )
+
+SELECTED_RELEASE_MODULE_ID = "prowlarr"
+SELECTED_DOWNLOAD_MODULE_ID = "qbittorrent"
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,28 +28,9 @@ class RuntimeModuleComposition:
     registry: StaticModuleRegistry
     runtime: ModuleRuntime
     legacy_registry: LegacyModuleRegistry
-    release_registration_factory: Callable[
-        [Callable[[], httpx.Client]], ReleaseProviderRegistration
-    ]
-
-
-class _BorrowedReleaseProvider:
-    """Legacy bridge whose concrete capability remains owned by ModuleRuntime."""
-
-    def __init__(self, runtime: ModuleRuntime, module_id: str) -> None:
-        self._provider = runtime.release_provider(module_id)
-
-    def validate(self) -> None:
-        return None
-
-    def search(self, query: ReleaseSearchQuery) -> tuple[ReleaseCandidate, ...]:
-        return self._provider.search(query)
-
-    def resolve(self, selection: PrivateReleaseSelection) -> DownloadArtifact:
-        return self._provider.resolve(selection)
-
-    def close(self) -> None:
-        return None
+    release_manifest: ModuleManifest
+    download_manifest: ModuleManifest
+    release_selections: ReleaseSelectionService
 
 
 def create_module_registry() -> StaticModuleRegistry:
@@ -61,10 +42,14 @@ def create_module_registry() -> StaticModuleRegistry:
 def _create_module_registry(
     client_factory: Callable[[], httpx.Client],
 ) -> StaticModuleRegistry:
+    manual = manual_registration()
+    tmdb = tmdb_registration(client_factory=client_factory)
+    release = prowlarr_registration(client_factory=client_factory)
+    download = qbittorrent_registration(client_factory=client_factory)
     return StaticModuleRegistry.create(
-        metadata=(manual_registration(), tmdb_registration(client_factory=client_factory)),
-        release=(prowlarr_registration(client_factory=client_factory),),
-        download=(qbittorrent_registration(client_factory=client_factory),),
+        metadata=(manual, tmdb),
+        release=(release,),
+        download=(download,),
     )
 
 
@@ -93,14 +78,6 @@ def _qbittorrent_registration(
     return qbittorrent_registration(client_factory=client_factory)
 
 
-def create_release_registration(
-    client_factory: Callable[[], httpx.Client] = httpx.Client,
-) -> ReleaseProviderRegistration:
-    """Build the selected first-party release registration."""
-
-    return prowlarr_registration(client_factory=client_factory)
-
-
 def create_runtime_module_composition(
     *,
     environment: Mapping[str, str],
@@ -118,25 +95,19 @@ def create_runtime_module_composition(
         download_factory=_qbittorrent_registration,
         runtime=runtime,
     )
-    release_registration = registry.release["prowlarr"]
-
-    def borrowed_release_registration(
-        ignored_client_factory: Callable[[], httpx.Client],
-    ) -> ReleaseProviderRegistration:
-        del ignored_client_factory
-        return ReleaseProviderRegistration(
-            manifest=release_registration.manifest,
-            build=lambda ignored_environment: _BorrowedReleaseProvider(
-                runtime,
-                release_registration.manifest.module_id,
-            ),
-        )
+    release_registration = registry.release[SELECTED_RELEASE_MODULE_ID]
+    download_registration = registry.download[SELECTED_DOWNLOAD_MODULE_ID]
 
     return RuntimeModuleComposition(
         registry=registry,
         runtime=runtime,
         legacy_registry=legacy_registry,
-        release_registration_factory=borrowed_release_registration,
+        release_manifest=release_registration.manifest,
+        download_manifest=download_registration.manifest,
+        release_selections=ReleaseSelectionService(
+            provider=lambda: runtime.release_provider(release_registration.manifest.module_id),
+            cache=ReleaseSelectionCache(),
+        ),
     )
 
 
@@ -144,6 +115,5 @@ __all__ = [
     "RuntimeModuleComposition",
     "create_legacy_module_registry",
     "create_module_registry",
-    "create_release_registration",
     "create_runtime_module_composition",
 ]

@@ -129,12 +129,21 @@ class ReleaseSelectionCache:
 
 
 class ReleaseSelectionService:
-    def __init__(self, *, provider: ReleaseProvider, cache: ReleaseSelectionCache) -> None:
-        self._provider = provider
+    def __init__(
+        self,
+        *,
+        provider: ReleaseProvider | Callable[[], ReleaseProvider],
+        cache: ReleaseSelectionCache,
+    ) -> None:
+        self._provider_source = provider
         self._cache = cache
 
+    def _provider(self) -> ReleaseProvider:
+        source = self._provider_source
+        return source() if callable(source) else source
+
     def search(self, query: ReleaseSearchQuery) -> tuple[SelectedRelease, ...]:
-        candidates = self._provider.search(query)
+        candidates = self._provider().search(query)
         if len(candidates) > query.limit:
             raise ModuleError(
                 category=ModuleFailureCategory.LIMIT_EXCEEDED,
@@ -158,11 +167,11 @@ class ReleaseSelectionService:
         candidate = self._cache.take(token)
         return ResolvedRelease(
             snapshot=candidate.snapshot,
-            artifact=_download_artifact(self._provider.resolve(candidate.selection)),
+            artifact=_download_artifact(self._provider().resolve(candidate.selection)),
         )
 
     def close(self) -> None:
-        self._provider.close()
+        self._cache.clear()
 
 
 class AcquisitionCommands:

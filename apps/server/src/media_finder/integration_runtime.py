@@ -7,27 +7,15 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from threading import RLock
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 import httpx
 from media_finder_core import ModuleRuntime
-from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
-from media_finder_sdk import (
-    CorrelationResult as CoreCorrelationResult,
-)
-from media_finder_sdk import (
-    DownloadArtifact as CoreDownloadArtifact,
-)
-from media_finder_sdk import (
-    DownloadClient as CoreDownloadClient,
-)
-from media_finder_sdk import (
-    DownloadDestination as CoreDownloadDestination,
-)
+from media_finder_core.acquisition import ReleaseSelectionService
+from media_finder_sdk import DownloadClient as CoreDownloadClient
 from media_finder_sdk import (
     ExportWarning as CoreExportWarning,
 )
-from media_finder_sdk import MagnetArtifact as CoreMagnetArtifact
 from media_finder_sdk import (
     MediaKind as CoreMediaKind,
 )
@@ -37,16 +25,16 @@ from media_finder_sdk import (
     MetadataRetentionPolicy,
     MetadataSearchQuery,
     MetadataSearchResult,
-    ModuleFailureCategory,
+    ModuleManifest,
     ProviderPayload,
-    ReleaseProviderRegistration,
     RetentionSubject,
-    resolve_module_environment,
 )
 from media_finder_sdk import (
     MetadataProvider as CoreMetadataProvider,
 )
-from media_finder_sdk import ModuleError as CoreModuleError
+from media_finder_sdk import (
+    ModuleError as CoreModuleError,
+)
 from media_finder_sdk import (
     NormalizedMetadata as CoreNormalizedMetadata,
 )
@@ -59,49 +47,18 @@ from media_finder_sdk import (
 from media_finder_sdk import (
     RetentionPolicy as CoreRetentionPolicy,
 )
-from media_finder_sdk import (
-    SubmissionResult as CoreSubmissionResult,
-)
-from media_finder_sdk import (
-    TorrentArtifact as CoreTorrentArtifact,
-)
 
-from .models import DownloadClientInstance
-from .sdk.errors import ModuleError as LegacyModuleError
-from .sdk.protocols import DownloadClient, MetadataProvider
+from .sdk.protocols import MetadataProvider
 from .sdk.registration import (
     EnvironmentConfigurationError,
-    IntegrationDescriptor,
     StaticModuleRegistry,
     resolve_environment,
 )
 from .sdk.settings import EnvReference
 from .sdk.types import (
     Attribution,
-    EnvironmentVariableSpec,
-)
-from .sdk.types import (
-    CorrelationResult as LegacyCorrelationResult,
-)
-from .sdk.types import (
-    DownloadArtifact as LegacyDownloadArtifact,
-)
-from .sdk.types import (
-    MagnetArtifact as LegacyMagnetArtifact,
 )
 from .sdk.types import RetentionPolicy as LegacyRetentionPolicy
-from .sdk.types import (
-    SubmissionResult as LegacySubmissionResult,
-)
-from .sdk.types import (
-    TorrentArtifact as LegacyTorrentArtifact,
-)
-from .system_clients import SYSTEM_QBITTORRENT_ID
-
-type ReleaseRegistrationFactory = Callable[
-    [Callable[[], httpx.Client]], ReleaseProviderRegistration
-]
-type ClientLoader = Callable[[DownloadClientInstance], DownloadClient]
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,11 +71,18 @@ class RuntimeResult[T]:
 class RuntimeFactory(Protocol):
     def metadata_provider(self, key: str) -> RuntimeResult[MetadataProvider]: ...
 
-    def prowlarr(self) -> RuntimeResult[ReleaseSelectionService]: ...
 
-    def download_client(
-        self, instance: DownloadClientInstance
-    ) -> RuntimeResult[DownloadClient]: ...
+@runtime_checkable
+class AcquisitionModuleAccess(Protocol):
+    @property
+    def release_manifest(self) -> ModuleManifest: ...
+
+    @property
+    def download_manifest(self) -> ModuleManifest: ...
+
+    def release_selections(self) -> RuntimeResult[ReleaseSelectionService]: ...
+
+    def selected_download_client(self) -> RuntimeResult[CoreDownloadClient]: ...
 
 
 class RuntimeLifecycle(Protocol):
@@ -133,36 +97,24 @@ class DefaultRuntimeFactory:
         *,
         http_client_factory: Callable[[], httpx.Client] = httpx.Client,
         registry: StaticModuleRegistry,
-        release_registration_factory: ReleaseRegistrationFactory,
         environment: Mapping[str, str] | None = None,
         lifecycle: RuntimeLifecycle | None = None,
         module_runtime: ModuleRuntime | None = None,
+        release_manifest: ModuleManifest | None = None,
+        download_manifest: ModuleManifest | None = None,
+        release_selections: ReleaseSelectionService | None = None,
     ) -> None:
         self._http_client_factory = http_client_factory
         self._environment = dict(os.environ if environment is None else environment)
         self._secret_resolver = self._resolve_environment_secret
-        self._prowlarr: dict[tuple[str, str], ReleaseSelectionService] = {}
         self._metadata: dict[tuple[str, str], MetadataProvider] = {}
-        self._download_clients: dict[tuple[str, str], DownloadClient] = {}
         self._http_clients: list[httpx.Client] = []
         self._registry = registry
         self._lifecycle = lifecycle
         self._module_runtime = module_runtime
-        self._release_registration_factory = release_registration_factory
-        release_manifest = release_registration_factory(http_client_factory).manifest
-        self._release_integration = IntegrationDescriptor(
-            key=release_manifest.module_id,
-            version=release_manifest.module_version,
-            environment=tuple(
-                EnvironmentVariableSpec(
-                    name=value.name,
-                    required=value.required,
-                    secret=value.secret,
-                    description_key=value.description_key,
-                )
-                for value in release_manifest.environment
-            ),
-        )
+        self._release_manifest = release_manifest
+        self._download_manifest = download_manifest
+        self._release_selection_service = release_selections
         self._lock = RLock()
         self._closed = False
 
@@ -171,28 +123,19 @@ class DefaultRuntimeFactory:
             if self._closed:
                 return
             self._closed = True
-            release_services = list(self._prowlarr.values())
-            download_clients = list(self._download_clients.values())
             clients = self._http_clients
             self._http_clients = []
-            self._prowlarr.clear()
             self._metadata.clear()
-            self._download_clients.clear()
+            release_selections = self._release_selection_service
+            self._release_selection_service = None
             lifecycle = self._lifecycle
             self._lifecycle = None
         first_error: BaseException | None = None
-        for release_service in reversed(release_services):
+        if release_selections is not None:
             try:
-                release_service.close()
+                release_selections.close()
             except BaseException as error:
-                if first_error is None:
-                    first_error = error
-        for download_client in reversed(download_clients):
-            try:
-                self._close_module(download_client)
-            except BaseException as error:
-                if first_error is None:
-                    first_error = error
+                first_error = error
         try:
             self._close_clients(clients)
         except BaseException as error:
@@ -208,8 +151,16 @@ class DefaultRuntimeFactory:
             raise first_error
 
     @property
-    def release_integration(self) -> IntegrationDescriptor:
-        return self._release_integration
+    def release_manifest(self) -> ModuleManifest:
+        if self._release_manifest is None:
+            raise ValueError("release_provider_unavailable")
+        return self._release_manifest
+
+    @property
+    def download_manifest(self) -> ModuleManifest:
+        if self._download_manifest is None:
+            raise ValueError("download_client_unavailable")
+        return self._download_manifest
 
     @property
     def registry(self) -> StaticModuleRegistry:
@@ -266,112 +217,37 @@ class DefaultRuntimeFactory:
                     return RuntimeResult(None, "integration_runtime_closed")
             return RuntimeResult(None, "metadata_provider_configuration_invalid")
 
-    def prowlarr(self) -> RuntimeResult[ReleaseSelectionService]:
+    def release_selections(self) -> RuntimeResult[ReleaseSelectionService]:
         with self._lock:
             if self._closed:
                 return RuntimeResult(None, "integration_runtime_closed")
-        owned_clients: list[httpx.Client] = []
-        provider = None
+        service = self._release_selection_service
+        if service is None:
+            return RuntimeResult(None, "release_provider_unavailable")
         try:
-            environment = resolve_environment(
-                self._release_integration.environment, self._environment
-            )
-            key = ("environment", self._release_integration.key)
-            with self._lock:
-                existing = self._prowlarr.get(key)
-            if existing is not None:
-                return RuntimeResult(existing)
-            registered = self._release_registration_factory(
-                self._attempt_client_factory(owned_clients)
-            )
-            provider = registered.build(
-                resolve_module_environment(registered.manifest, environment)
-            )
-            provider.validate()
-            adapter = ReleaseSelectionService(
-                provider=provider,
-                cache=ReleaseSelectionCache(),
-            )
-            with self._lock:
-                if self._closed:
-                    existing = None
-                    runtime_closed = True
-                else:
-                    runtime_closed = False
-                    existing = self._prowlarr.get(key)
-                if not runtime_closed and existing is None:
-                    self._prowlarr[key] = adapter
-                    return RuntimeResult(adapter)
-            if runtime_closed:
-                adapter.close()
-                return RuntimeResult(None, "integration_runtime_closed")
-            adapter.close()
-            return RuntimeResult(existing)
-        except EnvironmentConfigurationError as error:
-            self._close_clients(owned_clients)
-            return RuntimeResult(None, error.code, error.missing)
+            # Validate the borrowed capability before exposing the cache.
+            if self._module_runtime is None:
+                return RuntimeResult(None, "release_provider_unavailable")
+            self._module_runtime.release_provider(self.release_manifest.module_id)
+            return RuntimeResult(service)
+        except CoreModuleError as error:
+            return _runtime_failure(error)
         except Exception:
-            if provider is not None:
-                provider.close()
-            else:
-                self._close_clients(owned_clients)
-            with self._lock:
-                if self._closed:
-                    return RuntimeResult(None, "integration_runtime_closed")
-            return RuntimeResult(None, "prowlarr_configuration_invalid")
+            return RuntimeResult(None, "release_provider_configuration_invalid")
 
-    def download_client(self, instance: DownloadClientInstance) -> RuntimeResult[DownloadClient]:
+    def selected_download_client(self) -> RuntimeResult[CoreDownloadClient]:
         with self._lock:
             if self._closed:
                 return RuntimeResult(None, "integration_runtime_closed")
-        if instance.id != SYSTEM_QBITTORRENT_ID or not instance.system_owned:
-            return RuntimeResult(None, "download_client_system_required")
-        registration = self._registry.download_clients.get(instance.module_key)
-        if registration is None:
-            return RuntimeResult(None, "download_client_module_unknown")
-        owned_clients: list[httpx.Client] = []
-        client = None
+        if self._module_runtime is None:
+            return RuntimeResult(None, "download_client_unavailable")
         try:
-            environment = resolve_environment(registration.environment, self._environment)
-            cache_key = (registration.key, "environment")
-            with self._lock:
-                existing = self._download_clients.get(cache_key)
-            if existing is not None:
-                return RuntimeResult(existing)
-            client = registration.build(
-                environment,
-                self._attempt_client_factory(owned_clients),
-                self._secret_resolver,
+            return RuntimeResult(
+                self._module_runtime.download_client(self.download_manifest.module_id)
             )
-            client.validate_config()
-            with self._lock:
-                if self._closed:
-                    existing = None
-                    runtime_closed = True
-                else:
-                    runtime_closed = False
-                    existing = self._download_clients.get(cache_key)
-                if not runtime_closed and existing is None:
-                    self._download_clients[cache_key] = client
-                    if not callable(getattr(client, "close", None)):
-                        self._http_clients.extend(owned_clients)
-                    return RuntimeResult(client)
-            if runtime_closed:
-                self._close_module_or_clients(client, owned_clients)
-                return RuntimeResult(None, "integration_runtime_closed")
-            self._close_module_or_clients(client, owned_clients)
-            return RuntimeResult(existing)
-        except EnvironmentConfigurationError as error:
-            self._close_clients(owned_clients)
-            return RuntimeResult(None, error.code, error.missing)
+        except CoreModuleError as error:
+            return _runtime_failure(error)
         except Exception:
-            if client is None:
-                self._close_clients(owned_clients)
-            else:
-                self._close_module_or_clients(client, owned_clients)
-            with self._lock:
-                if self._closed:
-                    return RuntimeResult(None, "integration_runtime_closed")
             return RuntimeResult(None, "download_client_configuration_invalid")
 
     def _attempt_client_factory(
@@ -433,17 +309,20 @@ class RuntimeResolver:
     def __init__(
         self,
         *,
-        factory: RuntimeFactory | None,
-        providers: Mapping[str, MetadataProvider],
-        prowlarr: ReleaseSelectionService | None,
-        client_loader: ClientLoader | None,
-        download_client_versions: Mapping[str, str] | None = None,
+        module_runtime: ModuleRuntime | None = None,
+        factory: RuntimeFactory | None = None,
+        providers: Mapping[str, MetadataProvider] | None = None,
+        acquisition: AcquisitionModuleAccess | None = None,
     ) -> None:
         self._factory = factory
-        self._providers = dict(providers)
-        self._prowlarr = prowlarr
-        self._client_loader = client_loader
-        self._download_client_versions = dict(download_client_versions or {})
+        self._providers = dict(providers or {})
+        inherited_runtime = getattr(factory, "module_runtime", None)
+        self._module_runtime = module_runtime or (
+            inherited_runtime if isinstance(inherited_runtime, ModuleRuntime) else None
+        )
+        self._acquisition = acquisition or (
+            factory if isinstance(factory, AcquisitionModuleAccess) else None
+        )
 
     @property
     def supported_providers(self) -> Mapping[str, MetadataProvider]:
@@ -473,67 +352,48 @@ class RuntimeResolver:
                 attributions.append(provider.attribution())
         return attributions
 
-    def prowlarr(self) -> RuntimeResult[ReleaseSelectionService]:
-        if self._factory is None:
-            return RuntimeResult(
-                self._prowlarr,
-                None if self._prowlarr is not None else "prowlarr_not_configured",
-            )
-        try:
-            return self._factory.prowlarr()
-        except Exception:
-            return RuntimeResult(None, "prowlarr_configuration_invalid")
+    @property
+    def release_manifest(self) -> ModuleManifest:
+        if self._acquisition is not None:
+            return self._acquisition.release_manifest
+        runtime = self._require_module_runtime()
+        registrations = tuple(runtime.registry.release.values())
+        if len(registrations) != 1:
+            raise ValueError("release_provider_selection_invalid")
+        return registrations[0].manifest
 
-    def download_client(self, instance: DownloadClientInstance) -> RuntimeResult[DownloadClient]:
-        if instance.id != SYSTEM_QBITTORRENT_ID or not instance.system_owned:
-            return RuntimeResult(None, "download_client_system_required")
+    @property
+    def download_manifest(self) -> ModuleManifest:
+        if self._acquisition is not None:
+            return self._acquisition.download_manifest
+        runtime = self._require_module_runtime()
+        registrations = tuple(runtime.registry.download.values())
+        if len(registrations) != 1:
+            raise ValueError("download_client_selection_invalid")
+        return registrations[0].manifest
+
+    def release_selections(self) -> RuntimeResult[ReleaseSelectionService]:
+        if self._acquisition is not None:
+            return self._acquisition.release_selections()
+        return RuntimeResult(None, "release_provider_unavailable")
+
+    def selected_download_client(self) -> RuntimeResult[CoreDownloadClient]:
+        if self._acquisition is not None:
+            return self._acquisition.selected_download_client()
         try:
-            if self._factory is not None:
-                result = self._factory.download_client(instance)
-            elif self._client_loader is not None:
-                result = RuntimeResult(self._client_loader(instance))
-            else:
-                return RuntimeResult(None, "download_client_unavailable")
-            return result
+            runtime = self._require_module_runtime()
+            return RuntimeResult(runtime.download_client(self.download_manifest.module_id))
         except Exception:
             return RuntimeResult(None, "download_client_configuration_invalid")
-
-    def core_download_client(
-        self, instance: DownloadClientInstance
-    ) -> RuntimeResult[CoreDownloadClient]:
-        module_runtime = (
-            getattr(self._factory, "module_runtime", None) if self._factory is not None else None
-        )
-        if isinstance(module_runtime, ModuleRuntime):
-            try:
-                return RuntimeResult(module_runtime.download_client(instance.module_key))
-            except Exception:
-                return RuntimeResult(None, "download_client_configuration_invalid")
-        legacy = self.download_client(instance)
-        return RuntimeResult(
-            _CoreDownloadClientAdapter(legacy.value) if legacy.value is not None else None,
-            legacy.error_code,
-            legacy.missing_variables,
-        )
-
-    def download_client_version(self, instance: DownloadClientInstance) -> str | None:
-        module_runtime = (
-            getattr(self._factory, "module_runtime", None) if self._factory is not None else None
-        )
-        if isinstance(module_runtime, ModuleRuntime):
-            registration = module_runtime.registry.download.get(instance.module_key)
-            if registration is not None:
-                return registration.manifest.module_version
-        return self._download_client_versions.get(instance.module_key)
 
     def provider_ready(self, key: str) -> bool:
         return self.metadata_provider(key).value is not None
 
-    def prowlarr_ready(self) -> bool:
-        return self.prowlarr().value is not None
+    def release_provider_ready(self) -> bool:
+        return self.release_selections().value is not None
 
-    def client_ready(self, instance: DownloadClientInstance) -> bool:
-        result = self.download_client(instance)
+    def download_client_ready(self) -> bool:
+        result = self.selected_download_client()
         if result.value is None:
             return False
         try:
@@ -548,65 +408,20 @@ class RuntimeResolver:
         probe = getattr(self._factory, "environment_is_set", None)
         return bool(probe(name)) if callable(probe) else False
 
-
-class _CoreDownloadClientAdapter:
-    """Translate the temporary server client surface to the public SDK capability."""
-
-    def __init__(self, client: DownloadClient) -> None:
-        self._client = client
-
-    def validate(self) -> None:
-        self._client.validate_config()
-
-    def list_destinations(self) -> tuple[CoreDownloadDestination, ...]:
-        return tuple(
-            CoreDownloadDestination.model_validate(value.model_dump(mode="json"))
-            for value in self._client.list_destinations()
-        )
-
-    def submit(
-        self,
-        artifact: CoreDownloadArtifact,
-        destination: str,
-        correlation: str,
-    ) -> CoreSubmissionResult:
-        legacy_artifact: LegacyDownloadArtifact
-        if isinstance(artifact, CoreMagnetArtifact):
-            legacy_artifact = LegacyMagnetArtifact(uri=artifact.uri)
-        elif isinstance(artifact, CoreTorrentArtifact):
-            legacy_artifact = LegacyTorrentArtifact(content=artifact.content())
-        else:  # pragma: no cover - the SDK union is closed
-            raise ValueError("download_artifact_unsupported")
-        try:
-            value: LegacySubmissionResult = self._client.submit(
-                legacy_artifact,
-                destination,
-                correlation,
-            )
-        except LegacyModuleError as error:
-            raise _core_module_error(error.code) from None
-        return CoreSubmissionResult.model_validate(value.model_dump(mode="json"))
-
-    def find_by_correlation(self, correlation: str) -> CoreCorrelationResult:
-        try:
-            value: LegacyCorrelationResult = self._client.find_by_correlation(correlation)
-        except LegacyModuleError as error:
-            raise _core_module_error(error.code) from None
-        return CoreCorrelationResult.model_validate(value.model_dump(mode="json"))
-
-    def close(self) -> None:
-        return None
+    def _require_module_runtime(self) -> ModuleRuntime:
+        if self._module_runtime is None:
+            raise ValueError("module_runtime_unavailable")
+        return self._module_runtime
 
 
-def _core_module_error(code: str) -> CoreModuleError:
-    return CoreModuleError(
-        category=(
-            ModuleFailureCategory.TIMEOUT
-            if code == "submission_timeout"
-            else ModuleFailureCategory.UNAVAILABLE
-        ),
-        code=code,
+def _runtime_failure[T](error: CoreModuleError) -> RuntimeResult[T]:
+    missing = error.safe_details.get("missing_names", ())
+    missing_names = (
+        tuple(value for value in missing if isinstance(value, str))
+        if isinstance(missing, tuple)
+        else ()
     )
+    return RuntimeResult(None, error.code, missing_names)
 
 
 class LegacyMetadataCapabilities:

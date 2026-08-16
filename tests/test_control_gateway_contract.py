@@ -2,17 +2,15 @@ import asyncio
 import inspect
 
 import pytest
-from media_finder_control import ControlFailure, ControlGateway, Locale, PageRequest
-from media_finder_server import create_legacy_module_registry, create_runtime_factory
-from sqlalchemy.orm import Session, sessionmaker
-
 from media_finder.control_gateway import BackendControlGateway
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.integration_runtime import RuntimeResolver
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
+from media_finder_control import ControlFailure, ControlGateway, Locale, PageRequest
+from media_finder_server import create_legacy_module_registry
+from sqlalchemy.orm import Session, sessionmaker
 
 REGISTRY = create_legacy_module_registry()
-RELEASE_INTEGRATION = create_runtime_factory(environment={}).release_integration
 
 
 def _gateway(database: Session) -> BackendControlGateway:
@@ -20,13 +18,9 @@ def _gateway(database: Session) -> BackendControlGateway:
         sessions=sessionmaker(bind=database.get_bind(), expire_on_commit=False),
         cursor_secret=b"cursor-secret-for-tests",
         runtime=RuntimeResolver(
-            factory=None,
             providers={},
-            prowlarr=None,
-            client_loader=None,
         ),
         registry=REGISTRY,
-        release_integration=RELEASE_INTEGRATION,
     )
 
 

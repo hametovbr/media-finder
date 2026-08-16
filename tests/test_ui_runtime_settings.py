@@ -3,11 +3,10 @@ from pathlib import Path
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from media_finder_server import create_runtime_factory, create_ui_app
-
 from media_finder.db import migrate_to_head
 from media_finder.models import DownloadClientInstance
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
+from media_finder_server import create_runtime_factory, create_ui_app
 
 ENVIRONMENT = {
     "TMDB_TOKEN": "tmdb-secret",
@@ -67,7 +66,7 @@ def test_default_factory_returns_safe_codes_for_missing_or_unknown_integrations(
     factory = create_runtime_factory(environment={})
 
     assert factory.metadata_provider("unknown").error_code == "metadata_provider_not_found"
-    assert factory.prowlarr().error_code == "integration_environment_missing"
+    assert factory.release_selections().error_code == "module_environment_missing"
 
 
 def test_about_keeps_tmdb_attribution_during_live_outage(

@@ -1,9 +1,6 @@
 import httpx
 from media_finder_server import create_runtime_factory
 
-from media_finder.models import DownloadClientInstance
-from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
-
 
 def test_default_runtime_constructs_every_integration_only_from_exact_environment() -> None:
     requests: list[httpx.Request] = []
@@ -35,21 +32,9 @@ def test_default_runtime_constructs_every_integration_only_from_exact_environmen
         },
         http_client_factory=lambda: httpx.Client(transport=httpx.MockTransport(handler)),
     )
-    system = DownloadClientInstance(
-        id=SYSTEM_QBITTORRENT_ID,
-        name="qBittorrent",
-        module_key="qbittorrent",
-        system_owned=True,
-        config_payload={
-            "base_url": "https://attacker.example.test",
-            "username_ref": "env:ATTACKER_USER",
-            "password_ref": "env:ATTACKER_PASSWORD",
-        },
-    )
-
     assert factory.metadata_provider("tmdb").value is not None
-    assert factory.prowlarr().value is not None
-    assert factory.download_client(system).value is not None
+    assert factory.release_selections().value is not None
+    assert factory.selected_download_client().value is not None
     assert {request.url.host for request in requests} == {
         "api.themoviedb.org",
         "prowlarr.example.test",
@@ -61,23 +46,15 @@ def test_missing_environment_returns_safe_exact_names_without_values() -> None:
     factory = create_runtime_factory(environment={"TMDB_TOKEN": ""})
 
     tmdb = factory.metadata_provider("tmdb")
-    prowlarr = factory.prowlarr()
-    qbittorrent = factory.download_client(
-        DownloadClientInstance(
-            id=SYSTEM_QBITTORRENT_ID,
-            name="qBittorrent",
-            module_key="qbittorrent",
-            config_payload={},
-            system_owned=True,
-        )
-    )
+    release = factory.release_selections()
+    download = factory.selected_download_client()
 
     assert tmdb.error_code == "integration_environment_missing"
     assert tmdb.missing_variables == ("TMDB_TOKEN",)
-    assert prowlarr.error_code == "integration_environment_missing"
-    assert prowlarr.missing_variables == ("PROWLARR_URL", "PROWLARR_API_KEY")
-    assert qbittorrent.error_code == "integration_environment_missing"
-    assert qbittorrent.missing_variables == (
+    assert release.error_code == "module_environment_missing"
+    assert release.missing_variables == ("PROWLARR_URL", "PROWLARR_API_KEY")
+    assert download.error_code == "module_environment_missing"
+    assert download.missing_variables == (
         "QBITTORRENT_URL",
         "QBITTORRENT_USERNAME",
         "QBITTORRENT_PASSWORD",
