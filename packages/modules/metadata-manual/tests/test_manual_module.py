@@ -6,6 +6,7 @@ import ast
 import email
 import json
 import os
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -40,7 +41,9 @@ from media_finder_sdk import (
 
 ROOT = Path(__file__).parents[4]
 PACKAGE_ROOT = ROOT / "packages" / "modules" / "metadata-manual"
-UV = ROOT / ".venv" / "Scripts" / "uv.exe"
+UV = Path(
+    shutil.which("uv") or ROOT / ".venv" / ("Scripts/uv.exe" if os.name == "nt" else "bin/uv")
+)
 UV_CACHE = ROOT / ".tools" / "uv-cache"
 IDENTITY = "47e26ca2-f393-4a00-b33a-902d41d49714"
 

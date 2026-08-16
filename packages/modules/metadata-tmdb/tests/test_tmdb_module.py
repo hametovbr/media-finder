@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import email
 import os
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -45,7 +46,9 @@ from media_finder_sdk import (
 
 ROOT = Path(__file__).parents[4]
 PACKAGE_ROOT = ROOT / "packages" / "modules" / "metadata-tmdb"
-UV = ROOT / ".venv" / "Scripts" / "uv.exe"
+UV = Path(
+    shutil.which("uv") or ROOT / ".venv" / ("Scripts/uv.exe" if os.name == "nt" else "bin/uv")
+)
 UV_CACHE = ROOT / ".tools" / "uv-cache"
 TOKEN = "tmdb-fixture-token-never-log"
 FETCHED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)

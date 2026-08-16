@@ -7,6 +7,7 @@ import email
 import hashlib
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -38,7 +39,9 @@ from media_finder_sdk import (
 
 ROOT = Path(__file__).parents[4]
 PACKAGE_ROOT = ROOT / "packages" / "modules" / "release-prowlarr"
-UV = ROOT / ".venv" / "Scripts" / "uv.exe"
+UV = Path(
+    shutil.which("uv") or ROOT / ".venv" / ("Scripts/uv.exe" if os.name == "nt" else "bin/uv")
+)
 UV_CACHE = ROOT / ".tools" / "uv-cache"
 BASE_URL = "https://prowlarr.example.test/reverse/prowlarr"
 API_KEY = "prowlarr-fixture-api-key-never-log"
