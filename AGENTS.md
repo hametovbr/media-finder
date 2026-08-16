@@ -9,6 +9,44 @@
 - Keep `packages/builtin-ui` dependent only on `media-finder-control-contracts` and presentation-layer libraries. It must not import the backend package, SQLAlchemy, persistence models, repositories, runtime composition, or integration modules.
 - Treat `/api/control/v1` as the only supported boundary for an external browser UI. Any control-contract change requires an OpenSpec change, an updated deterministic OpenAPI snapshot, gateway/HTTP conformance tests, and browser-security tests.
 
+## Modular package and module rules
+
+The root is a virtual uv workspace. The server host (`apps/server`) is the only
+concrete composition root: it may depend on core, control contracts, the built-in
+UI, and selected first-party modules. Core depends only on the module SDK and
+control contracts; a module wheel depends only on `media-finder-module-sdk` and
+its own implementation libraries; the built-in UI depends only on control
+contracts and presentation libraries. Do not introduce core-to-module imports,
+module-to-core/persistence imports, UI-to-backend imports, or compatibility
+shims; `tests/architecture/test_package_boundaries.py` enforces this graph.
+
+Modules are trusted, reviewed, static build-time dependencies. Add them as one
+workspace wheel under `packages/modules/<kind-name>/` with a public typed
+`registration()`, `module.toml`, translations, and `fixtures/conformance.json`.
+Register concrete modules explicitly in `apps/server/src/media_finder_server/modules.py`.
+Do not add discovery, entry-point scanning, runtime installation, hot loading,
+marketplaces, generic hooks, module routes, module migrations, module assets, or
+a module service container. A second registration must not silently change the
+explicit release/download selection.
+
+`module.toml` is the value-free contract for identity, kind, version, SDK and
+contract compatibility, capabilities, attribution, translation keys, and exact
+environment declarations. Module factories receive only
+`ResolvedModuleEnvironment`; modules do not read process-wide environment,
+persist configuration or environment references, receive database/core/UI
+objects, or disclose secrets. A module owns its transport and idempotent
+`close()`; the root `ModuleRuntime` validates before caching, closes failed or
+losing attempts, and the root lifespan closes shared resources in reverse order.
+
+Keep executable SDK conformance and serialized conformance aligned. The former
+uses the capability-specific `assert_*_registration_conforms` assertions; the
+latter validates `fixtures/conformance.json` against
+`schemas/module-sdk/v1/` without importing Python core. Update checked JSON
+Schema/OpenAPI artifacts and deterministic validators with contract changes.
+Serialized fixtures never contain credentials, magnets, torrent bytes,
+authenticated URLs, or raw upstream payloads; executable fixtures may keep
+bounded safe artifacts in memory.
+
 ## Spec-driven development
 
 Every change that can affect runtime behavior, UX, architecture, APIs, schemas, module contracts, security, persistence, deployment, or operator behavior MUST follow the OpenSpec spec-driven development workflow.
@@ -36,7 +74,12 @@ During `openspec-apply-change`, use test-driven development for every behavior o
 
 If implementation exposes a missing or incorrect requirement or design decision, stop implementation and use `openspec-update-change`. Do not silently change scope, defer specified behavior, or modify planning artifacts ad hoc.
 
-The project-specific skills `adding-metadata-provider`, `adding-download-client`, and `evolving-metadata-schema` are additional domain guardrails. Use them together with the applicable OpenSpec lifecycle skill; they never replace proposal, apply, sync, or archive workflows. Update contracts, conformance tests, and fixtures together with behavior.
+The project-specific skills `adding-metadata-provider`, `adding-release-provider`,
+`adding-download-client`, and `evolving-metadata-schema` are additional domain
+guardrails. Use them together with the applicable OpenSpec lifecycle skill; they
+never replace proposal, apply, sync, or archive workflows. Update manifests,
+executable and serialized conformance, deterministic artifacts, architecture
+checks, and fixtures together with behavior.
 
 Never edit generated `.agents/skills/openspec-*` files manually; regenerate them with the pinned OpenSpec CLI.
 

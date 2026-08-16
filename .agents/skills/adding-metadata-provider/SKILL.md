@@ -1,70 +1,48 @@
 ---
 name: adding-metadata-provider
-description: Use when adding, replacing, or changing a Media Finder metadata-provider module, its manifest, configuration, normalization, attribution, retention policy, fixtures, or provider conformance tests. Do not use for editing one item's Manual metadata, release search, download clients, naming-only changes, or unrelated core features.
+description: Use when adding, replacing, or changing a Media Finder metadata-provider module, its manifest, normalization, retention, environment contract, fixtures, or conformance.
 ---
 
 # Adding a Metadata Provider
 
-## Core principle
+Add one statically packaged module; core keeps persistence, transactions,
+selection, and generic lifecycle ownership.
 
-Add a statically packaged adapter behind the public provider contract. Keep provider rules—including refresh, expiry, attribution, and upstream quirks—inside the module; keep database and UI-template access outside it.
+1. Use the applicable approved OpenSpec change and TDD: add a deterministic
+   failing behavior/contract test before implementation. Update the OpenSpec
+   delta when normalized data, retention, configuration, or public contracts
+   change.
+2. Create `packages/modules/metadata-<name>/` as an independent wheel. Its
+   import package exposes only `registration()` returning a
+   `MetadataProviderRegistration`; it imports only `media_finder_sdk` and its
+   own libraries. Add its workspace entry, direct host dependency in
+   `apps/server/pyproject.toml`, lockfile, `Dockerfile` wheel assembly, and
+   deterministic package/delivery inventories in the same change.
+3. Put identity, `metadata-provider` kind, capabilities (`search`, `fetch`,
+   `normalize`, plus any declared optional capability), attribution,
+   translations, compatibility, and exact value-free environment declarations
+   in `src/<package>/module.toml`. Match every key in `translations/en.json` and
+   `translations/ru.json`. Receive only `ResolvedModuleEnvironment`; never read
+   `os.environ`, persist configuration, or expose secrets.
+4. Use SDK DTOs, `ModuleError`, and provider-owned retention. If declaring
+   `metadata-edit`, supply its typed editor factory. Module-owned transports
+   close idempotently; core owns persistence, template rendering, and final
+   lifecycle.
+5. Add executable tests using
+   `assert_metadata_registration_conforms` and, if declared,
+   `assert_metadata_editor_registration_conforms`. Exercise real deterministic
+   fixtures, required-variable failures, locale/identity, normalization,
+   attribution, redaction, limits, retention, and double close.
+6. Add `fixtures/conformance.json` matching the raw `module.toml` hash and
+   `schemas/module-sdk/v1/conformance.schema.json`. It records safe serialized
+   behavior only—no credentials, raw payloads, or artifacts. Update generated
+   `schemas/module-sdk/v1/` artifacts when SDK contract shapes change.
+7. Add the public registration explicitly in
+   `apps/server/src/media_finder_server/modules.py`; never give core a concrete
+   import or identifier branch. Run focused package/SDK tests,
+   `pnpm module-conformance:test`, `pnpm module-conformance:validate`,
+   `uv run pytest tests/architecture/test_package_boundaries.py tests/test_wheel_isolation.py`,
+   then format, lint, type, and `pnpm spec:validate`.
 
-## Workflow
-
-1. Read `AGENTS.md`, the active OpenSpec change, and the current metadata-provider contract before editing.
-2. Propose or update OpenSpec requirements when behavior, normalized metadata, configuration, retention, or public contracts change. Do not implement before approval.
-3. Establish a failing contract or behavior test using deterministic fixtures.
-4. Add an isolated package with:
-   - a stable provider key and manifest;
-   - capabilities, typed Pydantic configuration, and an ordered immutable declaration of every exact environment variable;
-   - translation keys and generic-form metadata;
-   - configuration validation and standardized safe errors;
-   - search, fetch, normalization, provenance, and attribution;
-   - provider-owned retention planning and execution hooks;
-   - fixtures and a conformance-suite factory.
-5. Make the registration's exact environment declarations the only configuration source. Core resolves only those names into the builder's in-memory mapping; there is no database payload, operator-selected `env:NAME` reference, fallback, precedence, alias, or dynamic prefix. Mark each variable required/optional and secret/non-secret, provide its translation key, and never persist its value or an environment reference. Redact credentials, tokens, sensitive URLs, raw payload fragments, and upstream exception text.
-6. Normalize into the versioned public schema. Preserve provider identity, locale, completeness, structural quality, seasons, episodes, and Season 00 specials when supplied. Never auto-merge identities from different providers.
-7. Make retention explicit. The module computes calendar dates and returns generic actions; core only schedules and applies those actions. Retain revision envelopes, identity, overrides, and acquisition history when derived payload is purged.
-8. Run focused tests, `assert_provider_registration_conforms` for the exact environment contract and production builder, the shared provider behavior conformance suite, type/lint checks, documentation-policy checks, and strict OpenSpec validation.
-
-## Contract boundary
-
-| Module owns | Core owns |
-| --- | --- |
-| Upstream protocol and mapping | Persistence and transactions |
-| Provider configuration schema | Generic settings rendering |
-| Attribution and provenance | Revision orchestration |
-| Refresh and expiry semantics | Provider-agnostic maintenance schedule |
-| Fixture-backed upstream behavior | Shared conformance runner |
-
-The module must not receive a database session, application repository, Jinja environment, template path, arbitrary HTML, or JavaScript.
-
-## Test recipe
-
-Use one provider factory with recorded or synthetic fixtures. Pass independent literal declarations and fixture values to `assert_provider_registration_conforms`; it must verify exact names/classifications, every required-variable omission, and successful production construction before behavior conformance runs. Cover valid and invalid configuration, requested locales, search/fetch mapping, stable external identity, standardized errors, secret redaction, attribution, and no database/template dependency. If the provider expires data, use a fake clock to test boundary dates, refresh, purge, retained envelope fields, and `metadata_source_expired` export behavior.
-
-## Example
-
-For a provider whose terms allow six months of caching, compute its refresh and expiry timestamps inside that provider package. Return public maintenance actions from its hook and test them with a fake clock. Do not add the provider name or six-month duration to core maintenance code.
-
-## Common mistakes
-
-- Encoding a provider-specific TTL in core or a global setting.
-- Returning raw upstream payloads through public APIs.
-- Storing resolved credentials or passkey-bearing URLs.
-- Persisting integration settings or operator-selected environment references.
-- Supporting precedence or fallback between environment and persisted integration configuration.
-- Adding provider-specific templates instead of typed generic settings.
-- Mocking the module internals instead of exercising the public conformance contract.
-- Treating title/year similarity as cross-provider identity.
-
-## Completion checklist
-
-- Approved OpenSpec behavior and contract
-- Failing test observed before implementation
-- Manifest, typed config, exact environment declarations, translations, attribution, fixtures
-- Search, fetch, normalize, provenance, safe errors
-- Module-owned retention hooks or explicit no-expiry behavior
-- Registration and behavior conformance suites passing without DB/template access
-- Secrets and logs verified safe
-- Strict OpenSpec and repository checks passing
+Do not clone provider-specific policy into core, add a generic plugin loader,
+or treat a serialized fixture as a substitute for executable conformance.

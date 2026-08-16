@@ -70,7 +70,7 @@
 - [x] 8.3 Update the multi-stage Docker build to build and install wheels rather than workspace source paths; prove the production image includes module manifests, fixtures needed at runtime, templates, catalogs, static assets, migrations, and only one non-root application process.
 - [x] 8.4 Update Compose and environment documentation from the first-party manifests without adding private infrastructure, runtime plugin mounts, another service, or persisted integration configuration.
 - [x] 8.5 Write English architecture and module-authoring documentation covering package ownership, dependency graph, `module.toml`, public registrations, exact environment declarations, trust limits, conformance, schema artifacts, first-party composition, lifecycle, and triggers for out-of-process modules.
-- [ ] 8.6 Update `AGENTS.md` and project skills for the new paths and rules, add an `adding-release-provider` skill, and update metadata/download/schema skills so future changes require the appropriate OpenSpec delta, manifest, fixture, conformance, serialized artifacts, architecture checks, and tests.
+- [x] 8.6 Update `AGENTS.md` and project skills for the new paths and rules, add an `adding-release-provider` skill, and update metadata/download/schema skills so future changes require the appropriate OpenSpec delta, manifest, fixture, conformance, serialized artifacts, architecture checks, and tests.
 
 ## 9. Final Verification and Apply Handoff
 
