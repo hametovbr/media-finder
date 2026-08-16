@@ -24,20 +24,28 @@ selection, and generic lifecycle ownership.
    in `src/<package>/module.toml`. Match every key in `translations/en.json` and
    `translations/ru.json`. Receive only `ResolvedModuleEnvironment`; never read
    `os.environ`, persist configuration, or expose secrets.
-4. Use SDK DTOs, `ModuleError`, and provider-owned retention. If declaring
-   `metadata-edit`, supply its typed editor factory. Module-owned transports
-   close idempotently; core owns persistence, template rendering, and final
-   lifecycle.
-5. Add executable tests using
+4. Bound every upstream read before decoding, including authentication and
+   validation endpoints. Enforce declared and streamed bytes, strict JSON,
+   depth/nodes/counts/text, and finite portable numbers. Before fan-out, validate
+   and deduplicate the complete reference set, enforce per-response and aggregate
+   request/result budgets, and cap concurrency. Revalidate all SDK output; map
+   failures to stable safe `ModuleError` data without bodies, credentials, or
+   sensitive URLs.
+5. Use SDK DTOs and provider-owned retention. If declaring `metadata-edit`,
+   supply its typed editor factory. Module-owned transports close idempotently;
+   core owns persistence, template rendering, and final lifecycle.
+6. Add executable tests using
    `assert_metadata_registration_conforms` and, if declared,
    `assert_metadata_editor_registration_conforms`. Exercise real deterministic
    fixtures, required-variable failures, locale/identity, normalization,
    attribution, redaction, limits, retention, and double close.
-6. Add `fixtures/conformance.json` matching the raw `module.toml` hash and
+7. Add `fixtures/conformance.json` matching the raw `module.toml` hash and
    `schemas/module-sdk/v1/conformance.schema.json`. It records safe serialized
-   behavior only—no credentials, raw payloads, or artifacts. Update generated
-   `schemas/module-sdk/v1/` artifacts when SDK contract shapes change.
-7. Add the public registration explicitly in
+   behavior only—no credentials, raw payloads, or artifacts. Bind deterministic
+   runtime search/fetch/normalize, retention, failure, and redaction cases to the
+   same serialized expectations so neither representation can drift. Update
+   generated `schemas/module-sdk/v1/` artifacts when SDK contract shapes change.
+8. Add the public registration explicitly in
    `apps/server/src/media_finder_server/modules.py`; never give core a concrete
    import or identifier branch. Run focused package/SDK tests,
    `pnpm module-conformance:test`, `pnpm module-conformance:validate`,

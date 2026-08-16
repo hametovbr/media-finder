@@ -1,0 +1,4 @@
+interface:
+  display_name: "Make Pragmatic Media Finder Decisions"
+  short_description: "Choose proportionate Media Finder architecture"
+  default_prompt: "Use $making-pragmatic-media-finder-decisions to choose the least complex sufficient design."
