@@ -24,11 +24,12 @@ from sqlalchemy import (
     inspect,
     or_,
     select,
-    text,
 )
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship, sessionmaker
 
+from ..platform.clock import SystemClock
 from ..platform.database import Base
+from ..platform.transactions import SqlAlchemyTransactionOwner
 from .models import (
     CatalogIdentity,
     CatalogPage,
@@ -46,7 +47,7 @@ def _new_id() -> str:
 
 
 def _now() -> datetime:
-    return datetime.now(UTC)
+    return SystemClock().now()
 
 
 class CollectionRecord(Base):
@@ -528,38 +529,20 @@ class SqlAlchemyCatalogUnitOfWork:
     """Own one write transaction and expose explicit nested savepoints."""
 
     def __init__(self, sessions: sessionmaker[Session]) -> None:
-        self._sessions = sessions
-        self._session: Session | None = None
-        self._repository: SqlAlchemyCatalogRepository | None = None
+        self._transactions = SqlAlchemyTransactionOwner(
+            sessions=sessions,
+            resource_factory=SqlAlchemyCatalogRepository,
+        )
 
     @contextmanager
     def write(self) -> Iterator[SqlAlchemyCatalogRepository]:
-        if self._session is not None:
-            raise RuntimeError("catalog_write_already_active")
-        session = self._sessions()
-        repository = SqlAlchemyCatalogRepository(session)
-        self._session = session
-        self._repository = repository
-        try:
-            if session.get_bind().dialect.name == "sqlite":
-                session.execute(text("BEGIN IMMEDIATE"))
+        with self._transactions.write() as repository:
             yield repository
-            session.commit()
-        except BaseException:
-            session.rollback()
-            raise
-        finally:
-            session.info.pop("retention_purge", None)
-            self._repository = None
-            self._session = None
-            session.close()
 
     @contextmanager
     def savepoint(self) -> Iterator[SqlAlchemyCatalogRepository]:
-        if self._session is None or self._repository is None:
-            raise RuntimeError("catalog_write_not_active")
-        with self._session.begin_nested():
-            yield self._repository
+        with self._transactions.savepoint() as repository:
+            yield repository
 
 
 def _metadata_to_storage(metadata: NormalizedMetadata) -> dict[str, Any]:

@@ -6,11 +6,11 @@ from uuid import uuid4
 import pytest
 from acquisition_fakes import StaticAcquisitionModules
 from fastapi.testclient import TestClient
-from media_finder.db import migrate_to_head, session_factory
 from media_finder.models import Acquisition, MediaItem
 from media_finder.sdk.types import CorrelationResult, DownloadDestination, SubmissionResult
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
+from media_finder_core.platform.database import migrate_to_head, session_factory
 from media_finder_sdk import (
     MagnetArtifact,
     PrivateReleaseSelection,

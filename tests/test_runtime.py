@@ -4,8 +4,9 @@ from time import monotonic, sleep
 import pytest
 from fastapi.testclient import TestClient
 from media_finder import runtime as legacy_runtime
-from media_finder.db import migrate_to_head
 from media_finder.models import AppSetting
+from media_finder_core.platform.configuration import ConfigurationError
+from media_finder_core.platform.database import migrate_to_head
 from media_finder_server import create_application, run
 
 
@@ -86,34 +87,28 @@ def test_runtime_lifespan_disposes_database_after_module_close_failure(
     assert disposed is True
 
 
-def test_application_construction_disposes_database_when_secret_resolution_fails(
+def test_application_validates_configuration_before_constructing_database(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database_url = f"sqlite:///{tmp_path / 'construction-failure.db'}"
     monkeypatch.setenv("MEDIA_FINDER_DATABASE_URL", database_url)
     monkeypatch.delenv("MEDIA_FINDER_UI_SECRET", raising=False)
     migrate_to_head(database_url)
-    disposed = False
-    original_create_database = legacy_runtime.create_database
+    created = False
 
     def create_recorded_database(url: str):
-        engine = original_create_database(url)
-        original_dispose = engine.dispose
-
-        def dispose() -> None:
-            nonlocal disposed
-            disposed = True
-            original_dispose()
-
-        monkeypatch.setattr(engine, "dispose", dispose)
-        return engine
+        del url
+        nonlocal created
+        created = True
+        raise AssertionError("database must not be constructed")
 
     monkeypatch.setattr(legacy_runtime, "create_database", create_recorded_database)
 
-    with pytest.raises(ValueError, match="referenced environment variable is not set"):
+    with pytest.raises(ConfigurationError) as failure:
         create_application()
 
-    assert disposed is True
+    assert failure.value.safe_details == {"variable": "MEDIA_FINDER_UI_SECRET"}
+    assert created is False
 
 
 def test_run_migrates_before_starting_exactly_one_worker(
@@ -121,6 +116,8 @@ def test_run_migrates_before_starting_exactly_one_worker(
 ) -> None:
     events: list[object] = []
     monkeypatch.setenv("MEDIA_FINDER_DATABASE_URL", "sqlite:////data/media-finder.db")
+    monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "test-ui-secret")
+    monkeypatch.setenv("MEDIA_FINDER_INTEGRATION_TOKEN", "test-integration-token")
     monkeypatch.setattr(
         "media_finder.runtime.migrate_to_head",
         lambda url: events.append(("migrate", url)),
@@ -153,6 +150,8 @@ def test_migration_failure_prevents_server_start(monkeypatch: pytest.MonkeyPatch
         raise RuntimeError("migration failed")
 
     monkeypatch.setenv("MEDIA_FINDER_DATABASE_URL", "sqlite:////data/media-finder.db")
+    monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "test-ui-secret")
+    monkeypatch.setenv("MEDIA_FINDER_INTEGRATION_TOKEN", "test-integration-token")
     monkeypatch.setattr("media_finder.runtime.migrate_to_head", fail_migration)
     served = False
 

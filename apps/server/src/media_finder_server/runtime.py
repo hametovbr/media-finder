@@ -12,6 +12,7 @@ from media_finder.integration_runtime import DefaultRuntimeFactory
 from media_finder.runtime import create_application as _create_application
 from media_finder.runtime import run as _run
 from media_finder.ui import create_ui_app as _create_ui_app
+from media_finder_core.platform import CoreConfiguration
 
 from .modules import (
     create_legacy_module_registry,
@@ -42,11 +43,14 @@ def create_runtime_factory(
 
 
 def create_application() -> FastAPI:
-    runtime_factory = create_runtime_factory()
+    environment = dict(os.environ)
+    configuration = CoreConfiguration.from_environment(environment)
+    runtime_factory = create_runtime_factory(environment=environment)
     try:
         return _create_application(
             registry=runtime_factory.registry,
             runtime_factory=runtime_factory,
+            configuration=configuration,
         )
     except BaseException:
         runtime_factory.close()
@@ -54,6 +58,16 @@ def create_application() -> FastAPI:
 
 
 def create_ui_app(database_url: str, **options: Any) -> FastAPI:
+    reference = options.pop("session_secret_reference", None)
+    if reference is not None:
+        prefix = "env:"
+        if not isinstance(reference, str) or not reference.startswith(prefix):
+            raise ValueError("session_secret_reference_invalid")
+        variable = reference.removeprefix(prefix)
+        secret = os.environ.get(variable)
+        if not isinstance(secret, str) or not secret:
+            raise ValueError("session_secret_unavailable")
+        options["session_secret"] = secret
     runtime_factory = options.pop("runtime_factory", None)
     owns_runtime_factory = False
     uses_explicit_test_capabilities = any(
@@ -84,11 +98,14 @@ def create_ui_app(database_url: str, **options: Any) -> FastAPI:
 
 
 def run() -> None:
-    runtime_factory = create_runtime_factory()
+    environment = dict(os.environ)
+    configuration = CoreConfiguration.from_environment(environment)
+    runtime_factory = create_runtime_factory(environment=environment)
     try:
         _run(
             registry=runtime_factory.registry,
             runtime_factory=runtime_factory,
+            configuration=configuration,
         )
     finally:
         runtime_factory.close()

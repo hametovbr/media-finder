@@ -4,9 +4,9 @@ from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
-from media_finder.db import migrate_to_head
 from media_finder.ui import error_message, resolve_locale
 from media_finder_builtin_ui.forms import decode_form
+from media_finder_core.platform.database import migrate_to_head
 from media_finder_server import create_ui_app
 from starlette.requests import Request
 

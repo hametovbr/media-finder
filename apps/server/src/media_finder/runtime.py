@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager, suppress
-from datetime import UTC, datetime
+from datetime import datetime
 
 import uvicorn
 from fastapi import FastAPI
@@ -17,66 +17,64 @@ from media_finder_core.catalog.persistence import (
     SqlAlchemyCatalogQueries,
     SqlAlchemyCatalogUnitOfWork,
 )
+from media_finder_core.platform import (
+    CoreConfiguration,
+    MaintenanceRunner,
+    SystemClock,
+    create_database,
+    migrate_to_head,
+    session_factory,
+)
 from media_finder_sdk import MetadataProvider as CoreMetadataProvider
 from media_finder_sdk import MetadataRetentionPolicy
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from .api import create_app as create_processor_app
-from .config import EnvReference, resolve_env_reference
 from .control_api import create_control_app
 from .control_gateway import BackendControlGateway
 from .control_security import BackendBrowserSecurity
-from .db import create_database, migrate_to_head, session_factory
 from .integration_runtime import (
     DefaultRuntimeFactory,
     RuntimeResolver,
 )
-from .maintenance import MaintenanceRunner
+from .maintenance_state import SqlAlchemyMaintenanceState
 from .sdk.registration import StaticModuleRegistry
 
-DEFAULT_DATABASE_URL = "sqlite:////data/media-finder.db"
-UI_SECRET_REFERENCE = "env:MEDIA_FINDER_UI_SECRET"
-INTEGRATION_TOKEN_REFERENCE = "env:MEDIA_FINDER_INTEGRATION_TOKEN"
 MAINTENANCE_CHECK_SECONDS = 60 * 60
 logger = logging.getLogger(__name__)
 
 
-def _secure_cookie() -> bool:
-    value = os.environ.get("MEDIA_FINDER_SECURE_COOKIE", "true").casefold()
-    if value in {"1", "true", "yes", "on"}:
-        return True
-    if value in {"0", "false", "no", "off"}:
-        return False
-    raise ValueError("MEDIA_FINDER_SECURE_COOKIE must be a boolean")
+def core_configuration(
+    environment: Mapping[str, str] | None = None,
+) -> CoreConfiguration:
+    return CoreConfiguration.from_environment(os.environ if environment is None else environment)
 
 
 def database_url() -> str:
-    return os.environ.get("MEDIA_FINDER_DATABASE_URL", DEFAULT_DATABASE_URL)
+    return core_configuration().database_url
 
 
 def ui_mode() -> str:
-    value = os.environ.get("MEDIA_FINDER_UI_MODE", "builtin")
-    if value not in {"builtin", "disabled"}:
-        raise ValueError("MEDIA_FINDER_UI_MODE must be builtin or disabled")
-    return value
+    return core_configuration().ui_mode
 
 
 def create_application(
     *,
     registry: StaticModuleRegistry,
     runtime_factory: DefaultRuntimeFactory,
+    configuration: CoreConfiguration | None = None,
 ) -> FastAPI:
     """Compose browser and processor interfaces from environment configuration."""
 
-    url = database_url()
-    mode = ui_mode()
+    selected = configuration or core_configuration()
+    url = selected.database_url
     engine = create_database(url)
     sessions = session_factory(engine)
     try:
         return _compose_application(
             url=url,
-            mode=mode,
+            configuration=selected,
             engine=engine,
             sessions=sessions,
             registry=registry,
@@ -90,13 +88,13 @@ def create_application(
 def _compose_application(
     *,
     url: str,
-    mode: str,
+    configuration: CoreConfiguration,
     engine: Engine,
     sessions: sessionmaker[Session],
     registry: StaticModuleRegistry,
     runtime_factory: DefaultRuntimeFactory,
 ) -> FastAPI:
-    secret = resolve_env_reference(EnvReference(value=UI_SECRET_REFERENCE)).get_secret_value()
+    secret = configuration.ui_secret.get_secret_value()
     secret_bytes = secret.encode()
     runtime = RuntimeResolver(
         factory=runtime_factory,
@@ -114,15 +112,15 @@ def _compose_application(
         create_builtin_ui(
             gateway=gateway,
             security=security,
-            options=BuiltinUIOptions(secure_cookie=_secure_cookie()),
+            options=BuiltinUIOptions(secure_cookie=configuration.secure_cookie),
         )
-        if mode == "builtin"
+        if configuration.ui_mode == "builtin"
         else FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     )
     control = create_control_app(
         gateway=gateway,
         security=security,
-        secure_cookie=_secure_cookie(),
+        secure_cookie=configuration.secure_cookie,
     )
     module_runtime = runtime_factory.module_runtime
     if module_runtime is None:
@@ -133,7 +131,7 @@ def _compose_application(
     }
     processor = create_processor_app(
         url,
-        integration_token_reference=INTEGRATION_TOKEN_REFERENCE,
+        integration_token=configuration.integration_token.get_secret_value(),
         retention_policies=retention_policies,
         database_engine=engine,
         sessions=sessions,
@@ -182,28 +180,31 @@ def _execute_maintenance(application: FastAPI, *, startup: bool) -> None:
             providers[module_id] = module_runtime.metadata_provider(module_id)
         except Exception:
             continue
+    clock = SystemClock()
     service = MetadataRetentionService(
         query_port=SqlAlchemyCatalogQueries(application.state.sessions),
         unit_of_work=SqlAlchemyCatalogUnitOfWork(application.state.sessions),
         policies=policies,
         providers=providers,
-        clock=lambda: datetime.now(UTC),
+        clock=clock.now,
     )
-    runner = MaintenanceRunner(_CoreRetentionCoordinator(service))
-    with application.state.sessions() as session:
-        now = datetime.now(UTC)
-        if startup:
-            runner.run_at_startup(session, now)
-        else:
-            runner.run_if_daily_due(session, now)
+    runner = MaintenanceRunner(
+        coordinator=_CoreRetentionCoordinator(service),
+        state=SqlAlchemyMaintenanceState(application.state.sessions),
+        clock=clock,
+    )
+    if startup:
+        runner.run_at_startup()
+    else:
+        runner.run_if_daily_due()
 
 
 class _CoreRetentionCoordinator:
     def __init__(self, service: MetadataRetentionService) -> None:
         self._service = service
 
-    def run(self, session: Session, now: datetime) -> None:
-        del session, now
+    def run(self, now: datetime) -> None:
+        del now
         self._service.run()
 
 
@@ -223,13 +224,16 @@ def run(
     *,
     registry: StaticModuleRegistry,
     runtime_factory: DefaultRuntimeFactory,
+    configuration: CoreConfiguration | None = None,
 ) -> None:
     """Migrate storage before constructing or starting the single web worker."""
 
-    migrate_to_head(database_url())
+    selected = configuration or core_configuration()
+    migrate_to_head(selected.database_url)
     application = create_application(
         registry=registry,
         runtime_factory=runtime_factory,
+        configuration=selected,
     )
     uvicorn.run(
         application,

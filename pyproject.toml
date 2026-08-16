@@ -62,7 +62,7 @@ mypy_path = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--strict-config --strict-markers --cov=media_finder --cov-report=term-missing"
+addopts = "--strict-config --strict-markers --cov=media_finder --cov-branch --cov-report=term-missing"
 testpaths = ["tests"]
 pythonpath = []
 # Starlette 1.x still falls back to httpx while its test client migrates to the

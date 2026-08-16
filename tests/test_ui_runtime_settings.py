@@ -3,9 +3,9 @@ from pathlib import Path
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from media_finder.db import migrate_to_head
 from media_finder.models import DownloadClientInstance
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
+from media_finder_core.platform.database import migrate_to_head
 from media_finder_server import create_runtime_factory, create_ui_app
 
 ENVIRONMENT = {

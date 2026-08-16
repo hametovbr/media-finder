@@ -1,12 +1,12 @@
 from datetime import UTC, datetime
 
 import httpx
-from media_finder.maintenance import MaintenanceRunner
 from media_finder_core.catalog import MetadataCatalogService, MetadataRetentionService
 from media_finder_core.catalog.persistence import (
     SqlAlchemyCatalogQueries,
     SqlAlchemyCatalogUnitOfWork,
 )
+from media_finder_core.platform import MaintenanceRunner
 from media_finder_metadata_tmdb import registration as tmdb_registration
 from media_finder_sdk import MediaKind, MetadataIdentity, resolve_module_environment
 from sqlalchemy.orm import Session, sessionmaker
@@ -188,16 +188,35 @@ def test_core_contains_no_concrete_provider_policy() -> None:
 
 
 def test_generic_maintenance_runs_at_startup_and_once_daily(database: Session) -> None:
+    del database
     calls: list[datetime] = []
 
     class Coordinator:
-        def run(self, session: Session, now: datetime) -> None:
-            del session
+        def run(self, now: datetime) -> None:
             calls.append(now)
 
-    runner = MaintenanceRunner(Coordinator())
     start = datetime(2025, 1, 1, tzinfo=UTC)
-    runner.run_at_startup(database, start)
-    assert runner.run_if_daily_due(database, datetime(2025, 1, 1, 23, tzinfo=UTC)) is False
-    assert runner.run_if_daily_due(database, datetime(2025, 1, 2, tzinfo=UTC)) is True
+
+    class Clock:
+        current = start
+
+        def now(self) -> datetime:
+            return self.current
+
+    class State:
+        completed: datetime | None = None
+
+        def last_completed_at(self) -> datetime | None:
+            return self.completed
+
+        def record_completed(self, completed_at: datetime) -> None:
+            self.completed = completed_at
+
+    clock = Clock()
+    runner = MaintenanceRunner(coordinator=Coordinator(), state=State(), clock=clock)
+    runner.run_at_startup()
+    clock.current = datetime(2025, 1, 1, 23, tzinfo=UTC)
+    assert runner.run_if_daily_due() is False
+    clock.current = datetime(2025, 1, 2, tzinfo=UTC)
+    assert runner.run_if_daily_due() is True
     assert calls == [start, datetime(2025, 1, 2, tzinfo=UTC)]

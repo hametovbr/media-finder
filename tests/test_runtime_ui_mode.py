@@ -4,10 +4,10 @@ from time import sleep
 
 import pytest
 from fastapi.testclient import TestClient
-from media_finder_server import create_application
-
-from media_finder.db import migrate_to_head
 from media_finder.runtime import ui_mode
+from media_finder_core.platform import ConfigurationError
+from media_finder_core.platform.database import migrate_to_head
+from media_finder_server import create_application
 
 
 def _environment(
@@ -28,6 +28,8 @@ def _environment(
 
 
 def test_ui_mode_defaults_and_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MEDIA_FINDER_UI_SECRET", "test-ui-secret")
+    monkeypatch.setenv("MEDIA_FINDER_INTEGRATION_TOKEN", "test-integration-token")
     monkeypatch.delenv("MEDIA_FINDER_UI_MODE", raising=False)
     assert ui_mode() == "builtin"
     monkeypatch.setenv("MEDIA_FINDER_UI_MODE", "builtin")
@@ -35,10 +37,11 @@ def test_ui_mode_defaults_and_validation(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("MEDIA_FINDER_UI_MODE", "disabled")
     assert ui_mode() == "disabled"
     monkeypatch.setenv("MEDIA_FINDER_UI_MODE", "other")
-    with pytest.raises(ValueError, match="MEDIA_FINDER_UI_MODE"):
+    with pytest.raises(ConfigurationError) as invalid:
         ui_mode()
+    assert invalid.value.safe_details == {"variable": "MEDIA_FINDER_UI_MODE"}
     monkeypatch.setenv("MEDIA_FINDER_UI_MODE", "BUILTIN")
-    with pytest.raises(ValueError, match="MEDIA_FINDER_UI_MODE"):
+    with pytest.raises(ConfigurationError):
         ui_mode()
 
 

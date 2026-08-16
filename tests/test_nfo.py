@@ -6,12 +6,12 @@ from xml.etree import ElementTree
 import pytest
 from fastapi.testclient import TestClient
 from media_finder.api import create_app
-from media_finder.db import create_database, migrate_to_head, session_factory
 from media_finder.domain import CatalogService
 from media_finder.models import Acquisition
 from media_finder.sdk.types import NormalizedMetadata as LegacyNormalizedMetadata
 from media_finder.sdk.types import RetentionPolicy as LegacyRetentionPolicy
 from media_finder_core.exports import EntityType, render_nfo
+from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
 from media_finder_sdk import (
     Artwork,
     Episode,
@@ -187,7 +187,7 @@ def test_current_and_pinned_nfo_api_adds_provider_owned_warning_headers(
 
     app = create_app(
         url,
-        integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN",
+        integration_token="integration-secret",
         clock=lambda: datetime(2025, 2, 1, tzinfo=UTC),
         retention_policies={"tmdb": LEGACY_REGISTRY.metadata_providers["tmdb"].retention_factory()},
     )
@@ -225,9 +225,7 @@ def test_multi_episode_nfo_api_has_stable_machine_code(tmp_path: Path, monkeypat
         item = CatalogService(session).create_manual_item(_legacy(_series()))
         item_id = item.id
     engine.dispose()
-    client = TestClient(
-        create_app(url, integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN")
-    )
+    client = TestClient(create_app(url, integration_token="integration-secret"))
 
     response = client.get(
         f"/api/v1/media-items/{item_id}/exports/nfo",
@@ -257,9 +255,7 @@ def test_nfo_content_disposition_supports_safe_unicode_filename(
         item = CatalogService(session).create_manual_item(_legacy(metadata))
         item_id = item.id
     engine.dispose()
-    client = TestClient(
-        create_app(url, integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN")
-    )
+    client = TestClient(create_app(url, integration_token="integration-secret"))
 
     response = client.get(
         f"/api/v1/media-items/{item_id}/exports/nfo",
@@ -397,7 +393,7 @@ def test_nfo_api_defensively_revalidates_forged_provider_warning(
     client = TestClient(
         create_app(
             url,
-            integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN",
+            integration_token="integration-secret",
             clock=lambda: datetime(2025, 2, 1, tzinfo=UTC),
             retention_policies={"forged": ForgedWarningProvider()},  # type: ignore[dict-item]
         )

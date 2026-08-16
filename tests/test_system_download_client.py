@@ -6,10 +6,10 @@ from uuid import uuid4
 import pytest
 import sqlalchemy as sa
 from alembic.config import Config
-from media_finder.db import create_database, migrate_to_head, session_factory
 from media_finder.models import AppSetting, DownloadClientInstance
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID, ensure_system_qbittorrent
 from media_finder_core.acquisition import AcquisitionRequest
+from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
 from sqlalchemy import select
 
 from alembic import command

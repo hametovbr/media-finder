@@ -38,7 +38,7 @@
 - [x] 4.4 Move Acquisition state, idempotency, safe snapshots, exact correlation, timeout recovery, manual reconcile, and bounded opaque release selection into `media_finder_core.acquisition`; consume catalog through declared read ports; move the Acquisition record into its owning persistence adapter and add the immutable release/download module ID and version columns required before production cutover; make focused and real-SQL concurrency tests GREEN without retaining the legacy acquisition service.
 - [x] 4.5 Replace Prowlarr-specific acquisition branches with the selected ReleaseProvider registration while preserving one-use TTL tokens, payload bounds, first-party Prowlarr behavior, and the selected qBittorrent client; make release-search and submission integration tests GREEN.
 - [x] 4.6 Move normalized metadata, naming, NFO, expiry warnings, multi-episode rules, and current/pinned processor use cases into `media_finder_core.exports`; read catalog/acquisition snapshots through ports and make processor contract tests GREEN without exposing raw payloads or ORM records.
-- [ ] 4.7 Move database/session construction, transactions/savepoints, maintenance cadence, safe errors, configuration, caches, and clocks into `media_finder_core.platform`; retain a single transaction owner and make failure-isolation/readiness tests GREEN.
+- [x] 4.7 Move database/session construction, transactions/savepoints, maintenance cadence, safe errors, configuration, caches, and clocks into `media_finder_core.platform`; retain a single transaction owner and make failure-isolation/readiness tests GREEN.
 
 ## 5. Replace Persistence with the Clean Core Schema
 

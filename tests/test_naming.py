@@ -4,11 +4,11 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from media_finder.api import create_app
-from media_finder.db import create_database, migrate_to_head, session_factory
 from media_finder.domain import CatalogService
 from media_finder.models import Acquisition
 from media_finder.sdk.types import NormalizedMetadata as LegacyNormalizedMetadata
 from media_finder_core.exports import EntityType, render_naming
+from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
 from media_finder_sdk import Episode, MediaKind, NormalizedMetadata, Provenance, Season
 
 
@@ -179,9 +179,7 @@ def test_current_and_pinned_naming_endpoints_use_the_fixed_profile(
         session.commit()
         item_id, acquisition_id = item.id, str(acquisition.id)
     engine.dispose()
-    client = TestClient(
-        create_app(url, integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN")
-    )
+    client = TestClient(create_app(url, integration_token="integration-secret"))
     headers = {"Authorization": "Bearer integration-secret"}
     params = {
         "entity_type": "episode",

@@ -2,10 +2,6 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
-
-from media_finder.db import create_database, migrate_to_head, session_factory
 from media_finder.sdk.errors import ModuleError
 from media_finder.sdk.types import (
     Attribution,
@@ -24,6 +20,9 @@ from media_finder.sdk.types import (
     RetentionPolicy,
     SubmissionResult,
 )
+from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture

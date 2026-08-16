@@ -5,10 +5,10 @@ from pathlib import Path
 import pytest
 from acquisition_fakes import StaticAcquisitionModules
 from fastapi.testclient import TestClient
-from media_finder.db import migrate_to_head, session_factory
 from media_finder.models import Acquisition, DownloadClientInstance, MediaItem, MetadataRevision
 from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
+from media_finder_core.platform.database import migrate_to_head, session_factory
 from media_finder_sdk import (
     MagnetArtifact,
     PrivateReleaseSelection,

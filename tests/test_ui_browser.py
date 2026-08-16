@@ -16,7 +16,6 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, Response
 from media_finder.control_api import create_control_app
 from media_finder.control_security import BackendBrowserSecurity
-from media_finder.db import migrate_to_head, session_factory
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.models import Acquisition, DownloadClientInstance, MediaItem
 from media_finder.sdk.types import (
@@ -38,6 +37,7 @@ from media_finder.system_clients import SYSTEM_QBITTORRENT_ID
 from media_finder_builtin_ui import create_builtin_ui
 from media_finder_builtin_ui.fake import FakeBrowserSecurity, FakeControlGateway
 from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
+from media_finder_core.platform.database import migrate_to_head, session_factory
 from media_finder_sdk import (
     MagnetArtifact,
     PrivateReleaseSelection,

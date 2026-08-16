@@ -5,11 +5,11 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from media_finder.db import migrate_to_head, session_factory
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.models import DownloadClientInstance, MediaItem, MetadataRevision
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
 from media_finder_core.exports import EntityType, render_naming, render_nfo
+from media_finder_core.platform.database import migrate_to_head, session_factory
 from media_finder_sdk import NormalizedMetadata as CoreNormalizedMetadata
 from media_finder_server import create_ui_app
 from sqlalchemy import select

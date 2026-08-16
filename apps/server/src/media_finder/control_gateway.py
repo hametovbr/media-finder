@@ -81,6 +81,7 @@ from media_finder_core.catalog.persistence import (
     SqlAlchemyCatalogRepository,
     SqlAlchemyCatalogUnitOfWork,
 )
+from media_finder_core.platform import EphemeralCache, EphemeralTokenExpired
 from media_finder_sdk import (
     DownloadClient as CoreDownloadClient,
 )
@@ -108,7 +109,6 @@ from media_finder_sdk import ReleaseSearchQuery as ModuleReleaseSearchQuery
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from .ephemeral import EphemeralCache, EphemeralTokenExpired
 from .integration_runtime import LegacyMetadataCapabilities, RuntimeResolver
 from .models import MediaItem, MetadataRevision
 from .sdk.registration import StaticModuleRegistry

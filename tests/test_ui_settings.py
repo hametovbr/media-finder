@@ -3,11 +3,10 @@ from pathlib import Path
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from media_finder.models import AppSetting, DownloadClientInstance
+from media_finder_core.platform.database import migrate_to_head, session_factory
 from media_finder_server import create_ui_app
 from sqlalchemy import select
-
-from media_finder.db import migrate_to_head, session_factory
-from media_finder.models import AppSetting, DownloadClientInstance
 
 
 @pytest.fixture

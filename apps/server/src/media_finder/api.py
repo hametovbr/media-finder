@@ -25,12 +25,10 @@ from media_finder_core.exports import (
     NamingExportService,
     NfoExportService,
 )
+from media_finder_core.platform import create_database, migration_state, session_factory
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.exceptions import HTTPException as StarletteHTTPException
-
-from .config import EnvReference, resolve_env_reference
-from .db import create_database, migration_state, session_factory
 
 REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 bearer = HTTPBearer(auto_error=False)
@@ -103,7 +101,7 @@ def _error_response(request: Request, error: APIError) -> JSONResponse:
 def create_app(
     database_url: str,
     *,
-    integration_token_reference: str,
+    integration_token: str,
     clock: Callable[[], datetime] | None = None,
     retention_policies: Mapping[str, ExportWarningPolicy] | None = None,
     database_engine: Engine | None = None,
@@ -113,8 +111,7 @@ def create_app(
 
     owns_engine = database_engine is None
     engine = database_engine or create_database(database_url)
-    reference = EnvReference(value=integration_token_reference)
-    integration_token = resolve_env_reference(reference).get_secret_value().encode()
+    integration_token_bytes = integration_token.encode()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -214,7 +211,7 @@ def create_app(
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     ) -> None:
         supplied = credentials.credentials.encode() if credentials is not None else b""
-        valid = hmac.compare_digest(supplied, integration_token)
+        valid = hmac.compare_digest(supplied, integration_token_bytes)
         if credentials is None or credentials.scheme.casefold() != "bearer" or not valid:
             raise APIError(
                 401,

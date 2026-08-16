@@ -10,13 +10,12 @@ import httpx
 from fastapi import FastAPI
 from media_finder_builtin_ui import BuiltinUIOptions, create_builtin_ui
 from media_finder_builtin_ui.i18n import message_for
+from media_finder_core.platform import create_database, session_factory
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from .config import EnvReference, resolve_env_reference
 from .control_gateway import BackendControlGateway
 from .control_security import BackendBrowserSecurity
-from .db import create_database, session_factory
 from .integration_runtime import (
     AcquisitionModuleAccess,
     DefaultRuntimeFactory,
@@ -46,7 +45,7 @@ def error_message(code: str, locale: str) -> tuple[str, str]:
 def create_ui_app(
     database_url: str,
     *,
-    session_secret_reference: str,
+    session_secret: str,
     secure_cookie: bool = False,
     providers: dict[str, MetadataProvider] | None = None,
     acquisition: AcquisitionModuleAccess | None = None,
@@ -65,7 +64,7 @@ def create_ui_app(
             database_url=database_url,
             engine=engine,
             sessions=sessions,
-            session_secret_reference=session_secret_reference,
+            session_secret=session_secret,
             secure_cookie=secure_cookie,
             providers=providers,
             acquisition=acquisition,
@@ -84,7 +83,7 @@ def _compose_ui_app(
     database_url: str,
     engine: Engine,
     sessions: sessionmaker[Session],
-    session_secret_reference: str,
+    session_secret: str,
     secure_cookie: bool,
     providers: dict[str, MetadataProvider] | None,
     acquisition: AcquisitionModuleAccess | None,
@@ -93,11 +92,7 @@ def _compose_ui_app(
     http_client_factory: Callable[[], httpx.Client],
     environment: Mapping[str, str] | None,
 ) -> FastAPI:
-    secret = (
-        resolve_env_reference(EnvReference(value=session_secret_reference))
-        .get_secret_value()
-        .encode()
-    )
+    secret = session_secret.encode()
     selected_factory = runtime_factory
     provider_registry = dict(providers or registry.retention_providers())
     if selected_factory is None and providers is None and acquisition is None:

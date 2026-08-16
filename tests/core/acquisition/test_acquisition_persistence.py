@@ -10,7 +10,6 @@ from threading import Barrier
 from typing import cast
 
 import pytest
-from media_finder.db import create_database, migrate_to_head, session_factory
 from media_finder.domain import CatalogService
 from media_finder.models import DownloadClientInstance, MetadataRevision
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance
@@ -30,6 +29,7 @@ from media_finder_core.acquisition.persistence import (
     SqlAlchemyAcquisitionUnitOfWork,
 )
 from media_finder_core.catalog.persistence import SqlAlchemyCatalogQueries
+from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
 from media_finder_sdk import (
     CorrelationResult,
     DownloadDestination,

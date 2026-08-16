@@ -4,11 +4,10 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from media_finder.models import MediaItem, MetadataRevision
+from media_finder_core.platform.database import migrate_to_head, session_factory
 from media_finder_server import create_ui_app
 from sqlalchemy import func, select
-
-from media_finder.db import migrate_to_head, session_factory
-from media_finder.models import MediaItem, MetadataRevision
 
 
 def _csrf(text: str) -> str:

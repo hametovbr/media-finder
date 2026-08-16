@@ -4,10 +4,10 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from media_finder.api import create_app
-from media_finder.db import create_database, migrate_to_head, session_factory
 from media_finder.domain import CatalogService, RevisionInput
 from media_finder.models import Acquisition, MetadataRevision
 from media_finder.sdk.types import MediaKind, NormalizedMetadata, Provenance, RetentionPolicy
+from media_finder_core.platform.database import create_database, migrate_to_head, session_factory
 
 
 def _headers() -> dict[str, str]:
@@ -72,9 +72,7 @@ def test_metadata_endpoints_return_current_and_pinned_validated_snapshots(
         item_id, acquisition_id = item.id, str(acquisition.id)
     engine.dispose()
 
-    client = TestClient(
-        create_app(url, integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN")
-    )
+    client = TestClient(create_app(url, integration_token="integration-secret"))
     current = client.get(f"/api/v1/media-items/{item_id}/metadata", headers=_headers())
     pinned_response = client.get(
         f"/api/v1/acquisitions/{acquisition_id}/metadata", headers=_headers()
@@ -130,7 +128,7 @@ def test_expiry_is_enforced_at_boundary_before_and_after_purge(tmp_path: Path, m
     client = TestClient(
         create_app(
             url,
-            integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN",
+            integration_token="integration-secret",
             clock=lambda: expiry,
         )
     )
@@ -198,7 +196,7 @@ def test_naming_and_nfo_expiry_at_boundary_and_after_purge_for_current_and_pinne
     client = TestClient(
         create_app(
             url,
-            integration_token_reference="env:MEDIA_FINDER_INTEGRATION_TOKEN",
+            integration_token="integration-secret",
             clock=lambda: expiry,
         )
     )

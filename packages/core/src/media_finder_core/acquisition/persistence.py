@@ -19,14 +19,15 @@ from sqlalchemy import (
     event,
     inspect,
     select,
-    text,
     update,
 )
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
 
+from ..platform.clock import SystemClock
 from ..platform.database import Base
+from ..platform.transactions import SqlAlchemyTransactionOwner, nested_savepoint
 from .models import (
     AcquisitionDraft,
     AcquisitionResolution,
@@ -69,10 +70,10 @@ class AcquisitionRecord(Base):
     external_task_id: Mapped[str | None] = mapped_column(String(500))
     failure_code: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+        DateTime(timezone=True), nullable=False, default=SystemClock().now
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+        DateTime(timezone=True), nullable=False, default=SystemClock().now
     )
 
 
@@ -170,7 +171,7 @@ class SqlAlchemyAcquisitionRepository:
         if existing is not None:
             return AcquisitionResolution(acquisition=existing, created=False)
         try:
-            with self._session.begin_nested():
+            with nested_savepoint(self._session):
                 created = self.add_pending(draft)
         except IntegrityError:
             winner = self.find_by_idempotency(draft.idempotency_key)
@@ -274,25 +275,18 @@ class SqlAlchemyAcquisitionUnitOfWork:
         *,
         legacy_download_client_instance_id: str | None = None,
     ) -> None:
-        self._sessions = sessions
-        self._legacy_download_client_instance_id = legacy_download_client_instance_id
+        self._transactions = SqlAlchemyTransactionOwner(
+            sessions=sessions,
+            resource_factory=lambda session: SqlAlchemyAcquisitionRepository(
+                session,
+                legacy_download_client_instance_id=legacy_download_client_instance_id,
+            ),
+        )
 
     @contextmanager
     def write(self) -> Iterator[SqlAlchemyAcquisitionRepository]:
-        session = self._sessions()
-        try:
-            if session.get_bind().dialect.name == "sqlite":
-                session.execute(text("BEGIN IMMEDIATE"))
-            yield SqlAlchemyAcquisitionRepository(
-                session,
-                legacy_download_client_instance_id=self._legacy_download_client_instance_id,
-            )
-            session.commit()
-        except BaseException:
-            session.rollback()
-            raise
-        finally:
-            session.close()
+        with self._transactions.write() as repository:
+            yield repository
 
 
 def _snapshot(record: AcquisitionRecord) -> AcquisitionSnapshot:

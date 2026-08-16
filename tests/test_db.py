@@ -2,9 +2,13 @@ from pathlib import Path
 
 import pytest
 from alembic.config import Config
+from media_finder_core.platform.database import (
+    _alembic_config,
+    create_database,
+    migrate_to_head,
+    migration_state,
+)
 from sqlalchemy import inspect, text
-
-from media_finder.db import _alembic_config, create_database, migrate_to_head, migration_state
 
 
 def test_fresh_migration_and_sqlite_safety(tmp_path: Path) -> None:

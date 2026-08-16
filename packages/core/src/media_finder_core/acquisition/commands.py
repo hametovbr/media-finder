@@ -6,7 +6,7 @@ import secrets
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from threading import RLock
 from uuid import UUID, uuid4
 
@@ -27,6 +27,8 @@ from media_finder_sdk import (
     TorrentArtifact,
 )
 
+from ..platform.clock import SystemClock
+from ..platform.errors import safe_code
 from .models import (
     AcquisitionDraft,
     AcquisitionRequest,
@@ -82,7 +84,7 @@ class ReleaseSelectionCache:
             raise ValueError("release_selection_cache_bounds_invalid")
         self._ttl = ttl
         self._max_entries = max_entries
-        self._clock = clock or (lambda: datetime.now(UTC))
+        self._clock = clock or SystemClock().now
         self._entries: OrderedDict[str, _CacheEntry] = OrderedDict()
         self._lock = RLock()
 
@@ -256,7 +258,10 @@ class AcquisitionCommands:
             return self._transition(
                 acquisition.id,
                 status=AcquisitionStatus.FAILED,
-                failure_code=_safe_code(error.code),
+                failure_code=safe_code(
+                    error.code,
+                    fallback="download_client_submission_failed",
+                ),
             )
         except Exception:
             return self._transition(
@@ -418,13 +423,6 @@ def _correlation_result(value: object) -> CorrelationResult:
         return result
     except (AttributeError, TypeError, ValueError) as error:
         raise ValueError("download_client_correlation_invalid") from error
-
-
-def _safe_code(code: str) -> str:
-    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789_-")
-    if not code or len(code) > 200 or any(character not in allowed for character in code):
-        return "download_client_submission_failed"
-    return code
 
 
 def _validate_external_task_id(value: str | None) -> None:
