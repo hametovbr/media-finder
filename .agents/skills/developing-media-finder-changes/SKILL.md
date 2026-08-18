@@ -10,11 +10,15 @@ the new owner runs production behavior and the superseded path is removed.
 
 ## Before editing
 
-1. Use `openspec-apply-change`; read every reported context file and the current
+1. Confirm apply authorization comes from a user message received after the
+   planning artifacts were presented. An implementation request made before the
+   artifacts exist is not approval; use `openspec-propose`, present them, and
+   stop.
+2. Use `openspec-apply-change`; read every reported context file and the current
    task. Proposal approval alone is not apply authorization.
-2. Trace the path from delivery adapter through application service, ports,
+3. Trace the path from delivery adapter through application service, ports,
    persistence or module capability, and public projection.
-3. Name the approved scenario or reproduced approved-behavior defect that the
+4. Name the approved scenario or reproduced approved-behavior defect that the
    next test protects. A test cannot create a new requirement.
 
 If a needed capability, compatibility rule, error mapping, ownership boundary,
@@ -58,4 +62,5 @@ reverse order, including partial-construction failure.
 Report the scenario implemented, RED and GREEN evidence, removed path, remaining
 tasks, exact HEAD/worktree state, and any unavailable verification. Never call a
 partial slice complete because the new API shape exists while production still
-uses the old owner.
+uses the old owner. Apply is terminal for the current user turn: do not sync or
+archive. Suggest the separately authorized verification/archive action and stop.

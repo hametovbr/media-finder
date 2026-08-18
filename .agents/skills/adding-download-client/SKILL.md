@@ -8,6 +8,12 @@ description: Use when adding, replacing, or changing a Media Finder download-cli
 Build a static submission adapter. Core owns acquisition records, idempotency,
 state transitions, and the `mf-acq-<uuid>` correlation value.
 
+This domain skill is not a lifecycle entry point. Use it only inside an
+approved `openspec-apply-change`; if no approved active change exists, use
+`openspec-propose`, present its artifacts, and stop. A compatibility fix may use
+`skip_specs` only when its proposal maps the fix to an existing canonical
+requirement, explains why no requirement changes, and receives later approval.
+
 1. Start with the approved OpenSpec delta and a deterministic RED test. Update
    it for changes to artifacts, destinations, configuration, correlation, or
    public behavior.

@@ -71,3 +71,22 @@ def test_agents_routes_every_manual_skill() -> None:
 
     for name in sorted(MANUAL_SKILLS):
         assert f"`{name}`" in instructions
+
+
+def test_openspec_phase_authorization_guards_are_repeated_at_execution_boundaries() -> None:
+    instructions = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    development = (SKILLS / "developing-media-finder-changes" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    publication = (SKILLS / "verifying-and-publishing-media-finder" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    download_client = (SKILLS / "adding-download-client" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "Approval is retrospective" in instructions
+    assert "never chain proposal into apply or apply into archive" in instructions
+    assert "Direct OpenSpec CLI commands do not replace lifecycle skills" in instructions
+    assert re.search(r"after the\s+planning artifacts were presented", development)
+    assert "Apply is terminal for the current user turn" in development
+    assert "Verification does not authorize sync or archive" in publication
+    assert "not a lifecycle entry point" in download_client

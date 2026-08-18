@@ -9,13 +9,32 @@ Bind every claim and publication action to one exact candidate. A passing result
 from another HEAD, dirty tree, workflow revision, tag, or image digest is not
 evidence for the current candidate.
 
+## Verify the approved change
+
+Before calling an OpenSpec implementation complete or ready to archive:
+
+1. Run `openspec status --change <name> --json` and
+   `openspec instructions apply --change <name> --json`. Read every reported
+   context file, including proposal, specs, design, and tasks when present.
+2. Check completeness (tasks and scenario coverage), correctness (behavior and
+   tests match requirements), and coherence (implementation follows design and
+   repository ownership). Attach concrete file, test, or command evidence.
+3. Treat an incomplete task, missing requirement/scenario, failed required gate,
+   or artifact contradiction as blocking. Return design/spec drift to
+   `openspec-update-change` and implementation/test defects to
+   `openspec-apply-change`.
+4. Verification does not authorize sync or archive. Report readiness and stop;
+   `openspec-archive-change` requires a later user request.
+
 ## Verify the candidate
 
 1. Record full HEAD, branch/ref, worktree and index status, tool versions, and the
    exact command before running it.
 2. Run proportional local gates required by the affected OpenSpec task. Record
    exit codes and counts. Report unavailable network, browser, Docker, credentials,
-   permissions, or platform coverage as `not run` or `blocked`, never passed.
+   permissions, or platform coverage as `not run` or `blocked`, never passed. Do
+   not filter gate output through a pipeline unless `pipefail` preserves the
+   originating command's status.
 3. Recheck HEAD and cleanliness after verification. Generated or uncommitted
    changes create a different candidate and invalidate completion claims.
 4. Commit intentionally and push the exact branch. Open a PR with scope,
@@ -62,5 +81,7 @@ SemVer release.
 
 ## Final handoff
 
-Report release URL, tag, commit SHA, image tags/digests/platforms, workflow and
-check URLs, migration warning, unavailable local evidence, and clean worktree.
+For ordinary changes, report exact commit SHA/ref, commands and counts, unavailable
+evidence, push/PR state, and worktree status. For releases, also report release
+URL, tag, image tags/digests/platforms, workflow and check URLs, and migration
+warnings.
