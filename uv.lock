@@ -322,7 +322,7 @@ wheels = [
 
 [[package]]
 name = "media-finder"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "apps/server" }
 dependencies = [
     { name = "alembic" },
@@ -363,7 +363,7 @@ requires-dist = [
 
 [[package]]
 name = "media-finder-builtin-ui"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/builtin-ui" }
 dependencies = [
     { name = "babel" },
@@ -398,7 +398,7 @@ test = [
 
 [[package]]
 name = "media-finder-control-contracts"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/control-contracts" }
 dependencies = [
     { name = "pydantic" },
@@ -409,7 +409,7 @@ requires-dist = [{ name = "pydantic", specifier = ">=2.11,<3" }]
 
 [[package]]
 name = "media-finder-core"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/core" }
 dependencies = [
     { name = "alembic" },
@@ -434,7 +434,7 @@ requires-dist = [
 
 [[package]]
 name = "media-finder-download-qbittorrent"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/modules/download-qbittorrent" }
 dependencies = [
     { name = "httpx" },
@@ -449,7 +449,7 @@ requires-dist = [
 
 [[package]]
 name = "media-finder-metadata-manual"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/modules/metadata-manual" }
 dependencies = [
     { name = "media-finder-module-sdk" },
@@ -464,7 +464,7 @@ requires-dist = [
 
 [[package]]
 name = "media-finder-metadata-tmdb"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/modules/metadata-tmdb" }
 dependencies = [
     { name = "httpx" },
@@ -483,7 +483,7 @@ requires-dist = [
 
 [[package]]
 name = "media-finder-module-sdk"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/module-sdk" }
 dependencies = [
     { name = "packaging" },
@@ -498,7 +498,7 @@ requires-dist = [
 
 [[package]]
 name = "media-finder-release-prowlarr"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/modules/release-prowlarr" }
 dependencies = [
     { name = "httpx" },

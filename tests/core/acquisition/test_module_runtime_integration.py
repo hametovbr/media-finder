@@ -196,10 +196,10 @@ def test_first_party_round_trip_uses_only_typed_module_runtime_and_exact_version
         saved = SqlAlchemyAcquisitionQueries(sessions).get(acquisition_id)
         assert saved is not None
         assert saved.release_provider == ModuleVersionSnapshot(
-            module_id="prowlarr", module_version="0.1.0"
+            module_id="prowlarr", module_version="0.2.0"
         )
         assert saved.download_client == ModuleVersionSnapshot(
-            module_id="qbittorrent", module_version="0.1.0"
+            module_id="qbittorrent", module_version="0.2.0"
         )
         assert saved.release_snapshot.infohash == INFOHASH
         assert str(saved.release_snapshot.source_page_url) == "https://indexer.example.test/"

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Develop Media Finder Changes"
+  short_description: "Implement approved vertical changes cleanly"
+  default_prompt: "Use $developing-media-finder-changes to implement this approved Media Finder change."

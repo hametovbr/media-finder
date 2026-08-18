@@ -1,0 +1,4 @@
+interface:
+  display_name: "Maintain Media Finder Skills"
+  short_description: "Evolve project skills with behavioral evidence"
+  default_prompt: "Use $maintaining-media-finder-skills to create or update one Media Finder skill."

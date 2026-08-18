@@ -27,7 +27,7 @@
       "secret": true
     }
   ],
-  "manifest_sha256": "c7c0f8fd11e709c7aa97cffd7db9c22c4e65bdbc5b19b492b0e68d3861125368",
+  "manifest_sha256": "b0549178771a900d579c66d874c3bd53aa5ec117b6264d0942ace90cfd82df94",
   "missing_configuration": {
     "applicable": true,
     "error": {
@@ -49,7 +49,7 @@
   },
   "module_id": "qbittorrent",
   "module_kind": "download-client",
-  "module_version": "0.1.0",
+  "module_version": "0.2.0",
   "redaction_markers": [
     "artifact-body",
     "environment-values",
