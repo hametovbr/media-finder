@@ -458,6 +458,19 @@ def test_qbittorrent_authentication_failure_is_standardized_and_secret_safe() ->
     assert upstream_body not in rendered
 
 
+def test_qbittorrent_authenticates_against_204_no_content_login() -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/auth/login"):
+            return httpx.Response(204, headers={"set-cookie": "SID=qb5; Path=/"})
+        return httpx.Response(404)
+
+    client = _client(RecordingClientFactory(respond))
+    try:
+        client.validate()
+    finally:
+        client.close()
+
+
 def test_qbittorrent_sessions_are_isolated_and_lifecycle_close_is_idempotent() -> None:
     clients = RecordingClientFactory()
     first = _client(clients)

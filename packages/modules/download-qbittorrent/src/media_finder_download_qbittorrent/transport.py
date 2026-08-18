@@ -40,7 +40,7 @@ class QbittorrentTransport:
             "/api/v2/auth/login",
             data={"username": self._username, "password": self._password},
         )
-        if response_text.strip() != "Ok.":
+        if response_text.strip() not in {"", "Ok."}:
             raise RuntimeError
 
     def list_categories(self) -> dict[str, str]:
