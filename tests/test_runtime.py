@@ -146,7 +146,13 @@ def test_run_migrates_before_starting_exactly_one_worker(
         (
             "serve",
             application,
-            {"host": "0.0.0.0", "port": 8000, "workers": 1, "proxy_headers": True},
+            {
+                "host": "0.0.0.0",
+                "port": 8000,
+                "workers": 1,
+                "proxy_headers": True,
+                "log_level": "info",
+            },
         ),
     ]
 

@@ -10,6 +10,8 @@ from pydantic import SecretStr
 from .errors import SafeError
 
 DEFAULT_DATABASE_URL = "sqlite:////data/media-finder.db"
+DEFAULT_LOG_LEVEL = "info"
+ALLOWED_LOG_LEVELS = frozenset({"debug", "info", "warning", "error", "critical"})
 
 
 class ConfigurationError(SafeError):
@@ -20,6 +22,7 @@ class ConfigurationError(SafeError):
 class CoreConfiguration:
     database_url: str
     ui_mode: str
+    log_level: str
     secure_cookie: bool
     ui_secret: SecretStr
     integration_token: SecretStr
@@ -34,6 +37,10 @@ class CoreConfiguration:
         if ui_mode not in {"builtin", "disabled"}:
             raise _invalid("MEDIA_FINDER_UI_MODE")
 
+        log_level = environment.get("MEDIA_FINDER_LOG_LEVEL", DEFAULT_LOG_LEVEL).strip().lower()
+        if log_level not in ALLOWED_LOG_LEVELS:
+            raise _invalid("MEDIA_FINDER_LOG_LEVEL")
+
         cookie_value = environment.get("MEDIA_FINDER_SECURE_COOKIE", "true")
         if cookie_value == "true":
             secure_cookie = True
@@ -47,6 +54,7 @@ class CoreConfiguration:
         return cls(
             database_url=database_url,
             ui_mode=ui_mode,
+            log_level=log_level,
             secure_cookie=secure_cookie,
             ui_secret=SecretStr(ui_secret),
             integration_token=SecretStr(integration_token),
@@ -67,4 +75,10 @@ def _invalid(variable: str) -> ConfigurationError:
     )
 
 
-__all__ = ["DEFAULT_DATABASE_URL", "ConfigurationError", "CoreConfiguration"]
+__all__ = [
+    "ALLOWED_LOG_LEVELS",
+    "DEFAULT_DATABASE_URL",
+    "DEFAULT_LOG_LEVEL",
+    "ConfigurationError",
+    "CoreConfiguration",
+]
