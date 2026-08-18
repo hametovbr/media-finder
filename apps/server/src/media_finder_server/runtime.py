@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
@@ -52,6 +53,7 @@ from .modules import (
 from .processor_api import create_processor_app
 
 MAINTENANCE_CHECK_SECONDS = 60 * 60
+LOG_FORMAT = "%(asctime)s %(levelname)-8s [%(name)s] %(message)s"
 logger = logging.getLogger(__name__)
 
 
@@ -364,10 +366,30 @@ async def _maintenance_loop(
             await asyncio.wait_for(stop.wait(), timeout=MAINTENANCE_CHECK_SECONDS)
 
 
+def configure_logging(log_level: str) -> None:
+    """Apply one process-wide level to the root logger.
+
+    Uvicorn's own loggers are levelled separately through the ``log_level``
+    argument passed to ``uvicorn.run``; the root logger governs application
+    loggers and any third-party loggers that propagate to it.
+    """
+
+    numeric_level = getattr(logging, log_level.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ValueError(f"Invalid log level: {log_level}")
+    root = logging.getLogger()
+    root.setLevel(numeric_level)
+    if not root.hasHandlers():
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(logging.Formatter(LOG_FORMAT))
+        root.addHandler(handler)
+
+
 def run() -> None:
     """Migrate before constructing and serving one worker."""
 
     configuration = core_configuration()
+    configure_logging(configuration.log_level)
     migrate_to_head(configuration.database_url)
     application = create_application()
     uvicorn.run(
@@ -376,6 +398,7 @@ def run() -> None:
         port=8000,
         workers=1,
         proxy_headers=True,
+        log_level=configuration.log_level,
     )
 
 
