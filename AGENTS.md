@@ -64,6 +64,22 @@ Use the installed OpenSpec skills as follows:
 
 Planning and implementation are separate authorization boundaries. Completing `openspec-propose` does not authorize implementation; implementation begins only through `openspec-apply-change` after the planning artifacts are approved.
 
+Approval is retrospective: only a user message received after the planning
+artifacts were presented can authorize implementation. Requests such as
+"build", "fix", or "start implementation" cannot pre-approve artifacts that do
+not yet exist. Proposal, update, and apply are terminal for the current user
+turn; never chain proposal into apply or apply into archive. A completed apply
+reports status and stops. Archive requires a separate user request and may
+perform only the inline sync required by its own workflow.
+
+Direct OpenSpec CLI commands do not replace lifecycle skills. Before creating or
+revising each planning artifact, fetch and follow its current
+`openspec instructions <artifact> --change <name> --json` response. Treat
+`skip_specs` and other workflow metadata as reviewed planning decisions: record
+their justification in the artifacts and obtain later approval before apply.
+Never edit canonical specs during apply or use `openspec archive --yes` to bypass
+archive assessment and user selection.
+
 Project-local skills under `.agents/skills` are the self-contained Media Finder
 workflow. Subject to system, developer, and explicit user instructions, use them
 before overlapping workstation-local skills. A clean checkout must be sufficient;
@@ -117,4 +133,4 @@ During `openspec-apply-change`, use test-driven development for every behavior o
 
 If implementation exposes a missing or incorrect requirement or design decision, stop implementation and use `openspec-update-change`. Do not silently change scope, defer specified behavior, or modify planning artifacts ad hoc.
 
-Before handoff, run `pnpm spec:validate` plus the format, lint, type, test, and production-build commands documented for the current project stage.
+Before handoff, run `pnpm spec:validate` plus the format, lint, type, test, and production-build commands documented for the current project stage. Preserve the originating command's exit status when filtering output; use `pipefail` or avoid pipelines. Report any unavailable gate as `not run` or `blocked`, never passed.
