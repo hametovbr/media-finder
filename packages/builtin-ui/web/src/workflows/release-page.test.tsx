@@ -53,6 +53,69 @@ function useSession() {
 }
 
 describe("ReleasePage", () => {
+  it("forwards valid optional Prowlarr indexer identifiers", async () => {
+    useSession();
+    let requestBody: unknown;
+    server.use(
+      http.post(
+        `${baseUrl}/v1/media-items/:itemId/release-searches`,
+        async ({ request }) => {
+          requestBody = await request.json();
+          return HttpResponse.json(releaseResults);
+        },
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.type(
+      await screen.findByRole("searchbox", { name: "Release query" }),
+      "Arrival",
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "Prowlarr indexer IDs (optional)" }),
+      "7, 12",
+    );
+    await user.click(screen.getByRole("button", { name: "Search releases" }));
+
+    expect(
+      await screen.findByRole("radio", { name: /Arrival\.2016/ }),
+    ).toBeVisible();
+    expect(requestBody).toEqual({ indexer_ids: [7, 12], query: "Arrival" });
+  });
+
+  it("rejects malformed Prowlarr indexer identifiers before searching", async () => {
+    useSession();
+    let searchRequests = 0;
+    server.use(
+      http.post(`${baseUrl}/v1/media-items/:itemId/release-searches`, () => {
+        searchRequests += 1;
+        return HttpResponse.json(releaseResults);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.type(
+      await screen.findByRole("searchbox", { name: "Release query" }),
+      "Arrival",
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "Prowlarr indexer IDs (optional)" }),
+      "7, invalid",
+    );
+    await user.click(screen.getByRole("button", { name: "Search releases" }));
+
+    const indexerInput = screen.getByRole("textbox", {
+      name: "Prowlarr indexer IDs (optional)",
+    });
+    expect(indexerInput).toHaveAttribute("aria-invalid", "true");
+    expect(
+      screen.getByText("Enter comma-separated numeric indexer IDs."),
+    ).toBeVisible();
+    expect(searchRequests).toBe(0);
+  });
+
   it("requires explicit release and live destination selection before submission", async () => {
     useSession();
     let destinationReads = 0;
@@ -189,5 +252,46 @@ describe("ReleasePage", () => {
     expect(
       screen.queryByRole("radio", { name: /Arrival\.2016/ }),
     ).not.toBeInTheDocument();
+  });
+
+  it("reports a safe error and blocks submission when live destinations fail", async () => {
+    useSession();
+    server.use(
+      http.post(`${baseUrl}/v1/media-items/:itemId/release-searches`, () =>
+        HttpResponse.json(releaseResults),
+      ),
+      http.get(`${baseUrl}/v1/download-destinations`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: "download_client_unavailable",
+              request_id: "download-1",
+            },
+          },
+          { status: 503 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.type(
+      await screen.findByRole("searchbox", { name: "Release query" }),
+      "Arrival",
+    );
+    await user.click(screen.getByRole("button", { name: "Search releases" }));
+    await user.click(
+      await screen.findByRole("radio", { name: /Arrival\.2016/ }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The download client is unavailable.",
+    );
+    expect(
+      screen.queryByRole("combobox", { name: "Destination" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Confirm acquisition" }),
+    ).toBeDisabled();
   });
 });
