@@ -224,6 +224,35 @@ test("verification must build both independently replaceable UI boundary wheels"
   assert.match(validateDelivery(root).join("\n"), /wheel build is missing media-finder-builtin-ui/);
 });
 
+test("frontend assets must be built before the built-in UI wheel", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace(
+      "      - name: Build frontend production assets\n        run: pnpm ui:build\n",
+      "",
+    ),
+  );
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /frontend production build must run before workspace wheels/,
+  );
+});
+
+test("the production runtime image cannot contain a Node runtime", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, "Dockerfile", (value) =>
+    value.replace(
+      "FROM python:3.13.14-slim-bookworm AS runtime",
+      "FROM node:24-bookworm-slim AS runtime",
+    ),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /runtime image must remain Python-only/);
+});
+
 test("verification must run built-in UI tests through the wheel-only isolation runner", (context) => {
   const root = copyDeliveryFixture();
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -240,19 +269,16 @@ test("verification must run built-in UI tests through the wheel-only isolation r
   );
 });
 
-test("browser verification must run the fake gateway UI from installed wheels", (context) => {
+test("browser verification must run the Playwright built-in UI suite", (context) => {
   const root = copyDeliveryFixture();
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
   mutate(root, ".github/workflows/verify.yaml", (value) =>
-    value.replace(
-      "packages/builtin-ui/tests/run_isolated.py browser",
-      "packages/builtin-ui/tests/test_browser.py",
-    ),
+    value.replace("pnpm ui:browser", "pnpm ui:test"),
   );
 
   assert.match(
     validateDelivery(root).join("\n"),
-    /browser job must run the wheel-only built-in UI suite/,
+    /browser job must run the Playwright built-in UI suite/,
   );
 });
 

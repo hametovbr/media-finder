@@ -42,7 +42,7 @@ When deploying from a Git-backed stack in an orchestrator such as Komodo, keep `
 | `MEDIA_FINDER_INTEGRATION_TOKEN` | Yes | None | Bearer token for processor-facing `/api/v1` endpoints |
 | `MEDIA_FINDER_DATABASE_URL` | No | `sqlite:////data/media-finder.db` | SQLite URL inside the persistent data directory |
 | `MEDIA_FINDER_SECURE_COOKIE` | No | `true` in the image; `false` in the localhost Compose example | Enables the cookie `Secure` attribute; set `true` behind HTTPS |
-| `MEDIA_FINDER_UI_MODE` | No | `builtin` | `builtin` serves the bundled HTML UI; `disabled` keeps both APIs and health without HTML/static routes |
+| `MEDIA_FINDER_UI_MODE` | No | `builtin` | `builtin` serves the bundled static SPA; `disabled` keeps both APIs and health without browser routes or assets |
 | `MEDIA_FINDER_LOG_LEVEL` | No | `info` | Process-wide log level: `debug`, `info`, `warning`, `error`, or `critical` (case-insensitive); an unsupported value fails startup |
 | `MEDIA_FINDER_PORT` | Compose only | `8080` | Local host port in the example |
 | `MEDIA_FINDER_IMAGE_TAG` | Compose only | `latest` | GHCR tag; pin `vX.Y.Z` for production |

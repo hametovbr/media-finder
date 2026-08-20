@@ -2,7 +2,49 @@
   "name": "@media-finder/builtin-ui",
   "private": true,
   "version": "0.2.0",
+  "type": "module",
   "scripts": {
-    "assets:build": "node ../../scripts/build-assets.mjs"
+    "dev": "VITE_MOCK_API=true vite --config web/vite.config.ts",
+    "dev:backend": "vite --config web/vite.config.ts",
+    "format": "prettier --check web",
+    "lint": "oxlint web/src web/vite.config.ts",
+    "typecheck": "tsc -p web/tsconfig.json --noEmit",
+    "contract:generate": "node scripts/generate-control-types.mjs",
+    "contract:check": "node scripts/generate-control-types.mjs --check",
+    "test": "pnpm test:unit",
+    "test:unit": "vitest run --config web/vite.config.ts --passWithNoTests",
+    "test:browser": "playwright test --config web/playwright.config.ts --pass-with-no-tests",
+    "test:a11y": "vitest run --config web/vite.config.ts --passWithNoTests --testNamePattern accessibility",
+    "build": "pnpm contract:check && tsc -p web/tsconfig.json --noEmit && vite build --config web/vite.config.ts",
+    "assets:build": "pnpm build"
+  },
+  "dependencies": {
+    "@mantine/core": "9.5.1",
+    "@mantine/hooks": "9.5.1",
+    "@tanstack/react-query": "5.101.4",
+    "i18next": "26.3.6",
+    "openapi-fetch": "0.17.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-i18next": "17.0.11",
+    "react-router": "7.18.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.5",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
+    "axe-core": "4.13.0",
+    "jsdom": "30.0.1",
+    "msw": "2.15.0",
+    "openapi-typescript": "7.13.0",
+    "oxlint": "1.79.0",
+    "prettier": "3.9.6",
+    "typescript": "5.9.3",
+    "vite": "8.2.1",
+    "vitest": "4.1.11"
   }
 }

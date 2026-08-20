@@ -379,6 +379,11 @@ function validateImage(root, verify, verifyText, failures) {
   );
   requireValue(
     failures,
+    runtimeStage?.command.startsWith("python:"),
+    "Dockerfile: runtime image must remain Python-only",
+  );
+  requireValue(
+    failures,
     runtimeStage?.instructions.some(
       (instruction) => instruction.keyword === "USER" && instruction.command === "10001:10001",
     ),
@@ -531,11 +536,8 @@ function validateVerification(root, verify, verifyText, failures) {
     failures,
     browserCommands
       .split("\n")
-      .some(
-        (line) =>
-          line.trim() === "uv run python packages/builtin-ui/tests/run_isolated.py browser",
-      ),
-    ".github/workflows/verify.yaml: browser job must run the wheel-only built-in UI suite",
+      .some((line) => line.trim() === "pnpm ui:browser"),
+    ".github/workflows/verify.yaml: browser job must run the Playwright built-in UI suite",
   );
   requireValue(
     failures,
@@ -563,6 +565,18 @@ function validateVerification(root, verify, verifyText, failures) {
 
   const wheelCommand = String(
     stepByName(verify.jobs?.python, "Build independent workspace wheels")?.run ?? "",
+  );
+  const pythonSteps = verify.jobs?.python?.steps ?? [];
+  const frontendBuildIndex = pythonSteps.findIndex(
+    (step) => step.name === "Build frontend production assets" && step.run === "pnpm ui:build",
+  );
+  const wheelBuildIndex = pythonSteps.findIndex(
+    (step) => step.name === "Build independent workspace wheels",
+  );
+  requireValue(
+    failures,
+    frontendBuildIndex >= 0 && wheelBuildIndex > frontendBuildIndex,
+    ".github/workflows/verify.yaml: frontend production build must run before workspace wheels",
   );
   for (const distribution of WORKSPACE_DISTRIBUTIONS) {
     requireValue(
@@ -653,8 +667,7 @@ function validateVerification(root, verify, verifyText, failures) {
   );
   requireValue(
     failures,
-    isolatedUiRunner.includes('sorted(TESTS.rglob("test_*.py"))') &&
-      isolatedUiRunner.includes('path.name.startswith("test_browser")'),
+    isolatedUiRunner.includes('sorted(TESTS.rglob("test_*.py"))'),
     "packages/builtin-ui/tests/run_isolated.py: UI isolation runner must discover test files recursively",
   );
 }

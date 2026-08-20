@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -267,9 +268,70 @@ def test_one_resource_graph_is_reused_by_every_delivery_adapter(
 
         if ui_mode == "builtin":
             assert isinstance(resources.ui_app, FastAPI)
-            assert resources.ui_app.state.gateway is resources.gateway
+            assert not hasattr(resources.ui_app.state, "gateway")
+            assert not hasattr(resources.ui_app.state, "security")
         else:
             assert resources.ui_app is None
+
+
+def test_composed_builtin_ui_replaces_legacy_routes_without_a_second_domain_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Catch SPA fallback or removed form routes bypassing the control boundary."""
+
+    _configure(
+        monkeypatch,
+        tmp_path,
+        ui_mode="builtin",
+        filename="builtin-route-replacement.db",
+    )
+
+    with TestClient(create_application()) as client:
+        before = client.get(
+            "/api/control/v1/media-items",
+            params={"locale": "en"},
+        )
+        assert before.status_code == 200
+
+        for bookmark in (
+            "/",
+            "/add",
+            "/items/missing",
+            "/items/missing/releases",
+            "/settings",
+        ):
+            response = client.get(bookmark)
+            assert response.status_code == 200
+            assert '<div id="root"></div>' in response.text
+
+        for legacy_path in (
+            "/ui/collections",
+            "/ui/metadata/search",
+            "/ui/items/missing/releases/search",
+            "/ui/items/missing/acquisitions",
+        ):
+            assert client.post(legacy_path, data={"name": "must-not-exist"}).status_code in {
+                404,
+                405,
+            }
+
+        after = client.get(
+            "/api/control/v1/media-items",
+            params={"locale": "en"},
+        )
+        assert after.status_code == 200
+        assert after.json() == before.json()
+
+        index = client.get("/").text
+        asset_path = re.search(r'src="(/assets/index-[^"]+\.js)"', index)
+        assert asset_path is not None
+        browser_bundle = client.get(asset_path.group(1)).text
+        assert "/api/control" in browser_bundle
+        assert '"/api/v1' not in browser_bundle
+
+        processor = client.get("/api/v1/media-items/missing/metadata")
+        assert processor.status_code == 401
 
 
 def test_control_caches_are_injected_instead_of_created_by_child_services(

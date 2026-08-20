@@ -1,15 +1,12 @@
 [project]
 name = "media-finder-builtin-ui"
 version = "0.2.0"
-description = "Built-in Jinja and HTMX interface for Media Finder"
+description = "Bundled static web interface for Media Finder"
 requires-python = ">=3.13,<3.14"
 license = "MIT"
 dependencies = [
-  "babel>=2.17,<3",
   "fastapi>=0.116,<1",
-  "jinja2>=3.1,<4",
   "media-finder-control-contracts",
-  "uvicorn>=0.35,<1",
 ]
 
 [dependency-groups]
@@ -18,9 +15,6 @@ test = [
   "playwright>=1.55,<2",
   "pytest>=9.0.3,<10",
 ]
-
-[project.scripts]
-media-finder-ui-dev = "media_finder_builtin_ui.dev:main"
 
 [build-system]
 requires = ["hatchling==1.32.0"]

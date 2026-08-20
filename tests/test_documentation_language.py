@@ -28,10 +28,8 @@ def test_developer_facing_cyrillic_is_rejected(path: Path, content: str) -> None
     ("path", "content"),
     [
         (
-            Path(
-                "packages/builtin-ui/src/media_finder_builtin_ui/locales/ru/LC_MESSAGES/messages.po"
-            ),
-            'msgstr "Разрешённый перевод"\n',
+            Path("packages/builtin-ui/web/src/locales/ru.json"),
+            '{"label": "Разрешённый перевод"}\n',
         ),
         (
             Path(
@@ -39,19 +37,6 @@ def test_developer_facing_cyrillic_is_rejected(path: Path, content: str) -> None
                 "media_finder_metadata_manual/translations/ru.json"
             ),
             '{"module.manual.name": "Вручную"}\n',
-        ),
-        (Path("tests/test_ui_i18n.py"), 'expected = "Разрешённый перевод"\n'),
-        (
-            Path("packages/builtin-ui/tests/test_browser.py"),
-            'expected = "Разрешённый перевод"\n',
-        ),
-        (
-            Path("packages/builtin-ui/tests/test_fake_gateway.py"),
-            'expected = "Разрешённый перевод"\n',
-        ),
-        (
-            Path("packages/builtin-ui/tests/test_html_contract.py"),
-            'expected = "Разрешённый перевод"\n',
         ),
         (Path("tests/test_naming.py"), 'title = "Пользовательский тайтл"\n'),
         (
@@ -65,8 +50,8 @@ def test_localization_and_user_metadata_values_are_allowed(path: Path, content: 
 
 
 def test_localization_test_comment_is_still_developer_prose() -> None:
-    path = Path("tests/test_ui_i18n.py")
+    path = Path("tests/test_naming.py")
 
     assert violations_for(path, "# Недопустимый комментарий\n") == [
-        "tests/test_ui_i18n.py:1: Cyrillic prose is not allowed"
+        "tests/test_naming.py:1: Cyrillic prose is not allowed"
     ]

@@ -1,11 +1,13 @@
+import hashlib
 import json
 from pathlib import Path
 
-from media_finder_builtin_ui.fake import FakeControlGateway
+from fake_control_gateway import FakeControlGateway
 from media_finder_server.control_api import create_control_app
 from media_finder_server.control_security import BackendBrowserSecurity
 
 SNAPSHOT = Path("docs/api/control-v1.openapi.json")
+GENERATED_TYPES = Path("packages/builtin-ui/web/src/api/control.generated.ts")
 
 
 def _canonical_schema() -> str:
@@ -44,3 +46,10 @@ def test_control_openapi_is_deterministic_safe_and_current() -> None:
     assert "raw_payload" not in serialized
     assert "bearer" not in serialized
     assert not any("export" in path or "nfo" in path for path in schema["paths"])
+
+
+def test_builtin_ui_control_types_follow_the_checked_openapi() -> None:
+    digest = hashlib.sha256(SNAPSHOT.read_bytes()).hexdigest()
+
+    assert GENERATED_TYPES.is_file(), "generate the built-in UI control types"
+    assert GENERATED_TYPES.read_text(encoding="utf-8").startswith(f"// OpenAPI SHA256: {digest}\n")

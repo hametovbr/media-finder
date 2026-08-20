@@ -38,8 +38,8 @@ def _venv_python(environment_root: Path) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("suite", choices=("unit", "browser", "all"))
-    selected = parser.parse_args().suite
+    parser.add_argument("suite", choices=("unit",))
+    parser.parse_args()
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -123,18 +123,20 @@ def main() -> None:
             f"for name in {PROHIBITED_IMPORTS!r}:\n"
             "    assert importlib.util.find_spec(name) is None, name\n"
             "root = files('media_finder_builtin_ui')\n"
-            "assert root.joinpath('templates/base.html').is_file()\n"
-            "assert root.joinpath('static/ui.js').is_file()\n"
-            "assert root.joinpath('locales/ru/LC_MESSAGES/messages.mo').is_file()\n"
+            "assert root.joinpath('static/index.html').is_file()\n"
+            "assets = tuple(root.joinpath('static/assets').iterdir())\n"
+            "assert any(\n"
+            "    path.name.startswith('index-') and path.name.endswith('.js')\n"
+            "    for path in assets\n"
+            ")\n"
+            "assert any(\n"
+            "    path.name.startswith('index-') and path.name.endswith('.css')\n"
+            "    for path in assets\n"
+            ")\n"
         )
         _run([str(python), "-I", "-c", probe], cwd=scratch, environment=environment)
 
         discovered = sorted(TESTS.rglob("test_*.py"))
-        tests = []
-        if selected in {"unit", "all"}:
-            tests.extend(path for path in discovered if not path.name.startswith("test_browser"))
-        if selected in {"browser", "all"}:
-            tests.extend(path for path in discovered if path.name.startswith("test_browser"))
         _run(
             [
                 str(python),
@@ -144,7 +146,7 @@ def main() -> None:
                 str(PACKAGE / "pyproject.toml"),
                 "-p",
                 "no:cacheprovider",
-                *(str(path) for path in tests),
+                *(str(path) for path in discovered),
             ],
             cwd=scratch,
             environment=environment,

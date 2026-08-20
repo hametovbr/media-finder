@@ -1,0 +1,84 @@
+{
+  "appName": "Media Finder",
+  "navigation": {
+    "label": "Основная навигация",
+    "open": "Открыть навигацию",
+    "catalog": "Каталог",
+    "add": "Добавить произведение"
+  },
+  "locale": {
+    "switchToEnglish": "English",
+    "switchToRussian": "Русский"
+  },
+  "routes": {
+    "catalog": "Каталог",
+    "add": "Добавить произведение",
+    "overview": "Обзор произведения",
+    "releases": "Найти релиз",
+    "loading": "Загрузка страницы",
+    "notFound": "Страница не найдена",
+    "notFoundDescription": "Эта страница пока не входит в интерфейс."
+  },
+  "session": {
+    "loading": "Загрузка сессии"
+  },
+  "catalog": {
+    "all": "Все",
+    "empty": "Произведения не найдены.",
+    "filters": "Коллекции каталога",
+    "loadMore": "Загрузить ещё",
+    "loading": "Загрузка каталога",
+    "pendingReconciliation": "Ожидает — может потребоваться ручная сверка",
+    "uncategorized": "Без категории"
+  },
+  "detail": {
+    "empty": "Для этого произведения пока нет описания.",
+    "loading": "Загрузка произведения"
+  },
+  "metadata": {
+    "confirm": "Подтвердить выбор",
+    "confirmDescription": "Произведение похоже на существующий элемент каталога. Всё равно сохранить?",
+    "confirmTitle": "Подтвердить похожее произведение",
+    "loadingProviders": "Загрузка источников метаданных",
+    "save": "Сохранить в каталог",
+    "saved": "Сохранено в каталог",
+    "search": "Найти",
+    "title": "Название",
+    "viewItem": "Открыть произведение"
+  },
+  "release": {
+    "chooseDestination": "Выберите назначение",
+    "confirm": "Подтвердить получение",
+    "destination": "Назначение",
+    "query": "Поиск релиза",
+    "results": "Результаты поиска релизов",
+    "search": "Найти релизы",
+    "seeders": "сидов"
+  },
+  "mediaKind": {
+    "movie": "Фильм",
+    "series": "Сериал"
+  },
+  "acquisition": {
+    "failed": "Ошибка",
+    "pending": "Ожидает",
+    "submitted": "Отправлено"
+  },
+  "errors": {
+    "confirmation_required": "Проверьте и подтвердите выбор.",
+    "csrf_invalid": "Не удалось проверить запрос. Обновите страницу и повторите попытку.",
+    "download_destination_unavailable": "Выбранное назначение больше недоступно.",
+    "internal_error": "Media Finder не смог выполнить запрос.",
+    "json_required": "Сервер ожидает запрос в формате JSON.",
+    "media_item_not_found": "Запрошенное произведение не найдено.",
+    "metadata_unavailable": "Метаданные произведения больше недоступны.",
+    "release_search_token_expired": "Срок поиска релизов истёк. Выполните поиск снова.",
+    "release_selection_invalid": "Выбранный релиз больше недействителен.",
+    "request_body_invalid": "Данные запроса недействительны.",
+    "request_invalid": "Запрос недействителен.",
+    "requestId": "Идентификатор запроса: {{requestId}}",
+    "selection_expired": "Срок выбора истёк. Выполните поиск снова.",
+    "session_invalid": "Сессия браузера больше недействительна.",
+    "unexpected_response": "Сервер вернул неожиданный ответ."
+  }
+}

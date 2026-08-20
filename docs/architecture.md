@@ -32,7 +32,7 @@ flowchart TD
     Core["media-finder-core<br/>domains and orchestration"]
     SDK["media-finder-module-sdk<br/>integration contracts"]
     Control["media-finder-control-contracts<br/>browser DTOs and gateway"]
-    UI["media-finder-builtin-ui<br/>Jinja and HTMX"]
+    UI["media-finder-builtin-ui<br/>React SPA and static host"]
     Manual["metadata-manual"]
     TMDB["metadata-tmdb"]
     Prowlarr["release-prowlarr"]
@@ -67,7 +67,7 @@ The repository root is a virtual uv workspace, not a tenth distribution.
 | `media-finder-core` | Catalog, acquisition, exports, control orchestration, persistence adapters, transactions, bounded caches, module lifecycle | Concrete integration packages, templates, provider-specific branches |
 | `media-finder-module-sdk` | Module manifests, environment declarations, DTOs, protocols, typed registrations, errors, conformance, serialized fixture models | Core services, database access, HTTP framework, concrete transports |
 | `media-finder-control-contracts` | Stable browser DTOs, error envelope, `ControlGateway` protocol | FastAPI, persistence, integrations, UI rendering |
-| `media-finder-builtin-ui` | HTML routers, forms, Jinja templates, HTMX/static assets, gettext catalogs, fake development gateway | Core, server, SDK, ORM, database, concrete modules |
+| `media-finder-builtin-ui` | React/TypeScript browser source, generated control types, localized presentation catalogs, deterministic MSW fixtures, and packaged static assets | Core, server, SDK, ORM, database, concrete modules |
 | First-party module wheels | One integration implementation, its transport, manifest, translations, fixtures, conformance data | Core, persistence, browser routes or assets, sibling modules, process-wide environment access |
 
 ## Core bounded contexts
