@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Media Finder: Full system",
+      "type": "node-terminal",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "command": "zsh -lc 'umask 077; if [[ -r \"${env:HOME}/.media-finder-integrations.env\" ]]; then set -a; source \"${env:HOME}/.media-finder-integrations.env\"; set +a; else print -u2 \"Integration environment file not found; external modules will be unavailable.\"; fi; export MEDIA_FINDER_DATABASE_URL=\"sqlite:///${workspaceFolder}/media-finder-local.db\"; export MEDIA_FINDER_UI_SECRET=\"$(openssl rand -hex 32)\"; export MEDIA_FINDER_INTEGRATION_TOKEN=\"$(openssl rand -hex 32)\"; export MEDIA_FINDER_SECURE_COOKIE=false; export MEDIA_FINDER_UI_MODE=builtin; export MEDIA_FINDER_LOG_LEVEL=debug; pnpm ui:build && exec uv run python -c \"from media_finder_server.runtime import configure_logging, core_configuration, create_application, migrate_to_head; import uvicorn; configuration = core_configuration(); configure_logging(configuration.log_level); migrate_to_head(configuration.database_url); uvicorn.run(create_application(), host=\\\"127.0.0.1\\\", port=8000, workers=1, proxy_headers=True, log_level=configuration.log_level)\"'"
+    },
+    {
+      "name": "Media Finder: UI with mock API",
+      "type": "node-terminal",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "command": "zsh -lc 'exec pnpm ui:dev'"
+    },
+    {
+      "name": "Media Finder: Full verification",
+      "type": "node-terminal",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "UV_CACHE_DIR": "${workspaceFolder}/.tools/uv-cache"
+      },
+      "command": "zsh -lc 'set -euo pipefail; pnpm install --frozen-lockfile; uv sync --frozen --all-groups; pnpm docs:check; pnpm spec:validate; pnpm delivery:test; pnpm delivery:validate; pnpm module-conformance:test; pnpm module-conformance:validate; uv run ruff format --check .; uv run ruff check .; uv run mypy; pnpm ui:format; pnpm ui:lint; pnpm ui:type; pnpm ui:contract; pnpm ui:test; pnpm ui:a11y; uv run python packages/builtin-ui/tests/run_isolated.py unit; uv run pytest; uv run python scripts/check_schema_drift.py; pnpm ui:browser; pnpm ui:build; for launch_package in media-finder media-finder-core media-finder-module-sdk media-finder-control-contracts media-finder-builtin-ui media-finder-metadata-manual media-finder-metadata-tmdb media-finder-release-prowlarr media-finder-download-qbittorrent; do uv build --wheel --package \"$launch_package\" --out-dir dist/wheels; done; uv run pytest tests/test_wheel_isolation.py tests/test_workspace_packages.py tests/architecture/test_package_boundaries.py tests/architecture/test_legacy_root_removal.py; git diff --exit-code -- packages/builtin-ui/src/media_finder_builtin_ui/static; sg docker -c \"docker build --tag media-finder:ci . && bash scripts/smoke-container.sh\"'"
+    }
+  ]
+}
