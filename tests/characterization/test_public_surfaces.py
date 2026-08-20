@@ -32,18 +32,20 @@ def test_builtin_public_surfaces_preserve_routes_security_and_localization(
     with TestClient(create_application()) as client:
         catalog = client.get("/", headers={"Accept-Language": "ru-RU, en;q=0.8"})
         assert catalog.status_code == 200
-        assert (
-            "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0442\u0430\u0439\u0442\u043b"
-            in catalog.text
-        )
-        assert "mf_session=" in catalog.headers["set-cookie"]
-        assert "HttpOnly" in catalog.headers["set-cookie"]
-        assert "SameSite=lax" in catalog.headers["set-cookie"]
+        assert '<div id="root"></div>' in catalog.text
+        assert "set-cookie" not in catalog.headers
 
-        session = client.get("/api/control/v1/session")
+        session = client.get(
+            "/api/control/v1/session",
+            headers={"Accept-Language": "ru-RU, en;q=0.8"},
+        )
         assert session.status_code == 200
         csrf = session.json()["csrf_token"]
+        assert session.json()["ui_locale"] == "ru"
         assert session.json()["supported_locales"] == ["en", "ru"]
+        assert "mf_session=" in session.headers["set-cookie"]
+        assert "HttpOnly" in session.headers["set-cookie"]
+        assert "SameSite=lax" in session.headers["set-cookie"]
 
         diagnostics = client.get("/api/control/v1/integrations")
         assert diagnostics.status_code == 200

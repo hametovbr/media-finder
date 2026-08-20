@@ -2,3 +2,4 @@ packages:
   - packages/*
 allowBuilds:
   '@fission-ai/openspec': false
+  msw: false

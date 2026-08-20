@@ -1,9 +1,10 @@
 # Browser control API
 
 The versioned browser contract at `/api/control/v1` is the supported boundary
-for independently developed Media Finder interfaces. The bundled Jinja and
-HTMX interface uses the same typed gateway as this JSON adapter; it has no
-direct persistence or integration access.
+for independently developed Media Finder interfaces. The bundled React
+interface consumes this same JSON boundary; its Python wheel contains only a
+static SPA host and built assets, with no direct persistence or integration
+access.
 
 The deterministic OpenAPI document is stored at
 [`docs/api/control-v1.openapi.json`](api/control-v1.openapi.json). Consumers
@@ -43,18 +44,25 @@ search after expiry or eviction.
 
 ## Independent built-in UI development
 
-The built-in UI wheel contains its templates, static files, gettext catalogs,
-and presentation code. It depends only on `media-finder-control-contracts` and
-web libraries. Run it against deterministic fixtures without a database or
-external service:
+The browser source is under `packages/builtin-ui/web`. Node.js 20.19 or newer
+and pnpm 11.19 are required to develop or build it, but neither is present in
+the production runtime image. Run the isolated Vite host with typed MSW
+fixtures and no database or integration variables:
 
 ```console
-uv run media-finder-ui-dev
+pnpm ui:dev
 ```
 
-The development host is for local UI work only. Backend behavior must be tested
-against the real `ControlGateway` implementation and the HTTP adapter
-conformance suite.
+Use `?scenario=catalog|workflow|empty|loading|error|ru|desktop|mobile` for
+deterministic states. `pnpm ui:build` checks generated OpenAPI types and writes
+content-hashed assets into the Python package. `pnpm ui:test`,
+`pnpm ui:browser`, and `pnpm ui:a11y` run the frontend verification layers.
+
+The initial bundled interface supports catalog and collection browsing, media
+overview, metadata search and selection, release search, live destination
+selection, and Acquisition submission. Manual create/edit/import, collection
+mutation, settings, diagnostics, About, Acquisition history, and reconciliation
+remain available only through the unchanged control API for later UI work.
 
 ## Same-origin external UI topology
 
@@ -80,3 +88,7 @@ migrations, maintenance, and storage in the same Media Finder container. To
 roll back the frontend, restore `MEDIA_FINDER_UI_MODE=builtin` and recreate the
 container. This change adds no persistent data and requires no database
 migration.
+
+The bundled SPA ships inside the same immutable Media Finder image. Roll back a
+bad bundled frontend by restoring the previous image tag; there is no separate
+Node service, volume, or frontend database migration.

@@ -36,21 +36,10 @@ TEXT_SUFFIXES = {
 }
 TEXT_FILENAMES = {".dockerignore", "Dockerfile", "LICENSE"}
 LOCALIZATION_TESTS = {
-    "packages/builtin-ui/tests/test_browser.py",
-    "packages/builtin-ui/tests/test_fake_gateway.py",
-    "packages/builtin-ui/tests/test_html_contract.py",
     "tests/core/exports/test_exports_slice.py",
     "tests/test_documentation_language.py",
     "tests/test_naming.py",
     "tests/test_nfo.py",
-    "tests/test_ui_browser.py",
-    "tests/test_ui_catalog.py",
-    "tests/test_ui_error_feedback.py",
-    "tests/test_ui_foundation.py",
-    "tests/test_ui_i18n.py",
-    "tests/test_ui_manual_structured.py",
-    "tests/test_ui_release_live_clients.py",
-    "tests/test_ui_release_acceptance.py",
 }
 MODULE_TRANSLATION = re.compile(r"^packages/modules/[^/]+/src/[^/]+/translations/ru\.json$")
 
@@ -98,6 +87,13 @@ def _is_catalog_or_user_fixture(path: Path) -> bool:
     normalized = path.as_posix()
     return (
         normalized.startswith("packages/builtin-ui/src/media_finder_builtin_ui/locales/")
+        or normalized.startswith("packages/builtin-ui/web/src/locales/")
+        or (
+            normalized.startswith(
+                "packages/builtin-ui/src/media_finder_builtin_ui/static/assets/index-"
+            )
+            and path.suffix == ".js"
+        )
         or MODULE_TRANSLATION.fullmatch(normalized) is not None
         or normalized.startswith("tests/fixtures/user_metadata/")
     )

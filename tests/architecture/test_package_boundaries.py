@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import re
 import tomllib
 from pathlib import Path
 
@@ -250,13 +251,9 @@ def test_test_runtime_does_not_inject_workspace_source_directories() -> None:
     assert config["tool"]["pytest"]["ini_options"].get("pythonpath", []) == []
 
 
-def test_builtin_ui_package_owns_fake_only_unit_and_browser_suites() -> None:
+def test_builtin_ui_package_tests_remain_presentation_only() -> None:
     tests = PACKAGES["ui"] / "tests"
-    expected = {
-        tests / "test_fake_gateway.py",
-        tests / "test_html_contract.py",
-        tests / "test_browser.py",
-    }
+    expected = {tests / "test_static_host.py"}
     prohibited = (
         "alembic",
         "media_finder_core",
@@ -303,3 +300,44 @@ def test_builtin_ui_does_not_duplicate_concrete_module_translation_catalogs() ->
     duplicated = PACKAGES["ui"] / "src" / "media_finder_builtin_ui" / "module_translations"
 
     assert not tuple(duplicated.rglob("*.json"))
+
+
+def test_builtin_ui_browser_imports_are_presentation_only() -> None:
+    browser_source = PACKAGES["ui"] / "web" / "src"
+    allowed_packages = {
+        "@mantine/core",
+        "@mantine/hooks",
+        "@tanstack/react-query",
+        "@testing-library/react",
+        "@testing-library/user-event",
+        "axe-core",
+        "i18next",
+        "msw",
+        "openapi-fetch",
+        "react",
+        "react-dom",
+        "react-i18next",
+        "react-router",
+        "vitest",
+    }
+    import_pattern = re.compile(
+        r"(?:from\s+|import\s*\()(?P<quote>['\"])(?P<module>[^'\"]+)(?P=quote)"
+    )
+    violations: list[str] = []
+
+    sources = sorted((*browser_source.rglob("*.ts"), *browser_source.rglob("*.tsx")))
+    assert sources, "the built-in browser client source is missing"
+    for path in sources:
+        for match in import_pattern.finditer(path.read_text(encoding="utf-8")):
+            imported = match.group("module")
+            if imported.startswith((".", "/")):
+                continue
+            package = (
+                "/".join(imported.split("/")[:2])
+                if imported.startswith("@")
+                else imported.split("/")[0]
+            )
+            if package not in allowed_packages:
+                violations.append(f"{path.relative_to(ROOT)}:{imported}")
+
+    assert violations == []

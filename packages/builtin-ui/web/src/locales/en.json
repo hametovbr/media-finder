@@ -1,0 +1,84 @@
+{
+  "appName": "Media Finder",
+  "navigation": {
+    "label": "Primary navigation",
+    "open": "Open navigation",
+    "catalog": "Catalog",
+    "add": "Add title"
+  },
+  "locale": {
+    "switchToEnglish": "English",
+    "switchToRussian": "Русский"
+  },
+  "routes": {
+    "catalog": "Catalog",
+    "add": "Add title",
+    "overview": "Media overview",
+    "releases": "Find release",
+    "loading": "Loading page",
+    "notFound": "Page not found",
+    "notFoundDescription": "This page is not part of the current interface."
+  },
+  "session": {
+    "loading": "Loading session"
+  },
+  "catalog": {
+    "all": "All",
+    "empty": "No media items found.",
+    "filters": "Catalog collections",
+    "loadMore": "Load more",
+    "loading": "Loading catalog",
+    "pendingReconciliation": "Pending — may require manual reconciliation",
+    "uncategorized": "Uncategorized"
+  },
+  "detail": {
+    "empty": "No overview is available for this item.",
+    "loading": "Loading media item"
+  },
+  "metadata": {
+    "confirm": "Confirm selection",
+    "confirmDescription": "This title is similar to an existing catalog item. Save it anyway?",
+    "confirmTitle": "Confirm similar title",
+    "loadingProviders": "Loading metadata providers",
+    "save": "Save to catalog",
+    "saved": "Saved to catalog",
+    "search": "Search",
+    "title": "Title",
+    "viewItem": "View item"
+  },
+  "release": {
+    "chooseDestination": "Choose a destination",
+    "confirm": "Confirm acquisition",
+    "destination": "Destination",
+    "query": "Release query",
+    "results": "Release results",
+    "search": "Search releases",
+    "seeders": "seeders"
+  },
+  "mediaKind": {
+    "movie": "Movie",
+    "series": "Series"
+  },
+  "acquisition": {
+    "failed": "Failed",
+    "pending": "Pending",
+    "submitted": "Submitted"
+  },
+  "errors": {
+    "confirmation_required": "Review and confirm this selection.",
+    "csrf_invalid": "The request could not be verified. Refresh and try again.",
+    "download_destination_unavailable": "The selected destination is no longer available.",
+    "internal_error": "Media Finder could not complete the request.",
+    "json_required": "The server requires a JSON request.",
+    "media_item_not_found": "The requested media item was not found.",
+    "metadata_unavailable": "Metadata for this item is no longer available.",
+    "release_search_token_expired": "The release search expired. Search again.",
+    "release_selection_invalid": "The selected release is no longer valid.",
+    "request_body_invalid": "The request data is invalid.",
+    "request_invalid": "The request is invalid.",
+    "requestId": "Request ID: {{requestId}}",
+    "selection_expired": "The selection expired. Search again.",
+    "session_invalid": "Your browser session is no longer valid.",
+    "unexpected_response": "The server returned an unexpected response."
+  }
+}

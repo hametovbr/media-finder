@@ -33,7 +33,11 @@ def _valid_snapshot(verifier: ModuleType) -> object:
         distributions=distributions,
         existing_forbidden_paths=(),
         pth_files=(),
-        available_resources=verifier.REQUIRED_RESOURCES,
+        available_resources=verifier.REQUIRED_RESOURCES
+        | {
+            "media_finder_builtin_ui/static/assets/index-fixture.js",
+            "media_finder_builtin_ui/static/assets/index-fixture.css",
+        },
         migration_head="0001_clean_core",
         application_processes=("1",),
     )
@@ -127,6 +131,39 @@ def test_runtime_snapshot_requires_every_packaged_resource() -> None:
     )
 
     with pytest.raises(verifier.VerificationError, match="missing packaged resources"):
+        verifier.validate_runtime_snapshot(invalid)
+
+
+def test_runtime_snapshot_requires_hashed_spa_assets() -> None:
+    verifier = _load_verifier()
+    snapshot = _valid_snapshot(verifier)
+    invalid = verifier.RuntimeSnapshot(
+        **{
+            **vars(snapshot),
+            "available_resources": frozenset(
+                resource
+                for resource in snapshot.available_resources
+                if not resource.endswith(".css")
+            ),
+        }
+    )
+
+    with pytest.raises(verifier.VerificationError, match="missing packaged UI asset"):
+        verifier.validate_runtime_snapshot(invalid)
+
+
+def test_runtime_snapshot_rejects_legacy_ui_resources() -> None:
+    verifier = _load_verifier()
+    snapshot = _valid_snapshot(verifier)
+    invalid = verifier.RuntimeSnapshot(
+        **{
+            **vars(snapshot),
+            "available_resources": snapshot.available_resources
+            | {"media_finder_builtin_ui/templates/base.html"},
+        }
+    )
+
+    with pytest.raises(verifier.VerificationError, match="legacy UI resource"):
         verifier.validate_runtime_snapshot(invalid)
 
 

@@ -14,7 +14,7 @@ from datetime import datetime
 import httpx
 import uvicorn
 from fastapi import FastAPI
-from media_finder_builtin_ui import BuiltinUIOptions, create_builtin_ui
+from media_finder_builtin_ui import create_builtin_ui
 from media_finder_core import ModuleRuntime
 from media_finder_core.acquisition import ReleaseSelectionCache, ReleaseSelectionService
 from media_finder_core.catalog import MetadataRetentionService
@@ -211,15 +211,7 @@ def _build_resources(
         database_engine=engine,
         sessions=sessions,
     )
-    ui_app = (
-        create_builtin_ui(
-            gateway=gateway,
-            security=security,
-            options=BuiltinUIOptions(secure_cookie=configuration.secure_cookie),
-        )
-        if configuration.ui_mode == "builtin"
-        else None
-    )
+    ui_app = create_builtin_ui() if configuration.ui_mode == "builtin" else None
     return ApplicationResources(
         configuration=configuration,
         engine=engine,

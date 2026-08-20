@@ -96,19 +96,20 @@ def test_root_pytest_discovers_sdk_and_module_suites_but_not_isolated_ui_tests()
 
 def test_builtin_ui_owns_packaged_presentation_resources() -> None:
     package = UI_ROOT / "src" / "media_finder_builtin_ui"
-    expected = {
-        package / "templates" / "base.html",
-        package / "static" / "ui.js",
-        package / "locales" / "en" / "LC_MESSAGES" / "messages.mo",
-        package / "locales" / "ru" / "LC_MESSAGES" / "messages.mo",
-    }
+    expected = {package / "static" / "index.html"}
 
     assert all(path.is_file() for path in expected)
+    assert tuple((package / "static" / "assets").glob("index-*.js"))
+    assert tuple((package / "static" / "assets").glob("index-*.css"))
+    assert not (package / "templates").exists()
+    assert not (package / "locales").exists()
 
 
 def test_builtin_ui_has_no_backend_or_persistence_imports() -> None:
     package = UI_ROOT / "src" / "media_finder_builtin_ui"
     prohibited = (
+        "babel",
+        "jinja2",
         "media_finder",
         "sqlalchemy",
         "alembic",

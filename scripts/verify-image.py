@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
 from importlib import import_module, metadata, resources
+from importlib.resources.abc import Traversable
 from pathlib import Path
 
 EXPECTED_DISTRIBUTIONS = {
@@ -19,30 +21,7 @@ RUNTIME_SITE_PACKAGES = Path("/opt/venv/lib/python3.13/site-packages")
 FORBIDDEN_SOURCE_PATHS = (Path("/build"), Path("/app/apps"), Path("/app/packages"))
 REQUIRED_RESOURCES = frozenset(
     {
-        "media_finder_builtin_ui/templates/about.html",
-        "media_finder_builtin_ui/templates/add.html",
-        "media_finder_builtin_ui/templates/base.html",
-        "media_finder_builtin_ui/templates/catalog.html",
-        "media_finder_builtin_ui/templates/detail.html",
-        "media_finder_builtin_ui/templates/manual_editor.html",
-        "media_finder_builtin_ui/templates/release.html",
-        "media_finder_builtin_ui/templates/settings.html",
-        "media_finder_builtin_ui/templates/fragments/acquisition_retry.html",
-        "media_finder_builtin_ui/templates/fragments/acquisitions.html",
-        "media_finder_builtin_ui/templates/fragments/destinations.html",
-        "media_finder_builtin_ui/templates/fragments/manual_confirmation.html",
-        "media_finder_builtin_ui/templates/fragments/manual_json_form.html",
-        "media_finder_builtin_ui/templates/fragments/provider_results.html",
-        "media_finder_builtin_ui/templates/fragments/release_results.html",
-        "media_finder_builtin_ui/templates/fragments/similarity_warning.html",
-        "media_finder_builtin_ui/static/axe.min.js",
-        "media_finder_builtin_ui/static/base.css",
-        "media_finder_builtin_ui/static/favicon.svg",
-        "media_finder_builtin_ui/static/htmx.min.js",
-        "media_finder_builtin_ui/static/manual-editor.js",
-        "media_finder_builtin_ui/static/ui.js",
-        "media_finder_builtin_ui/locales/en/LC_MESSAGES/messages.mo",
-        "media_finder_builtin_ui/locales/ru/LC_MESSAGES/messages.mo",
+        "media_finder_builtin_ui/static/index.html",
         "media_finder_metadata_manual/module.toml",
         "media_finder_metadata_manual/fixtures/conformance.json",
         "media_finder_metadata_tmdb/module.toml",
@@ -59,6 +38,26 @@ REQUIRED_RESOURCES = frozenset(
         "media_finder_core/_migration_resources/alembic.ini",
         "media_finder_core/_migration_resources/alembic/env.py",
         "media_finder_core/_migration_resources/alembic/versions/0001_clean_core.py",
+    }
+)
+REQUIRED_UI_ASSET_PATTERNS = frozenset(
+    {
+        "media_finder_builtin_ui/static/assets/index-*.css",
+        "media_finder_builtin_ui/static/assets/index-*.js",
+    }
+)
+FORBIDDEN_UI_RESOURCE_PREFIXES = (
+    "media_finder_builtin_ui/locales/",
+    "media_finder_builtin_ui/templates/",
+)
+FORBIDDEN_UI_RESOURCES = frozenset(
+    {
+        "media_finder_builtin_ui/static/axe.min.js",
+        "media_finder_builtin_ui/static/base.css",
+        "media_finder_builtin_ui/static/favicon.svg",
+        "media_finder_builtin_ui/static/htmx.min.js",
+        "media_finder_builtin_ui/static/manual-editor.js",
+        "media_finder_builtin_ui/static/ui.js",
     }
 )
 
@@ -118,6 +117,22 @@ def validate_runtime_snapshot(snapshot: RuntimeSnapshot) -> None:
         raise VerificationError(
             f"missing packaged resources: {', '.join(sorted(missing_resources))}"
         )
+    missing_assets = {
+        pattern
+        for pattern in REQUIRED_UI_ASSET_PATTERNS
+        if not any(fnmatchcase(resource, pattern) for resource in snapshot.available_resources)
+    }
+    if missing_assets:
+        raise VerificationError(f"missing packaged UI asset: {', '.join(sorted(missing_assets))}")
+    legacy_resources = {
+        resource
+        for resource in snapshot.available_resources
+        if resource in FORBIDDEN_UI_RESOURCES or resource.startswith(FORBIDDEN_UI_RESOURCE_PREFIXES)
+    }
+    if legacy_resources:
+        raise VerificationError(
+            f"legacy UI resource remains packaged: {', '.join(sorted(legacy_resources))}"
+        )
     if snapshot.migration_head != "0001_clean_core":
         raise VerificationError(f"unexpected migration head: {snapshot.migration_head}")
     if len(snapshot.application_processes) != 1:
@@ -141,6 +156,23 @@ def discover_application_processes(proc_root: Path = Path("/proc")) -> tuple[str
     return tuple(sorted(processes, key=int))
 
 
+def discover_package_resources(package_name: str) -> frozenset[str]:
+    """Return every packaged file below one importlib resource root."""
+
+    discovered: set[str] = set()
+
+    def visit(node: Traversable, relative: str = "") -> None:
+        for child in node.iterdir():
+            child_relative = f"{relative}/{child.name}" if relative else child.name
+            if child.is_dir():
+                visit(child, child_relative)
+            elif child.is_file():
+                discovered.add(f"{package_name}/{child_relative}")
+
+    visit(resources.files(package_name))
+    return frozenset(discovered)
+
+
 def collect_runtime_snapshot() -> RuntimeSnapshot:
     distributions = []
     for distribution_name, module_name in EXPECTED_DISTRIBUTIONS.items():
@@ -157,7 +189,7 @@ def collect_runtime_snapshot() -> RuntimeSnapshot:
             )
         )
 
-    available_resources = set()
+    available_resources = set(discover_package_resources("media_finder_builtin_ui"))
     for resource in REQUIRED_RESOURCES:
         package_name, _, relative_path = resource.partition("/")
         if resources.files(package_name).joinpath(relative_path).is_file():
