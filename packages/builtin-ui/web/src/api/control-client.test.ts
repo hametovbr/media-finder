@@ -57,6 +57,28 @@ describe("ControlClient", () => {
     });
   });
 
+  it("serializes optional Prowlarr indexer identifiers in release searches", async () => {
+    const requests: unknown[] = [];
+    server.use(
+      http.post(
+        `${baseUrl}/v1/media-items/:itemId/release-searches`,
+        async ({ request }) => {
+          requests.push(await request.json());
+          return HttpResponse.json([]);
+        },
+      ),
+    );
+    const client = createControlClient({ baseUrl });
+
+    await client.searchReleases("item-1", "Arrival", [7, 12]);
+    await client.searchReleases("item-1", "Arrival");
+
+    expect(requests).toEqual([
+      { indexer_ids: [7, 12], query: "Arrival" },
+      { indexer_ids: [], query: "Arrival" },
+    ]);
+  });
+
   it("forwards request cancellation", async () => {
     server.use(
       http.get(`${baseUrl}/v1/session`, async () => {

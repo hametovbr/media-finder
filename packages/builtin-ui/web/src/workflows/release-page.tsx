@@ -10,7 +10,7 @@ import {
   Title,
 } from "@mantine/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 
@@ -22,25 +22,37 @@ import { createAcquisitionAttempt } from "./acquisition-attempt";
 type ReleaseResult = components["schemas"]["ReleaseSearchResult"];
 type Acquisition = components["schemas"]["AcquisitionView"];
 
+function parseIndexerIds(value: string): number[] | null {
+  if (value.trim().length === 0) return [];
+  const parts = value.split(",").map((part) => part.trim());
+  if (parts.some((part) => !/^\d+$/.test(part))) return null;
+  const values = parts.map(Number);
+  return values.every(Number.isSafeInteger) ? values : null;
+}
+
 export function ReleasePage() {
   const { client } = useControl();
   const { t } = useTranslation();
   const { itemId = "" } = useParams();
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
+  const [indexerIds, setIndexerIds] = useState("");
+  const [indexerIdsInvalid, setIndexerIdsInvalid] = useState(false);
   const [results, setResults] = useState<ReleaseResult[]>([]);
   const [releaseToken, setReleaseToken] = useState<string | null>(null);
   const [destination, setDestination] = useState("");
   const [feedbackCode, setFeedbackCode] = useState<string | null>(null);
   const [acquisition, setAcquisition] = useState<Acquisition | null>(null);
   const searchMutation = useMutation({
-    mutationFn: () => client.searchReleases(itemId, query.trim()),
+    mutationFn: (selectedIndexerIds: number[]) =>
+      client.searchReleases(itemId, query.trim(), selectedIndexerIds),
     onSuccess: (values) => {
       setResults(values);
       setReleaseToken(null);
       setDestination("");
       setFeedbackCode(null);
       setAcquisition(null);
+      setIndexerIdsInvalid(false);
     },
   });
   const destinationsQuery = useQuery({
@@ -74,9 +86,19 @@ export function ReleasePage() {
     },
   });
 
+  useEffect(() => {
+    if (destinationsQuery.isError) setDestination("");
+  }, [destinationsQuery.isError]);
+
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
-    if (query.trim().length > 0) searchMutation.mutate();
+    const selectedIndexerIds = parseIndexerIds(indexerIds);
+    if (selectedIndexerIds === null) {
+      setIndexerIdsInvalid(true);
+      return;
+    }
+    setIndexerIdsInvalid(false);
+    if (query.trim().length > 0) searchMutation.mutate(selectedIndexerIds);
   };
   const confirm = async () => {
     if (releaseToken === null || destination.length === 0) return;
@@ -106,6 +128,18 @@ export function ReleasePage() {
             role="searchbox"
             value={query}
           />
+          <TextInput
+            description={t("release.indexerIdsDescription")}
+            error={
+              indexerIdsInvalid ? t("errors.release_filter_invalid") : undefined
+            }
+            label={t("release.indexerIds")}
+            onChange={(event) => {
+              setIndexerIds(event.currentTarget.value);
+              setIndexerIdsInvalid(false);
+            }}
+            value={indexerIds}
+          />
           <Button loading={searchMutation.isPending} type="submit">
             {t("release.search")}
           </Button>
@@ -116,6 +150,18 @@ export function ReleasePage() {
           {t(`errors.${feedbackCode}`, {
             defaultValue: t("errors.unexpected_response"),
           })}
+        </Text>
+      )}
+      {destinationsQuery.isError && (
+        <Text role="alert">
+          {t(
+            `errors.${
+              destinationsQuery.error instanceof ControlFailure
+                ? destinationsQuery.error.code
+                : "unexpected_response"
+            }`,
+            { defaultValue: t("errors.unexpected_response") },
+          )}
         </Text>
       )}
       {results.length > 0 && (
@@ -138,22 +184,28 @@ export function ReleasePage() {
           </Stack>
         </Radio.Group>
       )}
-      {releaseToken !== null && destinationsQuery.data !== undefined && (
-        <NativeSelect
-          data={[
-            { label: t("release.chooseDestination"), value: "" },
-            ...destinationsQuery.data.map((value) => ({
-              label: value.label,
-              value: value.key,
-            })),
-          ]}
-          label={t("release.destination")}
-          onChange={(event) => setDestination(event.currentTarget.value)}
-          value={destination}
-        />
-      )}
+      {releaseToken !== null &&
+        !destinationsQuery.isError &&
+        destinationsQuery.data !== undefined && (
+          <NativeSelect
+            data={[
+              { label: t("release.chooseDestination"), value: "" },
+              ...destinationsQuery.data.map((value) => ({
+                label: value.label,
+                value: value.key,
+              })),
+            ]}
+            label={t("release.destination")}
+            onChange={(event) => setDestination(event.currentTarget.value)}
+            value={destination}
+          />
+        )}
       <Button
-        disabled={releaseToken === null || destination.length === 0}
+        disabled={
+          releaseToken === null ||
+          destination.length === 0 ||
+          destinationsQuery.isError
+        }
         loading={submissionMutation.isPending}
         onClick={() => void confirm()}
       >

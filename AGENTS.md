@@ -72,6 +72,37 @@ turn; never chain proposal into apply or apply into archive. A completed apply
 reports status and stops. Archive requires a separate user request and may
 perform only the inline sync required by its own workflow.
 
+### Work-item completion
+
+Phase completion is not overall work completion. A terminal OpenSpec handoff
+MUST report the phase completed, the overall work status, and the next required
+action or authorization. Until every applicable gate below succeeds, overall
+work remains incomplete or blocked and MUST NOT be described as complete:
+
+1. approved implementation and pre-archive verification;
+2. canonical specification synchronization for every applicable delta;
+3. archive of every completed active change;
+4. one cohesive squashed commit or a small set of logically separated commits;
+5. exact-candidate local verification and a clean worktree;
+6. push of a non-`main` branch and creation of a pull request;
+7. successful required checks and review for the exact pull-request head;
+8. merge of that verified result and confirmation that the delivered result is
+   present on `main`.
+
+Do not finalize or publish a delivery commit that omits an applicable canonical
+specification synchronization or archive. When delta specs exist, selecting an
+archive path that skips synchronization cannot satisfy overall completion.
+After a separately authorized archive succeeds, continue the already requested
+commit, push, pull-request, check, review, and merge sequence without another
+completion handoff unless the user narrows or stops it or an external gate
+blocks progress.
+
+For a behavior-neutral change that legitimately bypasses OpenSpec, report
+OpenSpec closure as not applicable rather than silently omitting it. Commit,
+push, pull-request verification, merge, and post-merge confirmation remain
+mandatory. Failed, pending, skipped, stale-SHA, unavailable, or unconfirmed
+evidence is blocking evidence, never a pass.
+
 Direct OpenSpec CLI commands do not replace lifecycle skills. Before creating or
 revising each planning artifact, fetch and follow its current
 `openspec instructions <artifact> --change <name> --json` response. Treat

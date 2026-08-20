@@ -1,25 +1,4 @@
-# Bilingual Web UI Specification
-
-## Purpose
-
-Define an accessible bilingual, bundled browser interface that manages the supported catalog-to-Acquisition workflow exclusively through the same-origin control API.
-
-## Requirements
-
-### Requirement: Same-origin control client
-The built-in interface SHALL bootstrap its browser session and execute its catalog, metadata, release, destination, and Acquisition workflows exclusively through the same-origin `/api/control/v1` JSON contract. It SHALL send the session CSRF token and JSON media type on mutations, SHALL NOT call the processor `/api/v1` surface, and SHALL NOT receive a processor integration token, backend service, repository, database object, or concrete integration instance.
-
-#### Scenario: Bootstrap the built-in client
-- **WHEN** a browser opens the built-in interface without an existing valid session
-- **THEN** the interface obtains its supported locales, selected locale preferences, and CSRF token from `/api/control/v1/session` while the signed session cookie remains HttpOnly
-
-#### Scenario: Submit a protected mutation
-- **WHEN** the user confirms metadata selection or Acquisition submission
-- **THEN** the interface sends same-origin JSON with the current session CSRF token and the backend applies the existing control-contract behavior
-
-#### Scenario: Inspect browser traffic
-- **WHEN** the critical built-in workflow is exercised in a browser
-- **THEN** no request targets `/api/v1` and no processor Bearer credential is present in browser state or traffic
+## MODIFIED Requirements
 
 ### Requirement: Supported built-in workflow
 The built-in interface SHALL expose catalog browsing, read-only collection filtering, media overview, metadata-provider search and explicit selection, release search and explicit selection, live destination selection, and idempotent Acquisition submission. It SHALL NOT expose Manual create, edit, import, or episode CSV controls; collection or media-item mutation controls; Acquisition history or reconciliation controls; integration diagnostics; Settings; or About. The omitted workflows SHALL remain available through their unchanged browser control API operations for future interfaces and later increments.
@@ -31,21 +10,6 @@ The built-in interface SHALL expose catalog browsing, read-only collection filte
 #### Scenario: Open an omitted secondary route
 - **WHEN** a user navigates to a removed route for Manual editing, Settings, diagnostics, About, or Acquisition reconciliation
 - **THEN** the client presents localized not-found feedback and does not invoke a legacy HTML handler or mutate state
-
-### Requirement: Responsive catalog shell
-The UI SHALL provide a desktop-first responsive shell with read-only collection navigation, `Uncategorized`, an add-title action, and a poster-grid main view. Desktop navigation SHALL remain visible beside the catalog, while a mobile viewport SHALL expose the same navigation through a keyboard-operable dismissible drawer without horizontal page overflow.
-
-#### Scenario: Browse a collection
-- **WHEN** a user selects an existing collection
-- **THEN** the main view shows its active media cards in a responsive poster grid
-
-#### Scenario: Browse on a mobile viewport
-- **WHEN** a user opens and closes catalog navigation on a supported mobile viewport
-- **THEN** focus moves predictably, every supported navigation action remains available, and the document does not require horizontal scrolling
-
-#### Scenario: Poster artwork is absent or cannot load
-- **WHEN** a catalog item has no normalized poster artwork or its external image fails
-- **THEN** its card retains a stable poster-shaped local placeholder without requesting a remote fallback asset
 
 ### Requirement: Informative media cards
 Each media card SHALL show title, year, media type, metadata provider, and the latest Acquisition state as `pending`, `submitted`, or `failed` when an attempt exists. A `pending` card SHALL indicate that manual reconciliation may be required and SHALL NOT imply client download progress. Cards SHALL NOT display download progress for any state.
@@ -99,36 +63,6 @@ The release-search UI SHALL accept a free query and optional Prowlarr indexer id
 - **WHEN** a caller attempts to archive or restore a download-client instance through a former UI route
 - **THEN** the request is rejected because the environment-owned qBittorrent identity has no user-managed lifecycle
 
-### Requirement: Localized and accessible interaction
-All human-readable UI text SHALL be localizable in English and Russian. For an API or domain error, the UI SHALL select a localized human-readable message by its stable invariant machine error code. Machine error codes SHALL remain language-neutral, stable, and byte-for-byte unchanged across locales and SHALL never be translated. Critical flows SHALL support keyboard navigation, visible focus, associated labels, and semantic status feedback.
-
-#### Scenario: Switch interface language
-- **WHEN** a user selects Russian
-- **THEN** subsequent UI pages use Russian localization while developer documentation and persisted provider identifiers remain unchanged
-
-#### Scenario: Complete add flow by keyboard
-- **WHEN** a keyboard-only user adds and confirms an item
-- **THEN** every required control is reachable and the result is announced through semantic feedback
-
-#### Scenario: Localize an error message
-- **WHEN** the same stable machine error code is presented in English and Russian UI locales
-- **THEN** the human-readable message uses the selected locale while the machine error code is identical in both responses and diagnostic context
-
-#### Scenario: Unknown machine error code
-- **WHEN** the UI receives an unrecognized stable machine error code
-- **THEN** it displays a localized generic safe error message while retaining the unchanged code for diagnostics
-
-### Requirement: External-auth trust and CSRF protection
-The UI SHALL maintain no user-account database and SHALL rely on external reverse-proxy authentication when exposed beyond localhost. Mutating UI requests SHALL require a valid signed session and CSRF token. Session cookies SHALL be `HttpOnly`, `SameSite=Lax`, and configurable as `Secure` for HTTPS.
-
-#### Scenario: Missing CSRF token
-- **WHEN** a browser submits a mutating UI request without a valid CSRF token
-- **THEN** the system rejects the request without applying changes
-
-#### Scenario: HTTPS deployment
-- **WHEN** the operator enables secure-cookie mode behind an HTTPS reverse proxy
-- **THEN** the session cookie includes the `Secure` attribute
-
 ### Requirement: Independently buildable built-in interface
 The bundled interface SHALL be delivered as a separately buildable package whose browser source consumes the deterministic public control OpenAPI contract and presentation libraries only. It SHALL NOT require database, persistence-model, domain-service, runtime-integration, metadata-provider, download-client, backend repository, or processor SDK imports. Its deterministic development mode SHALL render the supported built-in workflow, English and Russian states, responsive layouts, and safe errors with typed fake HTTP responses and no database or external integration.
 
@@ -162,3 +96,8 @@ The built-in interface SHALL preserve GET navigation for `/`, `/add`, `/items/{i
 #### Scenario: Compare built-in and control behavior
 - **WHEN** a supported built-in workflow and a direct browser control request perform the same catalog, metadata, release, or Acquisition operation
 - **THEN** both use the same browser control endpoint and produce the same state transition and invariant machine error code
+
+## RENAMED Requirements
+
+- FROM: `### Requirement: Initial replacement workflow`
+- TO: `### Requirement: Supported built-in workflow`

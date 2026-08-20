@@ -69,6 +69,7 @@ export interface ControlClient {
   searchReleases(
     itemId: string,
     query: string,
+    indexerIds?: number[],
     signal?: AbortSignal,
   ): Promise<ReleaseSearchResult[]>;
   listDownloadDestinations(
@@ -258,12 +259,13 @@ export function createControlClient(
   async function searchReleases(
     itemId: string,
     query: string,
+    indexerIds: number[] = [],
     signal?: AbortSignal,
   ): Promise<ReleaseSearchResult[]> {
     const { data, error, response } = await api.POST(
       "/v1/media-items/{item_id}/release-searches",
       {
-        body: { indexer_ids: [], query },
+        body: { indexer_ids: indexerIds, query },
         params: { path: { item_id: itemId } },
         signal,
       },

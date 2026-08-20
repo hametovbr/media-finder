@@ -12,6 +12,7 @@ dependencies = [
 [dependency-groups]
 test = [
   "httpx>=0.28,<1",
+  "httpx2>=2,<3",
   "playwright>=1.55,<2",
   "pytest>=9.0.3,<10",
 ]
@@ -25,7 +26,4 @@ packages = ["src/media_finder_builtin_ui"]
 
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers"
-filterwarnings = [
-  "error",
-  "ignore:Using `httpx` with `starlette\\.testclient` is deprecated; install `httpx2` instead\\.:starlette.exceptions.StarletteDeprecationWarning:fastapi\\.testclient",
-]
+filterwarnings = ["error"]

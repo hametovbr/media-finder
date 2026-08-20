@@ -56,3 +56,8 @@ the requirement needs.
 End with Critical/Important counts, scenario coverage, proportional verification,
 auxiliary-complexity result, unresolved evidence, and a clear merge yes/no. A
 green suite does not override an ownership, contract, or necessity failure.
+
+A merge-ready review verdict is not overall work completion. Report the review
+verdict and overall work status separately. A locally acceptable implementation
+is still merge NO-GO while applicable OpenSpec closure, exact-candidate pull
+request checks or review, merge, or post-merge confirmation remains outstanding.

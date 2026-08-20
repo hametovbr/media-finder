@@ -62,5 +62,16 @@ reverse order, including partial-construction failure.
 Report the scenario implemented, RED and GREEN evidence, removed path, remaining
 tasks, exact HEAD/worktree state, and any unavailable verification. Never call a
 partial slice complete because the new API shape exists while production still
-uses the old owner. Apply is terminal for the current user turn: do not sync or
-archive. Suggest the separately authorized verification/archive action and stop.
+uses the old owner.
+
+When every apply task is done, use these distinct status fields:
+
+- `Implementation phase: complete`
+- `Overall work: incomplete`
+- `Next required authorization: verification/archive`
+
+Apply is terminal for the current user turn: do not sync, archive, commit a
+delivery candidate, push, or publish. Request the separately authorized
+verification/archive action and stop. Overall work cannot become complete until
+the applicable OpenSpec closure and protected-branch delivery gates in
+`AGENTS.md` finish.
