@@ -1,6 +1,6 @@
 [project]
 name = "media-finder-metadata-tmdb"
-version = "0.2.0"
+version = "0.3.0"
 description = "TMDB metadata provider module for Media Finder"
 requires-python = ">=3.13,<3.14"
 license = "MIT"

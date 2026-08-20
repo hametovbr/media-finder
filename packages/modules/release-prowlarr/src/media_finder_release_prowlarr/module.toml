@@ -1,6 +1,6 @@
 module_id = "prowlarr"
 module_kind = "release-provider"
-module_version = "0.2.0"
+module_version = "0.3.0"
 sdk_compatibility = ">=1,<2"
 contract_version = "1"
 name_key = "module.prowlarr.name"
