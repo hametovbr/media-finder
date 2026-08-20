@@ -24,27 +24,44 @@ Before calling an OpenSpec implementation complete or ready to archive:
    `openspec-update-change` and implementation/test defects to
    `openspec-apply-change`.
 4. Verification does not authorize sync or archive. Report readiness and stop;
-   `openspec-archive-change` requires a later user request.
+   `openspec-archive-change` requires a later user request. Use
+   `Verification phase: complete`, `Overall work: incomplete`, and name archive
+   with applicable canonical-spec synchronization as the next authorization.
+
+Do not finalize a delivery commit while an applicable change remains active or
+its delta differs from the canonical spec. After the separately authorized
+archive workflow returns successfully, continue ordinary publication unless the
+user narrowed or stopped it or an external gate blocks progress.
 
 ## Verify the candidate
 
-1. Record full HEAD, branch/ref, worktree and index status, tool versions, and the
+1. Confirm applicable OpenSpec changes are synchronized and archived. Inspect
+   the complete diff and shape it on a non-`main` branch as one cohesive squashed
+   commit or a small set of logically separated commits. Remove incidental WIP
+   history before treating the branch as the final candidate; rewrite only the
+   task-owned branch and use lease-protected force updates if it was already
+   pushed.
+2. Record full HEAD, branch/ref, worktree and index status, tool versions, and the
    exact command before running it.
-2. Run proportional local gates required by the affected OpenSpec task. Record
+3. Run proportional local gates required by the affected OpenSpec task. Record
    exit codes and counts. Report unavailable network, browser, Docker, credentials,
    permissions, or platform coverage as `not run` or `blocked`, never passed. Do
    not filter gate output through a pipeline unless `pipefail` preserves the
    originating command's status.
-3. Recheck HEAD and cleanliness after verification. Generated or uncommitted
+4. Recheck HEAD and cleanliness after verification. Generated or uncommitted
    changes create a different candidate and invalidate completion claims.
-4. Commit intentionally and push the exact branch. Open a PR with scope,
+5. Push the exact non-`main` branch and open or update a PR with scope,
    verification, limitations, compatibility/rollback, and release impact.
-5. Inspect all seven required `verification/*` checks and confirm each completed
-   successfully for the PR head SHA. Do not substitute an arbitrary green run or
-   hearsay status.
+6. Inspect all seven required `verification/*` checks and required review for the
+   exact pull-request head SHA. Confirm every requirement completed successfully;
+   failed, pending, skipped, stale-head, or unavailable evidence blocks merge. A
+   head change invalidates earlier checks and review and restarts this step.
 
-Merge only the verified head after required review. Record merge commit and
-confirm `main`/edge publication for that commit when the workflow requires it.
+Merge only the verified head after required review. Fetch the resulting `main`,
+identify the delivered commit produced by the repository's merge strategy, and
+confirm it is reachable from `main`. Record the PR head, delivered commit, and
+merge result; confirm `main`/edge publication for that commit when the workflow
+requires it.
 
 ## Prepare a stable release
 
@@ -82,6 +99,9 @@ SemVer release.
 ## Final handoff
 
 For ordinary changes, report exact commit SHA/ref, commands and counts, unavailable
-evidence, push/PR state, and worktree status. For releases, also report release
+evidence, push/PR state, exact-head checks/review, merge result, `main` ancestry,
+and worktree status. Use `Overall work: complete` only after the delivered result
+is confirmed on `main`; otherwise use `Overall work: incomplete` or `Overall
+work: blocked` and name the unresolved gate. For releases, also report release
 URL, tag, image tags/digests/platforms, workflow and check URLs, and migration
 warnings.

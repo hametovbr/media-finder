@@ -90,3 +90,50 @@ def test_openspec_phase_authorization_guards_are_repeated_at_execution_boundarie
     assert "Apply is terminal for the current user turn" in development
     assert "Verification does not authorize sync or archive" in publication
     assert "not a lifecycle entry point" in download_client
+
+
+def test_agents_requires_complete_openspec_and_protected_branch_delivery() -> None:
+    instructions = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    normalized = " ".join(instructions.split())
+
+    assert "Phase completion is not overall work completion" in normalized
+    assert "canonical specification synchronization" in normalized
+    assert "archive of every completed active change" in normalized
+    assert (
+        "one cohesive squashed commit or a small set of logically separated commits" in normalized
+    )
+    assert "push of a non-`main` branch" in normalized
+    assert "required checks and review for the exact pull-request head" in normalized
+    assert "confirmation that the delivered result is present on `main`" in normalized
+    assert "overall work remains incomplete or blocked" in normalized
+    assert "OpenSpec closure as not applicable" in normalized
+
+
+def test_development_handoff_cannot_overstate_overall_completion() -> None:
+    development = (SKILLS / "developing-media-finder-changes" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Implementation phase: complete" in development
+    assert "Overall work: incomplete" in development
+
+
+def test_review_verdict_cannot_overstate_overall_completion() -> None:
+    review = (SKILLS / "reviewing-media-finder-changes" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "A merge-ready review verdict is not overall work completion" in review
+
+
+def test_publication_handoff_requires_exact_candidate_through_main() -> None:
+    publication = (SKILLS / "verifying-and-publishing-media-finder" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    normalized = " ".join(publication.split())
+
+    assert (
+        "one cohesive squashed commit or a small set of logically separated commits" in normalized
+    )
+    assert "non-`main` branch" in normalized
+    assert "exact pull-request head SHA" in normalized
+    assert "reachable from `main`" in normalized
+    assert "Overall work: complete" in normalized

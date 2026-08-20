@@ -2,6 +2,7 @@
 dev = [
   "hatchling==1.32.0",
   "httpx>=0.28,<1",
+  "httpx2>=2,<3",
   "media-finder",
   "mypy>=1.17,<2",
   "playwright>=1.55,<2",
@@ -71,13 +72,7 @@ testpaths = [
   "packages/modules/download-qbittorrent/tests",
 ]
 pythonpath = []
-# Starlette 1.x still falls back to httpx while its test client migrates to the
-# separately distributed httpx2 package. Keep that single import-time boundary
-# tolerated while promoting every other warning to an error.
-filterwarnings = [
-  "error",
-  "ignore:Using `httpx` with `starlette\\.testclient` is deprecated; install `httpx2` instead\\.:starlette.exceptions.StarletteDeprecationWarning:fastapi\\.testclient",
-]
+filterwarnings = ["error"]
 
 [tool.coverage.run]
 branch = true
