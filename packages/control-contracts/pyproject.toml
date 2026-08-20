@@ -1,6 +1,6 @@
 [project]
 name = "media-finder-control-contracts"
-version = "0.2.0"
+version = "0.3.0"
 description = "Framework-independent browser control contracts for Media Finder"
 requires-python = ">=3.13,<3.14"
 license = "MIT"

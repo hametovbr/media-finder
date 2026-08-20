@@ -8,13 +8,13 @@
   ],
   "contract_version": "1",
   "environment": [],
-  "manifest_sha256": "6db9f59d0a9b24e348a3ef304a702820b1bc3002af2cf35e2f70e1bf4cc944c0",
+  "manifest_sha256": "62402df52ff1908f8220137a6f51fffb5e1264e30255d29ff0df33f4e23af3dd",
   "missing_configuration": {
     "applicable": false
   },
   "module_id": "manual",
   "module_kind": "metadata-provider",
-  "module_version": "0.2.0",
+  "module_version": "0.3.0",
   "redaction_markers": [
     "artifact-body",
     "environment-values",

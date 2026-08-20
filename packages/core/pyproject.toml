@@ -1,6 +1,6 @@
 [project]
 name = "media-finder-core"
-version = "0.2.0"
+version = "0.3.0"
 description = "Domain and application core for Media Finder"
 requires-python = ">=3.13,<3.14"
 license = "MIT"
