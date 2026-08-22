@@ -12,3 +12,4 @@ packages/builtin-ui/test-results/
 .superpowers/
 .DS_Store
 Thumbs.db
+.vscode/
