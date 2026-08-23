@@ -10,7 +10,7 @@ The production image is published at `ghcr.io/hametovbr/media-finder`. Start wit
 
 See the [operations guide](docs/operations.md) for secrets, Komodo or Docker Compose deployment, reverse-proxy authentication, networking, health checks, backups, upgrades, and rollback.
 
-TMDB, Prowlarr, and the single qBittorrent instance are configured only through their exact process environment variables. The Settings page is diagnostic and read-only; changing integration configuration requires recreating the container.
+TMDB, Prowlarr, and the single qBittorrent instance are configured only through their exact process environment variables. Changing integration configuration requires updating the environment and recreating the container.
 
 External FileFlows, n8n, and custom post-processors should follow the [processor integration guide](docs/processor-integration.md) for pinned metadata, naming, NFO, expiry, and safe error handling.
 
@@ -41,7 +41,7 @@ pnpm delivery:test
 pnpm delivery:validate
 ```
 
-Use the generated OpenSpec skills in `.agents/skills/` and follow [AGENTS.md](AGENTS.md). See [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change. The interactive low-fidelity [wireframe](docs/design/wireframe.html) records the intended MVP navigation without serving as production UI code.
+Use the generated OpenSpec skills in `.agents/skills/` and follow [AGENTS.md](AGENTS.md). See [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change.
 
 For implementation boundaries and extension work, see the
 [architecture guide](docs/architecture.md) and

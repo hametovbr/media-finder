@@ -17,12 +17,6 @@ importers:
       ajv-formats:
         specifier: 3.0.1
         version: 3.0.1(ajv@8.17.1)
-      axe-core:
-        specifier: 4.11.0
-        version: 4.11.0
-      htmx.org:
-        specifier: 2.0.10
-        version: 2.0.10
       smol-toml:
         specifier: 1.3.1
         version: 1.3.1
@@ -820,10 +814,6 @@ packages:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
     engines: {node: '>=12'}
 
-  axe-core@4.11.0:
-    resolution: {integrity: sha512-ilYanEU8vxxBexpJd8cWM4ElSQq4QctCLKih0TSfjIfCQTeyH/6zVrmIJfLPrKTKJRbiG+cfnZbQIjAlJmF1jQ==}
-    engines: {node: '>=4'}
-
   axe-core@4.13.0:
     resolution: {integrity: sha512-UzGt8zg7Ny8djbYMhxl2zuEevVa7r2gJjYY5Lwr1xM7+XU2nd6CkIWFTVcCIbAP63vSz71NaVyyuSk9lHKcy0A==}
     engines: {node: '>=4'}
@@ -1038,9 +1028,6 @@ packages:
 
   html-parse-stringify@4.0.1:
     resolution: {integrity: sha512-0zHsZJrK7S3K2aucXWL6ycoYJ/iNtIcFHC/nYQgFklPtrv5LpJctIiSCroWZWeuoXvuyFdzp6KzjJQ+OT5MfFw==}
-
-  htmx.org@2.0.10:
-    resolution: {integrity: sha512-kdeJe7ZVwaS6QMz/ebBIVtZdpwen6L0OQ5GOhPV9MKBb196TCZeZu4yA7ZIQsaLKv7EpXz+So7KSXNuHXhj7Cw==}
 
   https-proxy-agent@7.0.6:
     resolution: {integrity: sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==}
@@ -2393,8 +2380,6 @@ snapshots:
 
   assertion-error@2.0.1: {}
 
-  axe-core@4.11.0: {}
-
   axe-core@4.13.0: {}
 
   balanced-match@1.0.2: {}
@@ -2567,8 +2552,6 @@ snapshots:
       - '@noble/hashes'
 
   html-parse-stringify@4.0.1: {}
-
-  htmx.org@2.0.10: {}
 
   https-proxy-agent@7.0.6(supports-color@10.2.2):
     dependencies:
