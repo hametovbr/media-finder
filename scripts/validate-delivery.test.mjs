@@ -55,6 +55,28 @@ function mutate(root, relativePath, transform) {
   fs.writeFileSync(target, transform(fs.readFileSync(target, "utf8")), "utf8");
 }
 
+function ensureWebQualitySteps(value) {
+  if (
+    ["pnpm ui:format", "pnpm ui:lint", "pnpm ui:test"].every((command) =>
+      value.includes(`run: ${command}`),
+    )
+  ) {
+    return value;
+  }
+  const anchor = "      - name: Build frontend production assets\n        run: pnpm ui:build\n";
+  assert.ok(value.includes(anchor), "missing frontend production build step");
+  const steps = [
+    "      - name: Check built-in UI formatting",
+    "        run: pnpm ui:format",
+    "      - name: Lint built-in UI",
+    "        run: pnpm ui:lint",
+    "      - name: Test built-in UI",
+    "        run: pnpm ui:test",
+    "",
+  ].join("\n");
+  return value.replace(anchor, `${steps}${anchor}`);
+}
+
 function replaceDockerInstructionWithComment(value, instructionStart) {
   const start = value.indexOf(instructionStart);
   assert.notEqual(start, -1, `missing Docker instruction ${instructionStart}`);
@@ -239,6 +261,22 @@ test("frontend assets must be built before the built-in UI wheel", (context) => 
     /frontend production build must run before workspace wheels/,
   );
 });
+
+for (const [label, command, expected] of [
+  ["formatting", "pnpm ui:format", /python job must run pnpm ui:format/],
+  ["linting", "pnpm ui:lint", /python job must run pnpm ui:lint/],
+  ["unit tests", "pnpm ui:test", /python job must run pnpm ui:test/],
+]) {
+  test(`web quality verification requires built-in UI ${label}`, (context) => {
+    const root = copyDeliveryFixture();
+    context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    mutate(root, ".github/workflows/verify.yaml", (value) =>
+      ensureWebQualitySteps(value).replace(`run: ${command}`, "run: node --version"),
+    );
+
+    assert.match(validateDelivery(root).join("\n"), expected);
+  });
+}
 
 test("the production runtime image cannot contain a Node runtime", (context) => {
   const root = copyDeliveryFixture();
