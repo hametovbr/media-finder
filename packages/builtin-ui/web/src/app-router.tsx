@@ -19,6 +19,8 @@ import { sessionQueryKey } from "./api/control-provider";
 import styles from "./app-shell.module.css";
 import { CatalogPage } from "./catalog/catalog-page";
 import { MediaDetailPage } from "./catalog/media-detail-page";
+import { ManualAddPage } from "./manual/manual-add-page";
+import { ManualEditPage } from "./manual/manual-edit-page";
 import { MetadataPage } from "./workflows/metadata-page";
 import { ReleasePage } from "./workflows/release-page";
 
@@ -165,7 +167,9 @@ export const appRoutes: RouteObject[] = [
     children: [
       { index: true, element: <CatalogPage /> },
       { path: "add", element: <MetadataPage /> },
+      { path: "add/manual", element: <ManualAddPage /> },
       { path: "items/:itemId", element: <MediaDetailPage /> },
+      { path: "items/:itemId/edit", element: <ManualEditPage /> },
       {
         path: "items/:itemId/releases",
         element: <ReleasePage />,

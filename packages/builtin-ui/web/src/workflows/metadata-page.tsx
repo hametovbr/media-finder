@@ -32,7 +32,9 @@ export function MetadataPage() {
   const [savedItem, setSavedItem] = useState<MediaItem | null>(null);
   const [feedbackCode, setFeedbackCode] = useState<string | null>(null);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [mode, setMode] = useState<"provider" | null>(null);
   const providersQuery = useQuery({
+    enabled: mode === "provider",
     queryKey: ["control", "metadata-providers", session.ui_locale],
     queryFn: ({ signal }) => client.listMetadataProviders(signal),
   });
@@ -84,6 +86,23 @@ export function MetadataPage() {
   const providerKeys = Array.from(
     new Set(results.map((result) => result.provider_key)),
   );
+
+  if (mode === null) {
+    return (
+      <Stack gap="lg">
+        <Title order={1}>{t("routes.add")}</Title>
+        <Text>{t("metadata.choosePath")}</Text>
+        <Group>
+          <Button onClick={() => setMode("provider")}>
+            {t("metadata.chooseProvider")}
+          </Button>
+          <Button component={Link} to="/add/manual" variant="light">
+            {t("metadata.chooseManual")}
+          </Button>
+        </Group>
+      </Stack>
+    );
+  }
 
   if (providersQuery.isPending)
     return <Loader aria-label={t("metadata.loadingProviders")} />;

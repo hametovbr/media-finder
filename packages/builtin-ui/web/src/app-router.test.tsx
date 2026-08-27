@@ -36,6 +36,7 @@ async function renderRoute(path: string) {
       .fn()
       .mockResolvedValue({ items: [], next_cursor: null }),
     listMetadataProviders: vi.fn().mockResolvedValue([]),
+    searchMetadata: vi.fn().mockResolvedValue([]),
     listDownloadDestinations: vi.fn().mockResolvedValue([]),
     updateSession: vi.fn().mockImplementation(async ({ ui_locale }) => ({
       ...session,
@@ -66,6 +67,7 @@ describe("application routes", () => {
   it.each([
     ["/", "Catalog"],
     ["/add", "Add title"],
+    ["/add/manual", "Manual metadata"],
     ["/items/item-42", "Media overview"],
     ["/items/item-42/releases", "Find release"],
   ])("renders the supported bookmark %s", async (path, heading) => {
@@ -75,11 +77,32 @@ describe("application routes", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders localized not-found feedback for omitted and unknown routes", async () => {
-    await renderRoute("/settings");
+  it.each(["/settings", "/about"])(
+    "renders localized not-found feedback for omitted route %s",
+    async (path) => {
+      await renderRoute(path);
+      expect(
+        screen.getByRole("heading", { name: "Page not found" }),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it("requires an explicit provider or Manual choice without searching providers for Manual", async () => {
+    const user = userEvent.setup();
+    const { client } = await renderRoute("/add");
+
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Page not found" }),
+      screen.getByRole("button", { name: "Search metadata providers" }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("link", { name: "Enter or import Manual metadata" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Manual metadata" }),
     ).toBeInTheDocument();
+    expect(client.searchMetadata).not.toHaveBeenCalled();
   });
 
   it("keeps primary navigation visible and switches the session locale", async () => {

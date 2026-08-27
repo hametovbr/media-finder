@@ -11,7 +11,7 @@ import { createControlClient } from "../api/control-client";
 import { ControlProvider } from "../api/control-provider";
 import { appRoutes } from "../app-router";
 import { createUiI18n } from "../i18n";
-import { mediaDetail, sessions } from "../mocks/fixtures";
+import { manualSeriesDetail, mediaDetail, sessions } from "../mocks/fixtures";
 
 const baseUrl = "http://localhost/api/control";
 const server = setupServer();
@@ -91,6 +91,32 @@ describe("MediaDetailPage", () => {
 
     expect(await screen.findByRole("heading", { name: "Dark" })).toBeVisible();
     expect(screen.queryByText("Season One")).not.toBeInTheDocument();
+  });
+
+  it("exposes Manual edit only for Manual items", async () => {
+    useSession();
+    server.use(
+      http.get(`${baseUrl}/v1/media-items/:itemId`, ({ params }) =>
+        HttpResponse.json(
+          params.itemId === manualSeriesDetail.id
+            ? manualSeriesDetail
+            : mediaDetail,
+        ),
+      ),
+    );
+    renderDetail(manualSeriesDetail.id);
+
+    expect(
+      await screen.findByRole("link", { name: "Edit Manual metadata" }),
+    ).toHaveAttribute("href", `/items/${manualSeriesDetail.id}/edit`);
+
+    renderDetail(mediaDetail.id);
+    expect(
+      await screen.findByRole("heading", { name: "Arrival" }),
+    ).toBeVisible();
+    expect(
+      screen.getAllByRole("link", { name: "Edit Manual metadata" }),
+    ).toHaveLength(1);
   });
 
   it("renders localized loading and safe missing-item feedback", async () => {

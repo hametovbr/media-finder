@@ -297,7 +297,9 @@ def test_composed_builtin_ui_replaces_legacy_routes_without_a_second_domain_path
         for bookmark in (
             "/",
             "/add",
+            "/add/manual",
             "/items/missing",
+            "/items/missing/edit",
             "/items/missing/releases",
             "/settings",
         ):
@@ -322,6 +324,10 @@ def test_composed_builtin_ui_replaces_legacy_routes_without_a_second_domain_path
         )
         assert after.status_code == 200
         assert after.json() == before.json()
+
+        about = client.get("/api/control/v1/about")
+        assert about.status_code == 200
+        assert "attributions" in about.json()
 
         index = client.get("/").text
         asset_path = re.search(r'src="(/assets/index-[^"]+\.js)"', index)

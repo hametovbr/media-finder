@@ -26,9 +26,17 @@ Implement the Prowlarr torrent-only adapter, memory-only opaque result cache, qB
 
 Implement Bearer-protected metadata and export endpoints, public health endpoints, stable request-ID error envelopes, the `jellyfin-v1` extension-independent naming profile, and Jellyfin/Kodi-compatible XML exports. Cover expiry, specials, Unicode, reserved names, multiple extensions, and multi-episode NFO rejection with tests.
 
-## Task 5: Bilingual server-rendered UI
+## Task 5: Bilingual bundled browser UI
 
-Implement the responsive Jinja2/HTMX UI for collections, archive, poster grid, media details, metadata/manual add flows, acquisition search and submission, settings, first-run status, About/Credits, RU/EN localization, locale selection, signed sessions, and CSRF. Add keyboard-accessible critical browser tests.
+Implement the responsive, separately buildable React/Vite interface over
+`/api/control/v1` for catalog and read-only collection browsing, media details,
+provider metadata selection, Manual structured create and lossless edit,
+complete Manual JSON import, atomic episode CSV import, release search, and
+Acquisition submission. Preserve RU/EN localization, locale selection, signed
+sessions, CSRF, keyboard accessibility, and deterministic isolated browser
+fixtures. Settings, diagnostics, About/Credits, collection mutation,
+Acquisition history, and reconciliation are intentionally outside the bundled
+interface.
 
 ## Task 6: Container, CI, release, and operator documentation
 

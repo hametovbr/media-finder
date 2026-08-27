@@ -65,10 +65,9 @@ marked Compose block synchronized with those statically selected manifests:
 
 Manual is explicitly configuration-free. To enable any other module, set every
 variable in its row group before recreating the container. Empty values are
-treated as missing. The Settings page reports only exact variable names,
-required/secret classifications, and safe states; it cannot edit environment
-configuration and never displays values. Neither resolved values nor their
-environment-variable names are persisted as integration configuration.
+treated as missing. The bundled interface has no Settings page and cannot edit
+environment configuration. Neither resolved values nor their environment-variable
+names are persisted as integration configuration or displayed by the bundled UI.
 
 For example:
 

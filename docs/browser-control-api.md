@@ -53,16 +53,19 @@ fixtures and no database or integration variables:
 pnpm ui:dev
 ```
 
-Use `?scenario=catalog|workflow|empty|loading|error|ru|desktop|mobile` for
-deterministic states. `pnpm ui:build` checks generated OpenAPI types and writes
+Use `?scenario=catalog|workflow|empty|loading|error|manual-confirmation|manual-csv-invalid|manual-expired|manual-invalid|ru|desktop|mobile`
+for deterministic states. `pnpm ui:build` checks generated OpenAPI types and writes
 content-hashed assets into the Python package. `pnpm ui:test`,
 `pnpm ui:browser`, and `pnpm ui:a11y` run the frontend verification layers.
 
-The initial bundled interface supports catalog and collection browsing, media
-overview, metadata search and selection, release search, live destination
-selection, and Acquisition submission. Manual create/edit/import, collection
-mutation, settings, diagnostics, About, Acquisition history, and reconciliation
-remain available only through the unchanged control API for later UI work.
+The bundled interface supports catalog and read-only collection browsing, media
+overview, metadata search and selection, Manual structured create at
+`/add/manual`, complete schema-v1 JSON import, lossless Manual edit at
+`/items/{item_id}/edit`, atomic episode CSV import for Manual series, release
+search, live destination selection, and Acquisition submission. It intentionally
+does not expose collection mutation, settings, diagnostics, About/Credits,
+Acquisition history, or reconciliation; applicable operations remain available
+through the unchanged control API for future interfaces.
 
 ## Same-origin external UI topology
 
