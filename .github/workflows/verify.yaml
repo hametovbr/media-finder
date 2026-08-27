@@ -56,6 +56,12 @@ jobs:
         run: uv sync --frozen --all-groups
       - name: Install locked asset tooling
         run: pnpm install --frozen-lockfile
+      - name: Check built-in UI formatting
+        run: pnpm ui:format
+      - name: Lint built-in UI
+        run: pnpm ui:lint
+      - name: Test built-in UI
+        run: pnpm ui:test
       - name: Check Python formatting
         run: uv run ruff format --check .
       - name: Lint Python

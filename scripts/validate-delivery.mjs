@@ -567,6 +567,13 @@ function validateVerification(root, verify, verifyText, failures) {
     stepByName(verify.jobs?.python, "Build independent workspace wheels")?.run ?? "",
   );
   const pythonSteps = verify.jobs?.python?.steps ?? [];
+  for (const command of ["pnpm ui:format", "pnpm ui:lint", "pnpm ui:test"]) {
+    requireValue(
+      failures,
+      pythonSteps.some((step) => runsShellCommand(step, command)),
+      `.github/workflows/verify.yaml: python job must run ${command}`,
+    );
+  }
   const frontendBuildIndex = pythonSteps.findIndex(
     (step) => step.name === "Build frontend production assets" && step.run === "pnpm ui:build",
   );
