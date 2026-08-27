@@ -79,6 +79,15 @@ export function MediaDetailPage() {
       >
         {t("routes.releases")}
       </Button>
+      {item.provider_key === "manual" ? (
+        <Button
+          component={Link}
+          to={`/items/${encodeURIComponent(item.id)}/edit`}
+          variant="light"
+        >
+          {t("manual.edit.action")}
+        </Button>
+      ) : null}
     </Stack>
   );
 }

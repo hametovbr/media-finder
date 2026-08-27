@@ -13,6 +13,7 @@
   "routes": {
     "catalog": "Catalog",
     "add": "Add title",
+    "manual": "Manual metadata",
     "overview": "Media overview",
     "releases": "Find release",
     "loading": "Loading page",
@@ -36,6 +37,9 @@
     "loading": "Loading media item"
   },
   "metadata": {
+    "choosePath": "Choose how to add metadata.",
+    "chooseProvider": "Search metadata providers",
+    "chooseManual": "Enter or import Manual metadata",
     "confirm": "Confirm selection",
     "confirmDescription": "This title is similar to an existing catalog item. Save it anyway?",
     "confirmTitle": "Confirm similar title",
@@ -61,6 +65,84 @@
     "movie": "Movie",
     "series": "Series"
   },
+  "manual": {
+    "introduction": "Create structured metadata or import a complete version-1 Manual document.",
+    "loadingCollections": "Loading collections",
+    "save": "Save Manual metadata",
+    "modes": {
+      "structured": "Structured entry",
+      "json": "Complete JSON"
+    },
+    "json": {
+      "loadFile": "Load JSON file",
+      "source": "Manual JSON",
+      "submit": "Import Manual JSON"
+    },
+    "confirmation": {
+      "title": "Confirm Manual revision",
+      "description": "This Manual identity already exists. Confirm to replace it with the submitted complete document.",
+      "cancel": "Cancel",
+      "confirm": "Confirm revision"
+    },
+    "edit": {
+      "action": "Edit Manual metadata",
+      "title": "Edit Manual metadata",
+      "nonManual": "This item is not editable as Manual metadata."
+    },
+    "csv": {
+      "title": "Import episode CSV",
+      "description": "Paste or load the complete CSV. The server applies every row atomically.",
+      "loadFile": "Load episode CSV file",
+      "source": "Episode CSV",
+      "submit": "Import episode CSV"
+    },
+    "locales": {
+      "en": "English",
+      "ru": "Russian"
+    },
+    "fields": {
+      "externalId": "External ID",
+      "kind": "Media kind",
+      "title": "Title ({{locale}})",
+      "originalTitle": "Original title",
+      "year": "Year",
+      "plot": "Plot",
+      "releaseDate": "Release date",
+      "runtimeMinutes": "Runtime (minutes)",
+      "genres": "Genres",
+      "tags": "Tags",
+      "countries": "Countries",
+      "studios": "Studios",
+      "collection": "Collection",
+      "noCollection": "No collection"
+    },
+    "season": {
+      "legend": "Season {{number}}",
+      "number": "Season number",
+      "title": "Season title",
+      "plot": "Season plot",
+      "add": "Add season",
+      "remove": "Remove season {{number}}"
+    },
+    "episode": {
+      "legend": "Episode {{number}}",
+      "number": "Episode number",
+      "title": "Episode title",
+      "plot": "Episode plot",
+      "airDate": "Air date",
+      "runtimeMinutes": "Episode runtime (minutes)",
+      "ordering": "Episode ordering",
+      "add": "Add episode",
+      "remove": "Remove episode {{number}}"
+    },
+    "validation": {
+      "titleRequired": "Enter a title.",
+      "jsonSyntax": "Enter valid JSON.",
+      "jsonObject": "The JSON document must be an object.",
+      "jsonVersion": "The document must use schema version 1.",
+      "jsonTooLarge": "The JSON document must not exceed one mebibyte."
+    }
+  },
   "acquisition": {
     "failed": "Failed",
     "pending": "Pending",
@@ -71,8 +153,12 @@
     "csrf_invalid": "The request could not be verified. Refresh and try again.",
     "download_destination_unavailable": "The selected destination is no longer available.",
     "download_client_unavailable": "The download client is unavailable.",
+    "episode_csv_empty": "Enter episode CSV data.",
+    "episode_csv_invalid": "The episode CSV is invalid; no episodes were changed.",
+    "episode_csv_too_large": "Episode CSV must not exceed one mebibyte.",
     "internal_error": "Media Finder could not complete the request.",
     "json_required": "The server requires a JSON request.",
+    "manual_confirmation_expired": "The selection expired. Submit the Manual document again.",
     "media_item_not_found": "The requested media item was not found.",
     "metadata_unavailable": "Metadata for this item is no longer available.",
     "release_search_token_expired": "The release search expired. Search again.",

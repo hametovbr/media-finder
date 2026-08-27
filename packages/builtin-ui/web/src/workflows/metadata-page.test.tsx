@@ -78,6 +78,11 @@ describe("MetadataPage", () => {
     const user = userEvent.setup();
     renderPage();
 
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Search metadata providers",
+      }),
+    );
     await user.type(
       await screen.findByRole("searchbox", { name: "Title" }),
       "Arrival",
@@ -139,6 +144,11 @@ describe("MetadataPage", () => {
     );
     const user = userEvent.setup();
     renderPage();
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Search metadata providers",
+      }),
+    );
     await user.type(
       await screen.findByRole("searchbox", { name: "Title" }),
       "Arrival",

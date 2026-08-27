@@ -4,6 +4,9 @@ import {
   catalogItems,
   collections,
   downloadDestinations,
+  manualErrors,
+  manualMovieDetail,
+  manualSeriesDetail,
   mediaDetail,
   metadataProviders,
   metadataResults,
@@ -28,6 +31,10 @@ function activeScenario(request: Request): MockScenario {
     selected === "empty" ||
     selected === "error" ||
     selected === "loading" ||
+    selected === "manual-confirmation" ||
+    selected === "manual-csv-invalid" ||
+    selected === "manual-expired" ||
+    selected === "manual-invalid" ||
     selected === "mobile" ||
     selected === "ru" ||
     selected === "workflow"
@@ -72,10 +79,17 @@ export const mockHandlers = [
       next_cursor: null,
     });
   }),
-  http.get(`${control}/v1/media-items/:itemId`, ({ params }) =>
-    params.itemId === mediaDetail.id
-      ? HttpResponse.json(mediaDetail)
-      : HttpResponse.json(
+  http.get(`${control}/v1/media-items/:itemId`, ({ params }) => {
+    const item =
+      params.itemId === mediaDetail.id
+        ? mediaDetail
+        : params.itemId === manualMovieDetail.id
+          ? manualMovieDetail
+          : params.itemId === manualSeriesDetail.id
+            ? manualSeriesDetail
+            : null;
+    return item === null
+      ? HttpResponse.json(
           {
             error: {
               code: "media_item_not_found",
@@ -83,8 +97,9 @@ export const mockHandlers = [
             },
           },
           { status: 404 },
-        ),
-  ),
+        )
+      : HttpResponse.json(item);
+  }),
   http.get(`${control}/v1/metadata-providers`, () =>
     HttpResponse.json(metadataProviders),
   ),
@@ -103,6 +118,45 @@ export const mockHandlers = [
           { status: 410 },
         )
       : HttpResponse.json(mediaDetail, { status: 201 }),
+  ),
+  http.post(`${control}/v1/manual-imports`, async ({ request }) => {
+    const scenario = activeScenario(request);
+    if (scenario === "manual-confirmation") {
+      return HttpResponse.json(manualErrors.confirmation, { status: 409 });
+    }
+    if (scenario === "manual-invalid") {
+      return HttpResponse.json(manualErrors.invalid, { status: 422 });
+    }
+    const body = (await request.json()) as {
+      document?: { external_id?: string | null; kind?: "movie" | "series" };
+    };
+    if (body.document?.external_id === manualSeriesDetail.external_id) {
+      return HttpResponse.json(manualErrors.confirmation, { status: 409 });
+    }
+    return HttpResponse.json(
+      body.document?.kind === "series" ? manualSeriesDetail : manualMovieDetail,
+      { status: 201 },
+    );
+  }),
+  http.post(`${control}/v1/manual-imports/:token/confirm`, ({ params }) =>
+    String(params.token).includes("expired")
+      ? HttpResponse.json(manualErrors.expired, { status: 410 })
+      : HttpResponse.json(manualSeriesDetail),
+  ),
+  http.put(`${control}/v1/media-items/:itemId/manual-metadata`, ({ params }) =>
+    params.itemId === manualSeriesDetail.id
+      ? HttpResponse.json(manualErrors.confirmation, { status: 409 })
+      : HttpResponse.json(manualMovieDetail),
+  ),
+  http.post(
+    `${control}/v1/media-items/:itemId/episode-imports`,
+    async ({ request }) => {
+      const body = (await request.json()) as { csv?: string };
+      return activeScenario(request) === "manual-csv-invalid" ||
+        body.csv?.includes("INVALID")
+        ? HttpResponse.json(manualErrors.csvInvalid, { status: 422 })
+        : HttpResponse.json(manualSeriesDetail);
+    },
   ),
   http.post(`${control}/v1/media-items/:itemId/release-searches`, () =>
     HttpResponse.json(releaseResults),

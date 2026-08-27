@@ -2,7 +2,7 @@ schema: spec-driven
 context: |
   Media Finder is a self-hosted catalog and torrent-acquisition control plane.
   Repository documentation and developer-facing prose are English-only.
-  The MVP uses Python 3.13, FastAPI, Jinja2/HTMX, SQLAlchemy/Alembic, SQLite WAL, and one container.
+  The MVP uses Python 3.13, FastAPI, a separately buildable React/Vite bundled interface, SQLAlchemy/Alembic, SQLite WAL, statically selected module wheels, and one container.
   It does not scan, mux, move, or monitor media files and does not invoke Jellyfin.
   Provider-specific retention belongs exclusively to metadata-provider modules.
   Naming and exports must not assume a media-container extension.

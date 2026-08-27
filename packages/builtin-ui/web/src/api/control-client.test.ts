@@ -14,6 +14,42 @@ const session = {
 
 const server = setupServer();
 
+const manualDocument = {
+  artwork: [],
+  countries: ["CA"],
+  genres: ["Science Fiction"],
+  kind: "series" as const,
+  locale: "en" as const,
+  people: [],
+  provider_ids: { imdb: "tt-test" },
+  ratings: [],
+  schema_version: "1" as const,
+  seasons: [
+    {
+      episodes: [{ number: 1, title: "Special" }],
+      number: 0,
+      title: "Specials",
+    },
+  ],
+  studios: ["Fixture Studio"],
+  tags: ["fixture"],
+  titles: {
+    en: "Manual Series",
+    ru: "\u0420\u0443\u0447\u043d\u043e\u0439 \u0441\u0435\u0440\u0438\u0430\u043b",
+  },
+};
+
+const manualItem = {
+  acquisitions: [],
+  archived: false,
+  collection_id: "collection-1",
+  external_id: "e0a465bb-34eb-4565-bde2-b80d6e789b7c",
+  id: "manual-item-1",
+  kind: "series" as const,
+  metadata: manualDocument,
+  provider_key: "manual",
+};
+
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
@@ -179,5 +215,168 @@ describe("ControlClient", () => {
       code: directFailure.error?.error.code,
       status: directFailure.response.status,
     });
+  });
+
+  it("submits every Manual mutation through the typed CSRF-protected control path", async () => {
+    const requests: Array<{ body: unknown; method: string; url: string }> = [];
+    server.use(
+      http.get(`${baseUrl}/v1/session`, () => HttpResponse.json(session)),
+      http.post(`${baseUrl}/v1/manual-imports`, async ({ request }) => {
+        requests.push({
+          body: await request.json(),
+          method: request.method,
+          url: request.url,
+        });
+        expect(request.headers.get("content-type")).toContain(
+          "application/json",
+        );
+        expect(request.headers.get("x-csrf-token")).toBe(session.csrf_token);
+        expect(request.headers.has("authorization")).toBe(false);
+        return HttpResponse.json(manualItem, { status: 201 });
+      }),
+      http.post(
+        `${baseUrl}/v1/manual-imports/:token/confirm`,
+        async ({ request }) => {
+          requests.push({
+            body: (await request.text()) || null,
+            method: request.method,
+            url: request.url,
+          });
+          expect(request.headers.get("x-csrf-token")).toBe(session.csrf_token);
+          return HttpResponse.json(manualItem);
+        },
+      ),
+      http.put(
+        `${baseUrl}/v1/media-items/:itemId/manual-metadata`,
+        async ({ request }) => {
+          requests.push({
+            body: await request.json(),
+            method: request.method,
+            url: request.url,
+          });
+          expect(request.headers.get("x-csrf-token")).toBe(session.csrf_token);
+          return HttpResponse.json(manualItem);
+        },
+      ),
+      http.post(
+        `${baseUrl}/v1/media-items/:itemId/episode-imports`,
+        async ({ request }) => {
+          requests.push({
+            body: await request.json(),
+            method: request.method,
+            url: request.url,
+          });
+          expect(request.headers.get("x-csrf-token")).toBe(session.csrf_token);
+          return HttpResponse.json(manualItem);
+        },
+      ),
+    );
+    const client = createControlClient({ baseUrl });
+    await client.bootstrapSession();
+
+    await expect(
+      client.importManual({
+        collection_id: "collection-1",
+        document: manualDocument,
+      }),
+    ).resolves.toEqual(manualItem);
+    await expect(client.confirmManual("token/with space")).resolves.toEqual(
+      manualItem,
+    );
+    await expect(
+      client.editManual("item/with space", manualDocument),
+    ).resolves.toEqual(manualItem);
+    await expect(
+      client.importEpisodes(
+        "item/with space",
+        "season,episode,title\n0,1,Special\n",
+      ),
+    ).resolves.toEqual(manualItem);
+
+    expect(requests).toEqual([
+      {
+        body: { collection_id: "collection-1", document: manualDocument },
+        method: "POST",
+        url: `${baseUrl}/v1/manual-imports`,
+      },
+      {
+        body: null,
+        method: "POST",
+        url: `${baseUrl}/v1/manual-imports/token%2Fwith%20space/confirm`,
+      },
+      {
+        body: manualDocument,
+        method: "PUT",
+        url: `${baseUrl}/v1/media-items/item%2Fwith%20space/manual-metadata`,
+      },
+      {
+        body: { csv: "season,episode,title\n0,1,Special\n" },
+        method: "POST",
+        url: `${baseUrl}/v1/media-items/item%2Fwith%20space/episode-imports`,
+      },
+    ]);
+  });
+
+  it("exposes only an allowlisted Manual confirmation token from error details", async () => {
+    server.use(
+      http.post(`${baseUrl}/v1/manual-imports`, async ({ request }) => {
+        const body = (await request.json()) as {
+          document?: { titles?: { en?: string } };
+        };
+        const title = body.document?.titles?.en;
+        const detailsByTitle: Record<string, unknown> = {
+          "Manual valid": {
+            confirmation_token: "manual-confirmation-token",
+            kind: "manual",
+            upstream_url: "https://user:password@example.invalid/private",
+          },
+          "Manual wrong kind": {
+            confirmation_token: "metadata-token",
+            kind: "metadata",
+          },
+          "Manual malformed": {
+            confirmation_token: { secret: "not-a-string" },
+            kind: "manual",
+          },
+        };
+        return HttpResponse.json(
+          {
+            error: {
+              code: "confirmation_required",
+              details: detailsByTitle[title ?? ""] ?? null,
+              request_id: "manual-request",
+            },
+          },
+          { status: 409 },
+        );
+      }),
+    );
+    const client = createControlClient({ baseUrl });
+    const failureFor = async (title: string) =>
+      client
+        .importManual({
+          document: {
+            ...manualDocument,
+            titles: { en: title },
+          },
+        })
+        .catch((error: unknown) => error);
+
+    const valid = await failureFor("Manual valid");
+    const wrongKind = await failureFor("Manual wrong kind");
+    const malformed = await failureFor("Manual malformed");
+
+    expect(valid).toBeInstanceOf(ControlFailure);
+    expect(valid).toMatchObject({
+      code: "confirmation_required",
+      confirmationToken: "manual-confirmation-token",
+      requestId: "manual-request",
+      status: 409,
+    });
+    expect(wrongKind).toMatchObject({ confirmationToken: null });
+    expect(malformed).toMatchObject({ confirmationToken: null });
+    expect(JSON.stringify(valid)).not.toContain("upstream_url");
+    expect(JSON.stringify(valid)).not.toContain("password");
+    expect(JSON.stringify(valid)).not.toContain("not-a-string");
   });
 });

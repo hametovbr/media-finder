@@ -15,7 +15,7 @@ The default supported runtime SHALL use one application container, one web-serve
 
 #### Scenario: Build workspace packages
 - **WHEN** release automation builds the production artifact
-- **THEN** it independently builds every workspace distribution and includes the selected modules plus built-in UI templates, localization catalogs, and static assets in the common image
+- **THEN** it independently builds every workspace distribution and includes the selected modules plus the built-in UI's compiled browser output, localization resources, and deterministic static assets in the common image
 
 ### Requirement: Migration-gated startup
 Database migrations SHALL run before the web server. A migration failure or unavailable database SHALL stop the container.

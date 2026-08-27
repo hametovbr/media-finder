@@ -15,6 +15,8 @@ type CollectionPage = components["schemas"]["Page_CollectionView_"];
 type MediaItemDetail = components["schemas"]["MediaItemDetail"];
 type MetadataProvider = components["schemas"]["MetadataProviderView"];
 type MetadataSearchResult = components["schemas"]["MetadataSearchResult"];
+type ManualDocument = components["schemas"]["ManualDocumentV1"];
+type ManualImportRequest = components["schemas"]["ManualImportRequest"];
 type ReleaseSearchResult = components["schemas"]["ReleaseSearchResult"];
 type DownloadDestination = components["schemas"]["DownloadDestination"];
 type Acquisition = components["schemas"]["AcquisitionView"];
@@ -28,13 +30,21 @@ export interface CatalogRequest {
 
 export class ControlFailure extends Error {
   readonly code: string;
+  readonly confirmationToken: string | null;
   readonly requestId: string | null;
   readonly status: number;
 
-  constructor(code: string, status: number, requestId: string | null = null) {
+  constructor(
+    code: string,
+    status: number,
+    requestId: string | null = null,
+    confirmationToken: string | null = null,
+  ) {
     super(code);
     this.name = "ControlFailure";
     this.code = code;
+    this.confirmationToken = confirmationToken;
+    Object.defineProperty(this, "confirmationToken", { enumerable: false });
     this.requestId = requestId;
     this.status = status;
   }
@@ -46,6 +56,21 @@ export interface ControlClient {
   getMediaItem(
     itemId: string,
     locale: components["schemas"]["Locale"],
+    signal?: AbortSignal,
+  ): Promise<MediaItemDetail>;
+  importManual(
+    request: ManualImportRequest,
+    signal?: AbortSignal,
+  ): Promise<MediaItemDetail>;
+  confirmManual(token: string, signal?: AbortSignal): Promise<MediaItemDetail>;
+  editManual(
+    itemId: string,
+    document: ManualDocument,
+    signal?: AbortSignal,
+  ): Promise<MediaItemDetail>;
+  importEpisodes(
+    itemId: string,
+    csv: string,
     signal?: AbortSignal,
   ): Promise<MediaItemDetail>;
   listCatalog(
@@ -95,15 +120,27 @@ interface ControlClientOptions {
 function normalizeFailure(error: unknown, response: Response): ControlFailure {
   if (typeof error === "object" && error !== null && "error" in error) {
     const envelope = error as {
-      error?: { code?: unknown; request_id?: unknown };
+      error?: { code?: unknown; details?: unknown; request_id?: unknown };
     };
     const code = envelope.error?.code;
     const requestId = envelope.error?.request_id;
     if (typeof code === "string") {
+      const details = envelope.error?.details;
+      const confirmationToken =
+        code === "confirmation_required" &&
+        typeof details === "object" &&
+        details !== null &&
+        "kind" in details &&
+        details.kind === "manual" &&
+        "confirmation_token" in details &&
+        typeof details.confirmation_token === "string"
+          ? details.confirmation_token
+          : null;
       return new ControlFailure(
         code,
         response.status,
         typeof requestId === "string" ? requestId : null,
+        confirmationToken,
       );
     }
   }
@@ -221,6 +258,67 @@ export function createControlClient(
     return data;
   }
 
+  async function importManual(
+    request: ManualImportRequest,
+    signal?: AbortSignal,
+  ): Promise<MediaItemDetail> {
+    const { data, error, response } = await api.POST("/v1/manual-imports", {
+      body: request,
+      signal,
+    });
+    if (data === undefined) throw normalizeFailure(error, response);
+    return data;
+  }
+
+  async function confirmManual(
+    token: string,
+    signal?: AbortSignal,
+  ): Promise<MediaItemDetail> {
+    const { data, error, response } = await api.POST(
+      "/v1/manual-imports/{token}/confirm",
+      {
+        params: { path: { token } },
+        signal,
+      },
+    );
+    if (data === undefined) throw normalizeFailure(error, response);
+    return data;
+  }
+
+  async function editManual(
+    itemId: string,
+    document: ManualDocument,
+    signal?: AbortSignal,
+  ): Promise<MediaItemDetail> {
+    const { data, error, response } = await api.PUT(
+      "/v1/media-items/{item_id}/manual-metadata",
+      {
+        body: document,
+        params: { path: { item_id: itemId } },
+        signal,
+      },
+    );
+    if (data === undefined) throw normalizeFailure(error, response);
+    return data;
+  }
+
+  async function importEpisodes(
+    itemId: string,
+    csv: string,
+    signal?: AbortSignal,
+  ): Promise<MediaItemDetail> {
+    const { data, error, response } = await api.POST(
+      "/v1/media-items/{item_id}/episode-imports",
+      {
+        body: { csv },
+        params: { path: { item_id: itemId } },
+        signal,
+      },
+    );
+    if (data === undefined) throw normalizeFailure(error, response);
+    return data;
+  }
+
   async function searchMetadata(
     query: string,
     locale: components["schemas"]["Locale"],
@@ -310,7 +408,11 @@ export function createControlClient(
   return {
     api,
     bootstrapSession,
+    confirmManual,
+    editManual,
     getMediaItem,
+    importEpisodes,
+    importManual,
     listCatalog,
     listCollections,
     listMetadataProviders,
