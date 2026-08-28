@@ -6,7 +6,7 @@
   "scripts": {
     "assets:build": "pnpm ui:build",
     "delivery:validate": "node scripts/validate-delivery.mjs",
-    "delivery:test": "node --test scripts/validate-delivery.test.mjs",
+    "delivery:test": "node --test scripts/validate-delivery.test.mjs scripts/verify-repository-security.test.mjs",
     "docs:check": "python scripts/check_documentation_language.py",
     "ui:dev": "pnpm --filter @media-finder/builtin-ui dev",
     "ui:format": "pnpm --filter @media-finder/builtin-ui format",
@@ -23,6 +23,7 @@
     "py:lint": "uv run ruff check .",
     "py:type": "uv run mypy",
     "py:test": "uv run pytest",
+    "security:verify": "node scripts/verify-repository-security.mjs",
     "spec:validate": "openspec validate --all --strict",
     "spec:list": "openspec list"
   },

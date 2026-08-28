@@ -20,6 +20,10 @@ OpenSpec is the source of truth for product behavior and architecture. Start any
 
 Do not manually edit generated `.agents/skills/openspec-*` files. Regenerate them with the pinned CLI when the OpenSpec profile changes.
 
+## Security-affecting changes
+
+Follow the finding lifecycle and exception contract in [SECURITY.md](SECURITY.md). A change that modifies security policy, a scanner, a security gate, an exception, or release-security behavior must run `pnpm security:verify -- --repository OWNER/REPOSITORY` against the exact delivery target. Disabled, malformed, unavailable, or unauthorized GitHub evidence blocks delivery and must not be described as passed. Keep this authenticated live check outside ordinary required pull-request jobs so those jobs retain least-privilege permissions.
+
 ## Project skills
 
 The checked-in [project skill catalog](docs/agent-skills.md) is the portable
