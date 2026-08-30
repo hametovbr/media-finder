@@ -217,6 +217,42 @@ describe("ControlClient", () => {
     });
   });
 
+  it("exposes the returned similarity confirmation token and no unrelated details", async () => {
+    server.use(
+      http.post(`${baseUrl}/v1/metadata-selections/:token`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: "confirmation_required",
+              details: {
+                confirmation_token: "similarity-confirmation-token",
+                kind: "similarity",
+                upstream_url: "https://user:password@example.invalid/private",
+              },
+              request_id: "similarity-request",
+            },
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+    const client = createControlClient({ baseUrl });
+
+    const failure = await client
+      .selectMetadata("consumed-search-token", false)
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ControlFailure);
+    expect(failure).toMatchObject({
+      code: "confirmation_required",
+      confirmationToken: "similarity-confirmation-token",
+      requestId: "similarity-request",
+      status: 409,
+    });
+    expect(JSON.stringify(failure)).not.toContain("upstream_url");
+    expect(JSON.stringify(failure)).not.toContain("password");
+  });
+
   it("submits every Manual mutation through the typed CSRF-protected control path", async () => {
     const requests: Array<{ body: unknown; method: string; url: string }> = [];
     server.use(

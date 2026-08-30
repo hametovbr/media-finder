@@ -917,6 +917,17 @@
       "MetadataSearchResult": {
         "additionalProperties": false,
         "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
           "external_id": {
             "title": "External Id",
             "type": "string"
@@ -926,6 +937,20 @@
           },
           "locale": {
             "$ref": "#/components/schemas/Locale"
+          },
+          "poster_url": {
+            "anyOf": [
+              {
+                "format": "uri",
+                "maxLength": 2083,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Poster Url"
           },
           "provider_key": {
             "title": "Provider Key",

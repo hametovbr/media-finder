@@ -109,6 +109,8 @@ def _response_payload(request: httpx.Request) -> dict[str, object]:
                 {
                     "id": 129,
                     "title": "Spirited Away",
+                    "overview": "A journey through a spirit world.",
+                    "poster_path": "/spirited-poster.jpg",
                     "release_date": "2001-07-20",
                 }
             ]
@@ -118,6 +120,8 @@ def _response_payload(request: httpx.Request) -> dict[str, object]:
                 {
                     "id": 900,
                     "name": "Fixture Series",
+                    "overview": "A fixture series with a special.",
+                    "poster_path": "/series-poster.jpg",
                     "first_air_date": "2020-01-01",
                 }
             ]
@@ -533,6 +537,73 @@ def test_tmdb_typed_endpoints_reject_untrusted_paths_before_http_or_secret_use()
     transport.close()
     transport.close()
     assert client.is_closed
+
+
+def test_tmdb_search_constructs_complete_movie_and_series_previews() -> None:
+    module = _module()
+    provider = module.build(resolve_module_environment(module.manifest, {"TMDB_TOKEN": TOKEN}))
+
+    try:
+        movie, series = provider.search(
+            MetadataSearchQuery(query="Fixture", locale="en-US", limit=2)
+        )
+    finally:
+        provider.close()
+
+    assert movie.description == "A journey through a spirit world."
+    assert str(movie.poster_url) == ("https://image.tmdb.org/t/p/original/spirited-poster.jpg")
+    assert series.description == "A fixture series with a special."
+    assert str(series.poster_url) == "https://image.tmdb.org/t/p/original/series-poster.jpg"
+
+
+@pytest.mark.parametrize(
+    ("overview", "poster_path", "expected_description"),
+    (
+        (None, None, None),
+        ("", "/../secret.jpg", None),
+        ("A valid description.", "poster.jpg", "A valid description."),
+        ("A long-path result.", f"/{'a' * 2100}.jpg", "A long-path result."),
+    ),
+)
+def test_tmdb_search_keeps_results_when_previews_are_absent_or_invalid(
+    overview: object,
+    poster_path: object,
+    expected_description: str | None,
+) -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/3/search/movie":
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "id": 129,
+                            "title": "Preview edge case",
+                            "overview": overview,
+                            "poster_path": poster_path,
+                            "release_date": "2001-07-20",
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(200, json={"results": []})
+
+    module = _module(RecordingClientFactory(respond))
+    provider = module.build(resolve_module_environment(module.manifest, {"TMDB_TOKEN": TOKEN}))
+    try:
+        results = provider.search(
+            MetadataSearchQuery(
+                query="Preview",
+                locale="en-US",
+                media_kinds=(MediaKind.MOVIE,),
+            )
+        )
+    finally:
+        provider.close()
+
+    assert len(results) == 1
+    assert results[0].description == expected_description
+    assert results[0].poster_url is None
 
 
 def test_tmdb_failures_are_standardized_and_redact_secrets_and_sensitive_urls(

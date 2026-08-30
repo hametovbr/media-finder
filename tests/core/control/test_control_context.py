@@ -319,6 +319,63 @@ def test_metadata_control_service_consumes_metadata_and_manual_confirmation_toke
         cache.pop(token)
 
 
+def test_metadata_control_service_projects_and_retains_search_previews_unchanged() -> None:
+    """Control preserves validated module previews in the existing transient selection state."""
+    api = _api()
+    from media_finder_core.platform import EphemeralCache
+    from media_finder_sdk import MetadataSearchResult as SdkMetadataSearchResult
+
+    sdk_result = SdkMetadataSearchResult(
+        provider_id="provider-a",
+        external_id="external-1",
+        media_kind=MediaKind.MOVIE,
+        title="Example",
+        year=2026,
+        locale="en",
+        description="Exact provider description",
+        poster_url="https://images.example.test/posters/external-1.jpg",
+    )
+
+    class Provider:
+        def search(self, query):  # type: ignore[no-untyped-def]
+            assert query.query == "Example"
+            return (sdk_result,)
+
+    class Modules:
+        def provider_ids(self) -> tuple[str, ...]:
+            return ("provider-a",)
+
+        def metadata_provider(self, module_id: str) -> Provider:
+            assert module_id == "provider-a"
+            return Provider()
+
+    selections = EphemeralCache()
+    service = api.MetadataControlService(
+        query_port=object(),
+        unit_of_work=object(),
+        modules=Modules(),
+        projector=object(),
+        clock=lambda: NOW,
+        metadata_selections=selections,
+        manual_drafts=EphemeralCache(),
+    )
+
+    async def scenario() -> None:
+        result = (
+            await service.search_metadata(
+                request=MetadataSearchRequest(query="Example", locale=Locale.EN)
+            )
+        )[0]
+        assert result.description == "Exact provider description"
+        assert str(result.poster_url) == "https://images.example.test/posters/external-1.jpg"
+        retained = selections.get(result.token)
+        assert retained == sdk_result
+        assert retained.description == result.description
+        assert retained.poster_url == result.poster_url
+
+    asyncio.run(scenario())
+
+
 def test_acquisition_control_service_preserves_idempotency_and_reconciles() -> None:
     """Acquisition control consumes only catalog, persistence, and module capability ports."""
     api = _api()

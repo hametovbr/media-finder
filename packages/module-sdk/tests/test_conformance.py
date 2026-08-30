@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 from media_finder_sdk import (
     CorrelationResult,
     DownloadArtifact,
@@ -45,6 +46,7 @@ from media_finder_sdk import (
     assert_release_registration_conforms,
     parse_manifest,
 )
+from pydantic import ValidationError
 
 from .fixtures import manifest_toml
 
@@ -144,6 +146,52 @@ class _Download(_Lifecycle):
             correlation=correlation,
             external_task_id="task-1",
             conclusive=True,
+        )
+
+
+def test_metadata_search_result_previews_are_optional_and_typed() -> None:
+    enriched = MetadataSearchResult(
+        provider_id="fixture-metadata",
+        external_id="1",
+        media_kind=MediaKind.MOVIE,
+        title="Fixture",
+        year=2026,
+        locale="en",
+        description="A preview description.",
+        poster_url="https://images.example.test/posters/fixture.jpg",
+    )
+
+    assert enriched.model_dump(mode="json") == {
+        "provider_id": "fixture-metadata",
+        "external_id": "1",
+        "media_kind": "movie",
+        "title": "Fixture",
+        "year": 2026,
+        "locale": "en",
+        "description": "A preview description.",
+        "poster_url": "https://images.example.test/posters/fixture.jpg",
+    }
+
+    without_previews = MetadataSearchResult.model_validate(
+        {
+            "provider_id": "fixture-metadata",
+            "external_id": "2",
+            "media_kind": "series",
+            "title": "Fixture Series",
+            "locale": "en",
+        }
+    )
+    assert without_previews.description is None
+    assert without_previews.poster_url is None
+
+    with pytest.raises(ValidationError):
+        MetadataSearchResult(
+            provider_id="fixture-metadata",
+            external_id="3",
+            media_kind=MediaKind.MOVIE,
+            title="Invalid poster",
+            locale="en",
+            poster_url="not a URL",
         )
 
 

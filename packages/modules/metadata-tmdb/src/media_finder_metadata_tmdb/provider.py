@@ -17,7 +17,7 @@ from media_finder_sdk import (
 )
 from pydantic import ValidationError
 
-from .normalization import normalize_payload
+from .normalization import normalize_payload, search_poster_url
 from .transport import TmdbEndpoint, TmdbTransport
 
 _MAX_SERIES_SEASONS = 100
@@ -59,6 +59,7 @@ class TmdbProvider:
                     continue
                 release = item.get(date_field)
                 release_text = release if isinstance(release, str) else ""
+                overview = item.get("overview")
                 try:
                     result = MetadataSearchResult(
                         provider_id="tmdb",
@@ -67,6 +68,8 @@ class TmdbProvider:
                         title=str(title),
                         year=int(release_text[:4]) if len(release_text) >= 4 else None,
                         locale=query.locale,
+                        description=(overview if isinstance(overview, str) and overview else None),
+                        poster_url=search_poster_url(item.get("poster_path")),
                     )
                 except (TypeError, ValueError, ValidationError):
                     raise ModuleError(

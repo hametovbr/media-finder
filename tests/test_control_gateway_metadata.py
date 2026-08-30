@@ -13,6 +13,7 @@ from media_finder_core.catalog.persistence import (
 from media_finder_core.catalog.persistence import (
     MetadataRevisionRecord as MetadataRevision,
 )
+from media_finder_core.platform import EphemeralCache
 from media_finder_sdk import MediaKind, NormalizedMetadata, Provenance
 from media_finder_server.control_gateway import BackendControlGateway
 from sqlalchemy import func, select
@@ -55,7 +56,12 @@ def _add_item(
 def test_metadata_search_uses_requested_locale_and_selection_is_one_use(
     database: Session, fake_provider
 ) -> None:
-    gateway = _gateway(database, fake_provider)
+    selections = EphemeralCache()
+    gateway = create_gateway(
+        database,
+        metadata_provider=fake_provider,
+        metadata_selections=selections,
+    )
 
     async def scenario() -> None:
         results = await gateway.search_metadata(
@@ -63,6 +69,11 @@ def test_metadata_search_uses_requested_locale_and_selection_is_one_use(
         )
         assert len(results) == 1
         assert results[0].locale is Locale.RU
+        assert results[0].description == "Fixture search preview"
+        assert str(results[0].poster_url) == "https://images.example.test/posters/fixture-1.jpg"
+        retained = selections.get(results[0].token)
+        assert retained.description == results[0].description
+        assert retained.poster_url == results[0].poster_url
         saved = await gateway.select_metadata(
             token=results[0].token,
             request=MetadataSelectionRequest(),
@@ -70,6 +81,9 @@ def test_metadata_search_uses_requested_locale_and_selection_is_one_use(
         )
         assert saved.item.provider_key == fake_provider.manifest.module_id
         assert saved.item.metadata.titles == {"ru": "Fixture"}
+        serialized = saved.item.metadata.model_dump(mode="json")
+        assert "description" not in serialized
+        assert "poster_url" not in serialized
         assert saved.created is True
 
         with pytest.raises(ControlFailure) as consumed:

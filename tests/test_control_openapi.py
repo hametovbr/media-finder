@@ -46,6 +46,19 @@ def test_control_openapi_is_deterministic_safe_and_current() -> None:
     assert "raw_payload" not in serialized
     assert "bearer" not in serialized
     assert not any("export" in path or "nfo" in path for path in schema["paths"])
+    result_schema = schema["components"]["schemas"]["MetadataSearchResult"]
+    assert {"description", "poster_url"} <= set(result_schema["properties"])
+    assert "description" not in result_schema["required"]
+    assert "poster_url" not in result_schema["required"]
+    assert {value["type"] for value in result_schema["properties"]["description"]["anyOf"]} == {
+        "null",
+        "string",
+    }
+    poster_variants = result_schema["properties"]["poster_url"]["anyOf"]
+    assert {value["type"] for value in poster_variants} == {"null", "string"}
+    assert next(value for value in poster_variants if value["type"] == "string")["format"] == (
+        "uri"
+    )
 
 
 def test_builtin_ui_control_types_follow_the_checked_openapi() -> None:

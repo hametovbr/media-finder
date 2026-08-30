@@ -299,12 +299,20 @@ class _Provider:
         identity: MetadataIdentity,
         *,
         title: str = "Spirited Away",
+        description: str | None = None,
+        poster_url: str | None = None,
+        search_output: object | None = None,
         normalize_output: object | None = None,
         fetch_error: BaseException | None = None,
     ) -> None:
         self.uow = uow
         self.identity = identity
         self.title = title
+        self.description = description
+        self.poster_url = poster_url
+        self.search_output = search_output
+        self.last_search_result: MetadataSearchResult | None = None
+        self.fetch_identity: MetadataIdentity | None = None
         self.normalize_output = normalize_output
         self.fetch_error = fetch_error
         self.search_calls = 0
@@ -316,20 +324,24 @@ class _Provider:
     def search(self, query: MetadataSearchQuery) -> tuple[MetadataSearchResult, ...]:
         assert self.uow.write_active is False
         self.search_calls += 1
-        return (
-            MetadataSearchResult(
-                provider_id=self.identity.provider_id,
-                external_id=self.identity.external_id,
-                media_kind=self.identity.media_kind,
-                title=self.title,
-                year=2001,
-                locale=query.locale,
-            ),
+        if self.search_output is not None:
+            return (self.search_output,)  # type: ignore[return-value]
+        self.last_search_result = MetadataSearchResult(
+            provider_id=self.identity.provider_id,
+            external_id=self.identity.external_id,
+            media_kind=self.identity.media_kind,
+            title=self.title,
+            year=2001,
+            locale=query.locale,
+            description=self.description,
+            poster_url=self.poster_url,
         )
+        return (self.last_search_result,)
 
     def fetch(self, identity: MetadataIdentity) -> ProviderPayload:
         assert self.uow.write_active is False
         self.fetch_calls += 1
+        self.fetch_identity = identity
         if self.fetch_error is not None:
             raise self.fetch_error
         return ProviderPayload(data={"identity": identity.external_id, "title": self.title})
@@ -446,7 +458,13 @@ def _seed_revision(
 def test_metadata_search_calls_only_selected_providers_and_revalidates_results() -> None:
     api, store, uow = _service_fixture()
     first = _Provider(uow, _identity("provider-a", "a-1"))
-    second = _Provider(uow, _identity("provider-b", "b-1"), title="Second")
+    second = _Provider(
+        uow,
+        _identity("provider-b", "b-1"),
+        title="Second",
+        description="A complete transient preview.",
+        poster_url="https://images.example.test/posters/b-1.jpg",
+    )
     service = api.MetadataCatalogService(query_port=store, unit_of_work=uow, clock=lambda: NOW)
     query = MetadataSearchQuery(query="spirited", locale="en")
 
@@ -459,6 +477,9 @@ def test_metadata_search_calls_only_selected_providers_and_revalidates_results()
     assert tuple(result.provider_id for result in results) == ("provider-b",)
     assert first.search_calls == 0
     assert second.search_calls == 1
+    assert results[0] is not second.last_search_result
+    assert results[0].description == "A complete transient preview."
+    assert str(results[0].poster_url) == "https://images.example.test/posters/b-1.jpg"
 
     second.identity = _identity("provider-a", "wrong")
     with pytest.raises(ValueError, match="provider_identity_mismatch"):
@@ -467,6 +488,66 @@ def test_metadata_search_calls_only_selected_providers_and_revalidates_results()
             providers={"provider-b": second},
             selected_provider_ids=("provider-b",),
         )
+
+    class InvalidSearchResult:
+        def model_dump(self, *, mode: str) -> dict[str, object]:
+            assert mode == "json"
+            return {
+                "provider_id": "provider-b",
+                "external_id": "b-2",
+                "media_kind": "movie",
+                "title": "Invalid preview",
+                "locale": "en",
+                "description": None,
+                "poster_url": "not a complete URL",
+            }
+
+    invalid = _Provider(
+        uow,
+        _identity("provider-b", "b-2"),
+        search_output=InvalidSearchResult(),
+    )
+    with pytest.raises(ValueError, match="provider_output_invalid"):
+        service.search(
+            query=query,
+            providers={"provider-b": invalid},
+            selected_provider_ids=("provider-b",),
+        )
+
+
+def test_metadata_selection_uses_only_search_identity_not_transient_preview() -> None:
+    api, store, uow = _service_fixture()
+    provider = _Provider(
+        uow,
+        _identity(),
+        description="Search-only description",
+        poster_url="https://images.example.test/posters/item-1.jpg",
+    )
+    service = api.MetadataCatalogService(query_port=store, unit_of_work=uow, clock=lambda: NOW)
+    result = service.search(
+        query=MetadataSearchQuery(query="spirited", locale="en"),
+        providers={"provider-a": provider},
+        selected_provider_ids=("provider-a",),
+    )[0]
+    identity = MetadataIdentity(
+        provider_id=result.provider_id,
+        external_id=result.external_id,
+        media_kind=result.media_kind,
+        locale=result.locale,
+    )
+
+    selected = service.select(
+        identity=identity,
+        provider=provider,
+        retention_policy=_RetentionPolicy(),
+    )
+
+    assert provider.fetch_identity == identity
+    revision = store.get_revision(selected.item.current_revision_id)
+    assert revision is not None
+    serialized = revision.effective.model_dump(mode="json")
+    assert "description" not in serialized
+    assert "poster_url" not in serialized
 
 
 def test_metadata_exact_duplicate_returns_existing_without_provider_io() -> None:

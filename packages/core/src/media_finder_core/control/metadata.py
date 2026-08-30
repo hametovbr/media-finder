@@ -167,6 +167,8 @@ class MetadataControlService:
                 title=value.title,
                 year=value.year,
                 locale=Locale(value.locale),
+                description=value.description,
+                poster_url=value.poster_url,
             )
             for value in results
         )

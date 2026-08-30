@@ -297,6 +297,26 @@ def test_manual_provider_and_editor_pass_public_conformance() -> None:
     assert ModuleErrorData.from_error(invalid_import.value) == failures["import-invalid-document"]
 
 
+def test_manual_production_search_keeps_optional_previews_absent() -> None:
+    serialized = parse_serialized_conformance_fixture(
+        (PACKAGE_ROOT / "src/media_finder_metadata_manual/fixtures/conformance.json").read_bytes()
+    )
+    assert isinstance(serialized, SerializedMetadataProviderConformance)
+    module = registration(
+        fixtures={(MediaKind.SERIES, IDENTITY, "en"): ProviderPayload(data=_document())}
+    )
+    provider = module.build(resolve_module_environment(module.manifest, {}))
+
+    try:
+        results = provider.search(serialized.success.query)
+    finally:
+        provider.close()
+
+    assert results
+    assert all(result.description is None for result in results)
+    assert all(result.poster_url is None for result in results)
+
+
 def test_invalid_episode_table_is_safe_and_does_not_mutate_current_metadata() -> None:
     module = registration()
     assert module.editor is not None

@@ -218,6 +218,7 @@ class FakeControlGateway:
             token = "metadata-similar"
         else:
             token = "metadata-1"
+        has_preview = "no preview" not in query
         return (
             MetadataSearchResult(
                 token=token,
@@ -227,6 +228,10 @@ class FakeControlGateway:
                 title=("Example Series" if request.locale is Locale.EN else RU_SERIES),
                 year=2025,
                 locale=request.locale,
+                description=("A fixture series description." if has_preview else None),
+                poster_url=(
+                    "https://images.example.test/posters/series-100.jpg" if has_preview else None
+                ),
             ),
         )
 

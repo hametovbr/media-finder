@@ -120,6 +120,8 @@ class MetadataSearchResult(PublicModel):
     title: Annotated[str, Field(min_length=1, max_length=1000)]
     year: int | None = Field(default=None, ge=1800, le=3000)
     locale: str
+    description: str | None = None
+    poster_url: HttpUrl | None = None
 
 
 class ProviderPayload(PublicModel):

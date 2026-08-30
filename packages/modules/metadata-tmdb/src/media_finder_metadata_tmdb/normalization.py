@@ -25,6 +25,17 @@ _IMAGE_PATH = re.compile(r"^/[A-Za-z0-9._/-]+$")
 _IMAGE_BASE_URL = "https://image.tmdb.org/t/p/original"
 
 
+def search_poster_url(value: object) -> HttpUrl | None:
+    """Construct a complete TMDB search poster URL or omit an invalid preview."""
+
+    if not isinstance(value, str) or _IMAGE_PATH.fullmatch(value) is None or ".." in value:
+        return None
+    try:
+        return HttpUrl(f"{_IMAGE_BASE_URL}{value}")
+    except ValidationError:
+        return None
+
+
 def normalize_payload(
     payload: ProviderPayload,
     identity: MetadataIdentity,

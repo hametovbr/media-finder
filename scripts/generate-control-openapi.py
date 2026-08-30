@@ -2,15 +2,16 @@
 
 import json
 from pathlib import Path
+from typing import cast
 
-from media_finder_builtin_ui.fake import FakeControlGateway
+from media_finder_control import ControlGateway
 from media_finder_server.control_api import create_control_app
 from media_finder_server.control_security import BackendBrowserSecurity
 
 
 def main() -> None:
     app = create_control_app(
-        gateway=FakeControlGateway(),
+        gateway=cast(ControlGateway, object()),
         security=BackendBrowserSecurity(secret=b"browser-session-secret-at-least-32-bytes"),
     )
     output = Path("docs/api/control-v1.openapi.json")

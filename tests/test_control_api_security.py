@@ -4,10 +4,12 @@ from media_finder_server.control_api import create_control_app
 from media_finder_server.control_security import BackendBrowserSecurity
 
 
-def _client(*, secure_cookie: bool = False) -> TestClient:
+def _client(
+    *, secure_cookie: bool = False, gateway: FakeControlGateway | None = None
+) -> TestClient:
     return TestClient(
         create_control_app(
-            gateway=FakeControlGateway(),
+            gateway=gateway or FakeControlGateway(),
             security=BackendBrowserSecurity(secret=b"browser-session-secret-at-least-32-bytes"),
             secure_cookie=secure_cookie,
         ),
@@ -69,6 +71,60 @@ def test_control_mutations_require_json_valid_session_csrf_and_same_origin() -> 
         invalid_session = client.patch("/v1/session", json={"ui_locale": "en"}, headers=valid)
         assert invalid_session.status_code == 403
         assert invalid_session.json()["error"]["code"] == "session_invalid"
+
+
+def test_metadata_search_rejections_do_not_invoke_gateway_or_create_selection_state() -> None:
+    class CountingGateway(FakeControlGateway):
+        def __init__(self) -> None:
+            super().__init__()
+            self.search_calls = 0
+            self.selection_tokens: set[str] = set()
+
+        async def search_metadata(self, *, request):  # type: ignore[no-untyped-def]
+            self.search_calls += 1
+            results = await super().search_metadata(request=request)
+            self.selection_tokens.update(result.token for result in results)
+            return results
+
+    gateway = CountingGateway()
+    with _client(gateway=gateway) as client:
+        csrf = client.get("/v1/session").json()["csrf_token"]
+        valid = {"Origin": "http://testserver", "X-CSRF-Token": csrf}
+        payload = {"query": "Example", "locale": "en"}
+
+        wrong_type = client.post(
+            "/v1/metadata-searches",
+            content="query=Example",
+            headers=valid | {"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert wrong_type.status_code == 415
+
+        for headers, code in (
+            ({"Origin": "http://testserver"}, "csrf_invalid"),
+            ({"Origin": "http://testserver", "X-CSRF-Token": "invalid"}, "csrf_invalid"),
+            ({"Origin": "https://attacker.example", "X-CSRF-Token": csrf}, "origin_invalid"),
+        ):
+            rejected = client.post("/v1/metadata-searches", json=payload, headers=headers)
+            assert rejected.status_code == 403
+            assert rejected.json()["error"]["code"] == code
+
+        client.cookies.clear()
+        missing_session = client.post("/v1/metadata-searches", json=payload, headers=valid)
+        assert missing_session.status_code == 403
+        assert missing_session.json()["error"]["code"] == "session_invalid"
+
+        refreshed_csrf = client.get("/v1/session").json()["csrf_token"]
+        client.cookies.set("mf_session", "invalid")
+        invalid_session = client.post(
+            "/v1/metadata-searches",
+            json=payload,
+            headers={"Origin": "http://testserver", "X-CSRF-Token": refreshed_csrf},
+        )
+        assert invalid_session.status_code == 403
+        assert invalid_session.json()["error"]["code"] == "session_invalid"
+
+        assert gateway.search_calls == 0
+        assert gateway.selection_tokens == set()
 
 
 def test_control_body_is_bounded_and_framework_errors_are_safe() -> None:

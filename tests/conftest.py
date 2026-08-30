@@ -61,6 +61,8 @@ class FakeProvider:
                 media_kind=MediaKind.MOVIE,
                 title=query.query,
                 locale=query.locale,
+                description="Fixture search preview",
+                poster_url="https://images.example.test/posters/fixture-1.jpg",
             ),
         )
 
