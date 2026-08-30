@@ -13,3 +13,4 @@ packages/builtin-ui/test-results/
 .DS_Store
 Thumbs.db
 .vscode/
+.lavish/
