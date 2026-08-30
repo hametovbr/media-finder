@@ -76,7 +76,36 @@ test.beforeEach(async ({ page }) => {
     return route.fulfill({ json: item });
   });
   await page.route("**/api/control/v1/metadata-providers", (route) =>
-    route.fulfill({ json: [] }),
+    route.fulfill({
+      json: [
+        {
+          capabilities: ["search", "select"],
+          key: "tmdb",
+          name_key: "tmdb.name",
+          ready: true,
+        },
+      ],
+    }),
+  );
+  await page.route("**/api/control/v1/metadata-searches", (route) =>
+    route.fulfill({
+      json: [
+        {
+          description: "A deterministic browser preview.",
+          external_id: "329865",
+          kind: "movie",
+          locale: "en",
+          poster_url: "http://127.0.0.1:4173/poster-failure.jpg",
+          provider_key: "tmdb",
+          title: "Arrival",
+          token: "metadata-token-browser",
+          year: 2016,
+        },
+      ],
+    }),
+  );
+  await page.route("**/api/control/v1/metadata-selections/*", (route) =>
+    route.fulfill({ json: manualItem("movie", "Arrival"), status: 201 }),
   );
   await page.route(
     "**/api/control/v1/manual-imports",
@@ -300,6 +329,130 @@ test("Manual create remains localized and responsive in Russian", async ({
       ),
     )
     .toBe(true);
+});
+
+test("metadata rows support keyboard focus, pending feedback, poster failure, and mobile width", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/poster-failure.jpg", (route) => route.abort());
+  let selectionRequests = 0;
+  await page.route("**/api/control/v1/metadata-selections/*", async (route) => {
+    selectionRequests += 1;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await route.fulfill({
+      json: manualItem("movie", "Arrival"),
+      status: 201,
+    });
+  });
+  await page.goto("/add");
+  await page.getByRole("button", { name: "Search metadata providers" }).click();
+  await page.getByRole("searchbox", { name: "Title" }).fill("Arrival");
+  const search = page.getByRole("button", { name: "Search" });
+  await search.click();
+  const row = page.getByRole("article", { name: /Arrival/ });
+  await expect(
+    row.getByRole("img", { name: "Poster unavailable for Arrival" }),
+  ).toBeVisible();
+  const select = row.getByRole("button", { name: "Select" });
+  await search.focus();
+  await page.keyboard.press("Tab");
+  await expect(select).toBeFocused();
+  await expect
+    .poll(() =>
+      select.evaluate((element) => getComputedStyle(element).outlineStyle),
+    )
+    .not.toBe("none");
+  await page.keyboard.press("Enter");
+  await expect(
+    row.getByRole("status", { name: "Selecting Arrival" }),
+  ).toBeVisible();
+  await expect(select).toBeDisabled();
+  await expect(
+    page.getByRole("heading", { name: "Saved to catalog" }),
+  ).toBeVisible();
+  expect(selectionRequests).toBe(1);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    )
+    .toBe(true);
+});
+
+test("Russian metadata similarity confirmation uses its new token and recovers from expiry", async ({
+  page,
+}) => {
+  const tokens: string[] = [];
+  await page.route(
+    "**/api/control/v1/metadata-selections/*",
+    async (route, request) => {
+      const token = new URL(request.url()).pathname.split("/").at(-1) ?? "";
+      tokens.push(token);
+      if (token === "metadata-token-browser") {
+        await route.fulfill({
+          status: 409,
+          json: {
+            error: {
+              code: "confirmation_required",
+              details: {
+                confirmation_token: "metadata-confirmation-browser",
+                kind: "similarity",
+              },
+            },
+          },
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 410,
+        json: { error: { code: "selection_expired" } },
+      });
+    },
+  );
+  await page.goto("/add");
+  await page
+    .getByRole("button", {
+      name: "\u0420\u0443\u0441\u0441\u043a\u0438\u0439",
+    })
+    .click();
+  await page
+    .getByRole("button", {
+      name: "\u041d\u0430\u0439\u0442\u0438 \u0443 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u043e\u0432 \u043c\u0435\u0442\u0430\u0434\u0430\u043d\u043d\u044b\u0445",
+    })
+    .click();
+  await page
+    .getByRole("searchbox", {
+      name: "\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435",
+    })
+    .fill("Arrival");
+  await page
+    .getByRole("button", { name: "\u041d\u0430\u0439\u0442\u0438" })
+    .click();
+  await page
+    .getByRole("button", {
+      name: "\u0412\u044b\u0431\u0440\u0430\u0442\u044c",
+    })
+    .click();
+  await expect(
+    page.getByRole("dialog", {
+      name: "\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c \u043f\u043e\u0445\u043e\u0436\u0435\u0435 \u043f\u0440\u043e\u0438\u0437\u0432\u0435\u0434\u0435\u043d\u0438\u0435",
+    }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", {
+      name: "\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c \u0432\u044b\u0431\u043e\u0440",
+    })
+    .click();
+  await expect(page.getByRole("alert")).toContainText(
+    "\u0421\u0440\u043e\u043a \u0432\u044b\u0431\u043e\u0440\u0430 \u0438\u0441\u0442\u0451\u043a. \u0412\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u0435 \u043f\u043e\u0438\u0441\u043a \u0441\u043d\u043e\u0432\u0430.",
+  );
+  await expect(page.getByRole("article", { name: /Arrival/ })).toBeHidden();
+  expect(tokens).toEqual([
+    "metadata-token-browser",
+    "metadata-confirmation-browser",
+  ]);
 });
 
 test("desktop navigation remains visible", async ({ page }) => {

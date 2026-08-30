@@ -160,6 +160,8 @@ class MetadataSearchResult(ControlModel):
     title: str
     year: int | None = None
     locale: Locale
+    description: str | None = None
+    poster_url: HttpUrl | None = None
 
 
 class MetadataSelectionRequest(ControlModel):

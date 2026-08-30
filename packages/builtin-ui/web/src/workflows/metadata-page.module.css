@@ -1,0 +1,65 @@
+.resultRow {
+  align-items: start;
+  display: grid;
+  gap: var(--mantine-spacing-md);
+  grid-template-columns: 6rem minmax(0, 1fr) auto;
+  min-width: 0;
+}
+
+.poster {
+  aspect-ratio: 2 / 3;
+  background: linear-gradient(
+    145deg,
+    var(--mantine-color-blue-8),
+    var(--mantine-color-dark-7)
+  );
+  border-radius: var(--mantine-radius-sm);
+  color: white;
+  display: grid;
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  overflow: hidden;
+  place-items: center;
+  width: 6rem;
+}
+
+.poster img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.resultContent {
+  min-width: 0;
+}
+
+.description {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.selectButton {
+  align-self: center;
+}
+
+.selectButton:focus-visible {
+  outline: 3px solid var(--mantine-color-blue-6);
+  outline-offset: 3px;
+}
+
+@media (max-width: 48em) {
+  .resultRow {
+    gap: var(--mantine-spacing-sm);
+    grid-template-columns: 4.5rem minmax(0, 1fr);
+  }
+
+  .poster {
+    width: 4.5rem;
+  }
+
+  .selectButton {
+    grid-column: 2;
+    justify-self: start;
+  }
+}

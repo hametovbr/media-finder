@@ -131,7 +131,7 @@ function normalizeFailure(error: unknown, response: Response): ControlFailure {
         typeof details === "object" &&
         details !== null &&
         "kind" in details &&
-        details.kind === "manual" &&
+        (details.kind === "manual" || details.kind === "similarity") &&
         "confirmation_token" in details &&
         typeof details.confirmation_token === "string"
           ? details.confirmation_token

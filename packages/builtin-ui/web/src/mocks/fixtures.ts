@@ -209,19 +209,24 @@ export const metadataProviders = [
 
 export const metadataResults = [
   {
+    description:
+      "A linguist works with the military to communicate with alien lifeforms.",
     external_id: "329865",
     kind: "movie",
     locale: "en",
     provider_key: "tmdb",
+    poster_url: "https://images.example.invalid/posters/arrival.jpg",
     title: "Arrival",
     token: "metadata-token-tmdb",
     year: 2016,
   },
   {
+    description: null,
     external_id: "tt2543164",
     kind: "movie",
     locale: "en",
     provider_key: "omdb",
+    poster_url: null,
     title: "Arrival",
     token: "metadata-token-omdb",
     year: 2016,

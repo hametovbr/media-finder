@@ -140,17 +140,21 @@
     },
     "results": [
       {
+        "description": "A journey through a spirit world.",
         "external_id": "129",
         "locale": "en-US",
         "media_kind": "movie",
+        "poster_url": "https://image.tmdb.org/t/p/original/spirited-poster.jpg",
         "provider_id": "tmdb",
         "title": "Spirited Away",
         "year": 2001
       },
       {
+        "description": "A fixture series with a special.",
         "external_id": "900",
         "locale": "en-US",
         "media_kind": "series",
+        "poster_url": "https://image.tmdb.org/t/p/original/series-poster.jpg",
         "provider_id": "tmdb",
         "title": "Fixture Series",
         "year": 2020

@@ -270,6 +270,18 @@
     "MetadataSearchResult": {
       "additionalProperties": false,
       "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
         "external_id": {
           "maxLength": 512,
           "minLength": 1,
@@ -282,6 +294,21 @@
         },
         "media_kind": {
           "$ref": "#/$defs/MediaKind"
+        },
+        "poster_url": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Poster Url"
         },
         "provider_id": {
           "title": "Provider Id",

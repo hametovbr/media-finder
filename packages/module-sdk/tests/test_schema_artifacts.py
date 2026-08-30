@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
-from media_finder_sdk import generate_schema_artifacts
+from media_finder_sdk import SDK_VERSION, generate_schema_artifacts
 
 ROOT = Path(__file__).parents[3]
 SCHEMA_ROOT = ROOT / "schemas" / "module-sdk" / "v1"
@@ -78,6 +79,47 @@ def test_schemas_preserve_semantic_module_boundaries() -> None:
     release_definitions = schemas["release.schema.json"]["$defs"]
     assert release_definitions["PrivateReleaseSelection"]["writeOnly"] is True
     assert release_definitions["TorrentArtifact"]["maxLength"] > 0
+
+
+def test_metadata_search_preview_contract_is_optional_and_version_one() -> None:
+    schemas = {
+        filename: json.loads(payload) for filename, payload in generate_schema_artifacts().items()
+    }
+    metadata_result = schemas["metadata.schema.json"]["$defs"]["MetadataSearchResult"]
+    serialized_result = schemas["conformance.schema.json"]["$defs"]["MetadataSearchResult"]
+
+    assert metadata_result == serialized_result
+    assert metadata_result["additionalProperties"] is False
+    assert set(metadata_result["properties"]) == {
+        "description",
+        "external_id",
+        "locale",
+        "media_kind",
+        "poster_url",
+        "provider_id",
+        "title",
+        "year",
+    }
+    assert "description" not in metadata_result["required"]
+    assert "poster_url" not in metadata_result["required"]
+    assert metadata_result["properties"]["description"] == {
+        "anyOf": [{"type": "string"}, {"type": "null"}],
+        "default": None,
+        "title": "Description",
+    }
+    poster_url = metadata_result["properties"]["poster_url"]
+    assert poster_url["default"] is None
+    assert poster_url["anyOf"][0]["format"] == "uri"
+    assert poster_url["anyOf"][1] == {"type": "null"}
+
+    assert str(SDK_VERSION) == "1.0.0"
+    for manifest_path in (
+        ROOT / "packages/modules/metadata-manual/src/media_finder_metadata_manual/module.toml",
+        ROOT / "packages/modules/metadata-tmdb/src/media_finder_metadata_tmdb/module.toml",
+    ):
+        manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+        assert manifest["sdk_compatibility"] == ">=1,<2"
+        assert manifest["contract_version"] == "1"
 
 
 def test_conformance_schema_is_discriminated_and_never_serializes_private_values() -> None:

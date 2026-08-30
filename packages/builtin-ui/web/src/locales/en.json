@@ -44,9 +44,13 @@
     "confirmDescription": "This title is similar to an existing catalog item. Save it anyway?",
     "confirmTitle": "Confirm similar title",
     "loadingProviders": "Loading metadata providers",
+    "posterFor": "Poster for {{title}}",
+    "posterUnavailable": "Poster unavailable for {{title}}",
     "save": "Save to catalog",
     "saved": "Saved to catalog",
     "search": "Search",
+    "select": "Select",
+    "selecting": "Selecting {{title}}",
     "title": "Title",
     "viewItem": "View item"
   },

@@ -42,8 +42,27 @@ def test_metadata_and_manual_http_adapter_preserves_gateway_workflows() -> None:
             headers=headers,
         )
         assert search.status_code == 200
-        assert search.json()[0]["token"] == "metadata-1"
+        assert search.json()[0] == {
+            "token": "metadata-1",
+            "provider_key": "tmdb",
+            "external_id": "100",
+            "kind": "series",
+            "title": "Example Series",
+            "year": 2025,
+            "locale": "en",
+            "description": "A fixture series description.",
+            "poster_url": "https://images.example.test/posters/series-100.jpg",
+        }
         assert "raw" not in search.text.casefold()
+
+        absent = client.post(
+            "/v1/metadata-searches",
+            json={"query": "no preview", "locale": "en", "provider_keys": []},
+            headers=headers,
+        )
+        assert absent.status_code == 200
+        assert absent.json()[0]["description"] is None
+        assert absent.json()[0]["poster_url"] is None
         selected = client.post(
             "/v1/metadata-selections/metadata-1",
             json={"confirm_similarity": False},

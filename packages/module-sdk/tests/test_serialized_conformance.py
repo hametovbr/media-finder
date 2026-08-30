@@ -70,8 +70,8 @@ def _release_fixture() -> dict[str, object]:
     }
 
 
-def test_serialized_conformance_parser_discriminates_all_module_kinds() -> None:
-    metadata = _common("metadata-provider") | {
+def _metadata_fixture() -> dict[str, object]:
+    return _common("metadata-provider") | {
         "success": {
             "query": {"query": "Fixture", "locale": "en", "limit": 1},
             "results": [
@@ -107,6 +107,10 @@ def test_serialized_conformance_parser_discriminates_all_module_kinds() -> None:
             },
         }
     }
+
+
+def test_serialized_conformance_parser_discriminates_all_module_kinds() -> None:
+    metadata = _metadata_fixture()
     release = _release_fixture()
     download = _common("download-client") | {
         "success": {
@@ -127,10 +131,10 @@ def test_serialized_conformance_parser_discriminates_all_module_kinds() -> None:
         }
     }
 
-    assert isinstance(
-        parse_serialized_conformance_fixture(json.dumps(metadata).encode()),
-        SerializedMetadataProviderConformance,
-    )
+    parsed_metadata = parse_serialized_conformance_fixture(json.dumps(metadata).encode())
+    assert isinstance(parsed_metadata, SerializedMetadataProviderConformance)
+    assert parsed_metadata.success.results[0].description is None
+    assert parsed_metadata.success.results[0].poster_url is None
     assert isinstance(
         parse_serialized_conformance_fixture(json.dumps(release).encode()),
         SerializedReleaseProviderConformance,
@@ -139,6 +143,25 @@ def test_serialized_conformance_parser_discriminates_all_module_kinds() -> None:
         parse_serialized_conformance_fixture(json.dumps(download).encode()),
         SerializedDownloadClientConformance,
     )
+
+
+def test_serialized_metadata_previews_accept_valid_values_and_reject_invalid_urls() -> None:
+    fixture = _metadata_fixture()
+    result = fixture["success"]["results"][0]  # type: ignore[index]
+    result["description"] = "A serialized preview."  # type: ignore[index]
+    result["poster_url"] = "https://images.example.test/posters/fixture.jpg"  # type: ignore[index]
+
+    parsed = parse_serialized_conformance_fixture(json.dumps(fixture).encode())
+
+    assert isinstance(parsed, SerializedMetadataProviderConformance)
+    assert parsed.success.results[0].description == "A serialized preview."
+    assert str(parsed.success.results[0].poster_url) == (
+        "https://images.example.test/posters/fixture.jpg"
+    )
+
+    result["poster_url"] = "not a URL"  # type: ignore[index]
+    with pytest.raises(ValidationError):
+        parse_serialized_conformance_fixture(json.dumps(fixture).encode())
 
 
 @pytest.mark.parametrize(
