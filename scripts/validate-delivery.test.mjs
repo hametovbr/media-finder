@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import YAML from "yaml";
 
 import { validateDelivery } from "./validate-delivery.mjs";
 
@@ -53,6 +54,51 @@ function copyDeliveryFixture() {
 function mutate(root, relativePath, transform) {
   const target = path.join(root, relativePath);
   fs.writeFileSync(target, transform(fs.readFileSync(target, "utf8")), "utf8");
+}
+
+const validationDate = "2026-08-28";
+
+function validSecurityException(overrides = {}) {
+  return {
+    id: "security-exception-example",
+    scanner: "ruff",
+    finding_id: "S101",
+    severity: "medium",
+    scope: "packages/core/src/example.py:10",
+    disposition: "false-positive",
+    rationale: "The bounded test fixture contains no production assertion.",
+    owner: "@maintainer",
+    tracking_ref: "https://github.com/hametovbr/media-finder/issues/123",
+    approved_on: "2026-08-01",
+    expires_on: "2026-10-01",
+    suppression: {
+      kind: "repository-file",
+      path: "config/security-suppressions.txt",
+    },
+    ...overrides,
+  };
+}
+
+function writeSecurityManifest(root, exceptions, schemaVersion = 1) {
+  const target = path.join(root, ".github/security-exceptions.yaml");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(
+    target,
+    YAML.stringify({ schema_version: schemaVersion, exceptions }),
+    "utf8",
+  );
+}
+
+function writeNativeSuppression(root, identifier = "security-exception-example") {
+  const target = path.join(root, "config/security-suppressions.txt");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, `ignored-rule # security-exception: ${identifier}\n`, "utf8");
+}
+
+function securityFailures(root) {
+  return validateDelivery(root, { currentDate: validationDate }).filter((failure) =>
+    failure.startsWith(".github/security-exceptions.yaml:"),
+  );
 }
 
 function ensureWebQualitySteps(value) {
@@ -618,4 +664,305 @@ test("isolated UI runner must discover future test files recursively", (context)
   );
 
   assert.match(validateDelivery(root).join("\n"), /UI isolation runner must discover test files/);
+});
+
+test("security exception manifest is a required delivery artifact", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.rmSync(path.join(root, ".github/security-exceptions.yaml"), { force: true });
+
+  assert.match(securityFailures(root).join("\n"), /required delivery artifact is missing/);
+});
+
+test("an empty version-1 security exception manifest is valid", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeSecurityManifest(root, []);
+
+  assert.deepEqual(securityFailures(root), []);
+});
+
+test("unknown security exception manifest versions are rejected", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeSecurityManifest(root, [], 2);
+
+  assert.match(securityFailures(root).join("\n"), /schema_version must be 1/);
+});
+
+test("security exception manifest entries must be an array", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const target = path.join(root, ".github/security-exceptions.yaml");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, "schema_version: 1\nexceptions: invalid\n", "utf8");
+
+  assert.match(securityFailures(root).join("\n"), /exceptions must be an array/);
+});
+
+test("malformed security exception YAML does not expose its source line", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const target = path.join(root, ".github/security-exceptions.yaml");
+  fs.writeFileSync(
+    target,
+    "schema_version: 1\nexceptions: [MUST-NOT-BE-EMITTED\n",
+    "utf8",
+  );
+
+  const failures = securityFailures(root).join("\n");
+  assert.match(failures, /invalid YAML/);
+  assert.doesNotMatch(failures, /MUST-NOT-BE-EMITTED/);
+});
+
+for (const field of [
+  "id",
+  "scanner",
+  "finding_id",
+  "severity",
+  "scope",
+  "disposition",
+  "rationale",
+  "owner",
+  "tracking_ref",
+  "approved_on",
+  "expires_on",
+  "suppression",
+]) {
+  test(`security exceptions require ${field}`, (context) => {
+    const root = copyDeliveryFixture();
+    context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    writeNativeSuppression(root);
+    const exception = validSecurityException();
+    delete exception[field];
+    writeSecurityManifest(root, [exception]);
+
+    const label = field === "id" ? "exception\\[0\\]" : "security-exception-example";
+    assert.match(securityFailures(root).join("\n"), new RegExp(`${label}.*${field}`));
+  });
+}
+
+test("security exception identifiers use stable kebab-case", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeNativeSuppression(root, "MUST-NOT-BE-EMITTED");
+  writeSecurityManifest(root, [validSecurityException({ id: "MUST-NOT-BE-EMITTED" })]);
+
+  const failures = securityFailures(root).join("\n");
+  assert.match(failures, /exception\[0\].*stable kebab-case/);
+  assert.doesNotMatch(failures, /MUST-NOT-BE-EMITTED/);
+});
+
+test("security exception tracking references use safe GitHub identifiers", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeNativeSuppression(root);
+  writeSecurityManifest(root, [
+    validSecurityException({ tracking_ref: "https://example.com/private/report" }),
+  ]);
+
+  assert.match(securityFailures(root).join("\n"), /security-exception-example.*tracking_ref/);
+});
+
+for (const [field, value] of [
+  ["severity", "urgent"],
+  ["disposition", "permanent-ignore"],
+]) {
+  test(`security exceptions reject invalid ${field}`, (context) => {
+    const root = copyDeliveryFixture();
+    context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    writeNativeSuppression(root);
+    writeSecurityManifest(root, [validSecurityException({ [field]: value })]);
+
+    assert.match(securityFailures(root).join("\n"), new RegExp(`security-exception-example.*${field}`));
+  });
+}
+
+test("security exception identifiers are unique", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeNativeSuppression(root);
+  writeSecurityManifest(root, [validSecurityException(), validSecurityException()]);
+
+  assert.match(securityFailures(root).join("\n"), /duplicate id security-exception-example/);
+});
+
+for (const unsafePath of ["/etc/passwd", "../outside.txt"]) {
+  test(`repository suppression paths reject ${unsafePath}`, (context) => {
+    const root = copyDeliveryFixture();
+    context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    writeSecurityManifest(root, [
+      validSecurityException({
+        suppression: { kind: "repository-file", path: unsafePath },
+      }),
+    ]);
+
+    assert.match(securityFailures(root).join("\n"), /security-exception-example.*suppression\.path/);
+  });
+}
+
+test("the exception manifest cannot act as its own native suppression", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeSecurityManifest(root, [
+    validSecurityException({
+      suppression: { kind: "repository-file", path: ".github/security-exceptions.yaml" },
+    }),
+  ]);
+
+  assert.match(securityFailures(root).join("\n"), /security-exception-example.*manifest/);
+});
+
+test("a symlink to the exception manifest cannot act as a native suppression", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeSecurityManifest(root, [validSecurityException()]);
+  const target = path.join(root, "config/security-suppressions.txt");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.symlinkSync("../.github/security-exceptions.yaml", target);
+
+  assert.match(securityFailures(root).join("\n"), /security-exception-example.*manifest/);
+});
+
+test("repository suppressions cannot escape the checkout through a symlink", (context) => {
+  const root = copyDeliveryFixture();
+  const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "media-finder-external-suppression-"));
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  context.after(() => fs.rmSync(externalRoot, { recursive: true, force: true }));
+  const externalTarget = path.join(externalRoot, "security-suppressions.txt");
+  fs.writeFileSync(externalTarget, "ignored-rule # security-exception-example\n", "utf8");
+  const target = path.join(root, "config/security-suppressions.txt");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.symlinkSync(externalTarget, target);
+  writeSecurityManifest(root, [validSecurityException()]);
+
+  assert.match(securityFailures(root).join("\n"), /security-exception-example.*inside the checkout/);
+});
+
+test("repository suppressions must reference an existing file", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeSecurityManifest(root, [validSecurityException()]);
+
+  assert.match(securityFailures(root).join("\n"), /security-exception-example.*target is missing/);
+});
+
+test("repository suppressions must carry their exception marker", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeNativeSuppression(root, "another-exception");
+  writeSecurityManifest(root, [validSecurityException()]);
+
+  assert.match(securityFailures(root).join("\n"), /security-exception-example.*marker is missing/);
+});
+
+test("repository suppression markers require the namespaced form", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const target = path.join(root, "config/security-suppressions.txt");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, "ignored-rule # security-exception-example\n", "utf8");
+  writeSecurityManifest(root, [validSecurityException()]);
+
+  assert.match(securityFailures(root).join("\n"), /security-exception-example.*marker is missing/);
+});
+
+test("repository suppression markers do not accept identifier prefixes", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeNativeSuppression(root, "security-exception-example-longer");
+  writeSecurityManifest(root, [validSecurityException()]);
+
+  assert.match(securityFailures(root).join("\n"), /security-exception-example.*marker is missing/);
+});
+
+test("security exceptions reject approval dates after expiry", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeNativeSuppression(root);
+  writeSecurityManifest(root, [validSecurityException({ expires_on: "2026-07-31" })]);
+
+  assert.match(securityFailures(root).join("\n"), /security-exception-example.*expires_on.*approved_on/);
+});
+
+test("security exceptions reject blank required text", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeNativeSuppression(root);
+  writeSecurityManifest(root, [validSecurityException({ rationale: "   " })]);
+
+  assert.match(securityFailures(root).join("\n"), /security-exception-example.*rationale/);
+});
+
+test("security exceptions reject unbounded required text", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeNativeSuppression(root);
+  writeSecurityManifest(root, [validSecurityException({ rationale: "x".repeat(2049) })]);
+
+  assert.match(securityFailures(root).join("\n"), /security-exception-example.*rationale.*2048/);
+});
+
+test("security exceptions require exact calendar dates", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeNativeSuppression(root);
+  writeSecurityManifest(root, [validSecurityException({ approved_on: "2026-02-30" })]);
+
+  assert.match(securityFailures(root).join("\n"), /security-exception-example.*approved_on.*YYYY-MM-DD/);
+});
+
+test("security exceptions cannot exceed the 90-day review window", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeNativeSuppression(root);
+  writeSecurityManifest(root, [validSecurityException({ expires_on: "2026-10-31" })]);
+
+  assert.match(securityFailures(root).join("\n"), /security-exception-example.*90 days/);
+});
+
+test("security exceptions reject approval dates after the current UTC date", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeNativeSuppression(root);
+  writeSecurityManifest(root, [
+    validSecurityException({ approved_on: "2026-08-29", expires_on: "2026-10-01" }),
+  ]);
+
+  assert.match(securityFailures(root).join("\n"), /security-exception-example.*approved_on.*future/);
+});
+
+test("security exceptions expire at the start of their UTC expiry date", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeNativeSuppression(root);
+  writeSecurityManifest(root, [validSecurityException({ expires_on: validationDate })]);
+
+  assert.match(securityFailures(root).join("\n"), /security-exception-example.*expired/);
+});
+
+test("an active repository-file security exception is valid", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeNativeSuppression(root);
+  writeSecurityManifest(root, [validSecurityException()]);
+
+  assert.deepEqual(securityFailures(root), []);
+});
+
+test("an active GitHub-hosted security exception locator is structurally valid", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const alertUrl = "https://github.com/hametovbr/media-finder/security/code-scanning/123";
+  writeSecurityManifest(root, [
+    validSecurityException({
+      id: "security-exception-codeql-example",
+      scanner: "codeql",
+      finding_id: "js/example-query",
+      tracking_ref: alertUrl,
+      suppression: { kind: "github-code-scanning-alert", url: alertUrl },
+    }),
+  ]);
+
+  assert.deepEqual(securityFailures(root), []);
 });

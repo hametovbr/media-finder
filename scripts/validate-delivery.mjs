@@ -23,9 +23,271 @@ function loadYaml(root, relativePath, failures) {
   if (!content) return {};
   try {
     return YAML.parse(content) ?? {};
-  } catch (error) {
-    failures.push(`${relativePath}: invalid YAML (${error.message})`);
+  } catch {
+    failures.push(`${relativePath}: invalid YAML`);
     return {};
+  }
+}
+
+const SECURITY_EXCEPTION_MANIFEST = ".github/security-exceptions.yaml";
+const SECURITY_EXCEPTION_SEVERITIES = new Set([
+  "critical",
+  "high",
+  "medium",
+  "low",
+  "unknown",
+]);
+const SECURITY_EXCEPTION_DISPOSITIONS = new Set([
+  "false-positive",
+  "accepted-risk",
+  "temporary-mitigation",
+]);
+const SECURITY_EXCEPTION_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const SECURITY_EXCEPTION_MAX_TEXT = 2048;
+const DAY_IN_MILLISECONDS = 24 * 60 * 60 * 1000;
+
+function exactUtcDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+  const milliseconds = Date.parse(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(milliseconds)) return undefined;
+  return new Date(milliseconds).toISOString().slice(0, 10) === value
+    ? milliseconds
+    : undefined;
+}
+
+function safeTrackingReference(value) {
+  if (typeof value !== "string") return false;
+  return (
+    /^#[1-9]\d*$/.test(value) ||
+    /^GHSA-[A-Za-z0-9-]+$/.test(value) ||
+    /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/(?:issues\/[1-9]\d*|security\/(?:advisories\/GHSA-[A-Za-z0-9-]+|code-scanning\/[1-9]\d*))$/.test(
+      value,
+    )
+  );
+}
+
+function exceptionLabel(exception, index) {
+  return typeof exception?.id === "string" &&
+    exception.id.length <= 100 &&
+    SECURITY_EXCEPTION_ID_PATTERN.test(exception.id)
+    ? exception.id
+    : `exception[${index}]`;
+}
+
+function hasSecurityExceptionMarker(content, identifier) {
+  return (
+    typeof content === "string" &&
+    typeof identifier === "string" &&
+    identifier.length <= 100 &&
+    SECURITY_EXCEPTION_ID_PATTERN.test(identifier) &&
+    new RegExp(`security-exception: ${identifier}(?![a-z0-9-])`).test(content)
+  );
+}
+
+function validRequiredText(exception, field, label, failures) {
+  const value = exception?.[field];
+  const valid =
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    value.length <= SECURITY_EXCEPTION_MAX_TEXT;
+  requireValue(
+    failures,
+    valid,
+    `${SECURITY_EXCEPTION_MANIFEST}: ${label} ${field} must be non-empty and at most ${SECURITY_EXCEPTION_MAX_TEXT} characters`,
+  );
+  return valid;
+}
+
+function safeRepositoryPath(relativePath) {
+  if (typeof relativePath !== "string" || !relativePath.trim() || path.isAbsolute(relativePath)) {
+    return false;
+  }
+  const normalized = path.normalize(relativePath);
+  return normalized !== "." && normalized !== ".." && !normalized.startsWith(`..${path.sep}`);
+}
+
+function validateSecurityExceptions(root, failures, currentDate) {
+  const manifestPath = path.join(root, SECURITY_EXCEPTION_MANIFEST);
+  if (!fs.existsSync(manifestPath)) {
+    readText(root, SECURITY_EXCEPTION_MANIFEST, failures);
+    return;
+  }
+  const manifest = loadYaml(root, SECURITY_EXCEPTION_MANIFEST, failures);
+  requireValue(
+    failures,
+    manifest?.schema_version === 1,
+    `${SECURITY_EXCEPTION_MANIFEST}: schema_version must be 1`,
+  );
+  if (!Array.isArray(manifest?.exceptions)) {
+    failures.push(`${SECURITY_EXCEPTION_MANIFEST}: exceptions must be an array`);
+    return;
+  }
+
+  const effectiveDate =
+    currentDate instanceof Date
+      ? currentDate.toISOString().slice(0, 10)
+      : (currentDate ?? new Date().toISOString().slice(0, 10));
+  const currentMilliseconds = exactUtcDate(effectiveDate);
+  if (currentMilliseconds === undefined) {
+    failures.push(`${SECURITY_EXCEPTION_MANIFEST}: currentDate must use YYYY-MM-DD`);
+    return;
+  }
+
+  const identifiers = new Set();
+  for (const [index, exception] of manifest.exceptions.entries()) {
+    const label = exceptionLabel(exception, index);
+    if (exception === null || typeof exception !== "object" || Array.isArray(exception)) {
+      failures.push(`${SECURITY_EXCEPTION_MANIFEST}: ${label} must be an object`);
+      continue;
+    }
+
+    for (const field of [
+      "id",
+      "scanner",
+      "finding_id",
+      "severity",
+      "scope",
+      "disposition",
+      "rationale",
+      "owner",
+      "tracking_ref",
+      "approved_on",
+      "expires_on",
+    ]) {
+      validRequiredText(exception, field, label, failures);
+    }
+
+    const identifierValid =
+      typeof exception.id === "string" &&
+      SECURITY_EXCEPTION_ID_PATTERN.test(exception.id) &&
+      exception.id.length <= 100;
+    requireValue(
+      failures,
+      identifierValid,
+      `${SECURITY_EXCEPTION_MANIFEST}: ${label} id must use stable kebab-case with at most 100 characters`,
+    );
+    if (identifierValid) {
+      requireValue(
+        failures,
+        !identifiers.has(exception.id),
+        `${SECURITY_EXCEPTION_MANIFEST}: duplicate id ${exception.id}`,
+      );
+      identifiers.add(exception.id);
+    }
+    requireValue(
+      failures,
+      SECURITY_EXCEPTION_SEVERITIES.has(exception.severity),
+      `${SECURITY_EXCEPTION_MANIFEST}: ${label} severity is invalid`,
+    );
+    requireValue(
+      failures,
+      SECURITY_EXCEPTION_DISPOSITIONS.has(exception.disposition),
+      `${SECURITY_EXCEPTION_MANIFEST}: ${label} disposition is invalid`,
+    );
+    requireValue(
+      failures,
+      safeTrackingReference(exception.tracking_ref),
+      `${SECURITY_EXCEPTION_MANIFEST}: ${label} tracking_ref must be a safe GitHub issue, advisory, or alert identifier`,
+    );
+
+    const approvedMilliseconds = exactUtcDate(exception.approved_on);
+    const expiresMilliseconds = exactUtcDate(exception.expires_on);
+    requireValue(
+      failures,
+      approvedMilliseconds !== undefined,
+      `${SECURITY_EXCEPTION_MANIFEST}: ${label} approved_on must use an exact YYYY-MM-DD calendar date`,
+    );
+    requireValue(
+      failures,
+      expiresMilliseconds !== undefined,
+      `${SECURITY_EXCEPTION_MANIFEST}: ${label} expires_on must use an exact YYYY-MM-DD calendar date`,
+    );
+    if (approvedMilliseconds !== undefined && expiresMilliseconds !== undefined) {
+      requireValue(
+        failures,
+        expiresMilliseconds > approvedMilliseconds,
+        `${SECURITY_EXCEPTION_MANIFEST}: ${label} expires_on must be after approved_on`,
+      );
+      requireValue(
+        failures,
+        (expiresMilliseconds - approvedMilliseconds) / DAY_IN_MILLISECONDS <= 90,
+        `${SECURITY_EXCEPTION_MANIFEST}: ${label} exception window must not exceed 90 days`,
+      );
+      requireValue(
+        failures,
+        currentMilliseconds < expiresMilliseconds,
+        `${SECURITY_EXCEPTION_MANIFEST}: ${label} exception is expired`,
+      );
+    }
+    if (approvedMilliseconds !== undefined) {
+      requireValue(
+        failures,
+        approvedMilliseconds <= currentMilliseconds,
+        `${SECURITY_EXCEPTION_MANIFEST}: ${label} approved_on cannot be in the future`,
+      );
+    }
+
+    const suppression = exception.suppression;
+    if (suppression === null || typeof suppression !== "object" || Array.isArray(suppression)) {
+      failures.push(`${SECURITY_EXCEPTION_MANIFEST}: ${label} suppression must be an object`);
+      continue;
+    }
+    if (suppression.kind === "repository-file") {
+      const pathIsSafe = safeRepositoryPath(suppression.path);
+      requireValue(
+        failures,
+        pathIsSafe,
+        `${SECURITY_EXCEPTION_MANIFEST}: ${label} suppression.path must be a safe repository-relative path`,
+      );
+      if (pathIsSafe) {
+        const target = path.join(root, suppression.path);
+        const targetIsFile = fs.existsSync(target) && fs.statSync(target).isFile();
+        requireValue(
+          failures,
+          targetIsFile,
+          `${SECURITY_EXCEPTION_MANIFEST}: ${label} suppression target is missing`,
+        );
+        if (targetIsFile) {
+          const rootRealPath = fs.realpathSync(root);
+          const targetRealPath = fs.realpathSync(target);
+          const manifestRealPath = fs.realpathSync(manifestPath);
+          const relativeTarget = path.relative(rootRealPath, targetRealPath);
+          const targetIsInsideCheckout =
+            relativeTarget !== "" &&
+            !path.isAbsolute(relativeTarget) &&
+            relativeTarget !== ".." &&
+            !relativeTarget.startsWith(`..${path.sep}`);
+          requireValue(
+            failures,
+            targetIsInsideCheckout,
+            `${SECURITY_EXCEPTION_MANIFEST}: ${label} suppression target must stay inside the checkout`,
+          );
+          const targetsManifest = targetRealPath === manifestRealPath;
+          requireValue(
+            failures,
+            !targetsManifest,
+            `${SECURITY_EXCEPTION_MANIFEST}: ${label} exception manifest cannot be its native suppression`,
+          );
+          if (!targetIsInsideCheckout || targetsManifest) continue;
+          requireValue(
+            failures,
+            hasSecurityExceptionMarker(fs.readFileSync(target, "utf8"), exception.id),
+            `${SECURITY_EXCEPTION_MANIFEST}: ${label} suppression marker is missing`,
+          );
+        }
+      }
+    } else if (suppression.kind === "github-code-scanning-alert") {
+      requireValue(
+        failures,
+        typeof suppression.url === "string" &&
+          /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/security\/code-scanning\/[1-9]\d*$/.test(
+            suppression.url,
+          ),
+        `${SECURITY_EXCEPTION_MANIFEST}: ${label} suppression.url must identify an exact GitHub code-scanning alert`,
+      );
+    } else {
+      failures.push(`${SECURITY_EXCEPTION_MANIFEST}: ${label} suppression.kind is invalid`);
+    }
   }
 }
 
@@ -804,8 +1066,9 @@ function validatePublishWorkflows(ci, release, failures) {
   );
 }
 
-export function validateDelivery(root = process.cwd()) {
+export function validateDelivery(root = process.cwd(), options = {}) {
   const failures = [];
+  validateSecurityExceptions(root, failures, options.currentDate);
   validateCompose(root, failures);
   const ciPath = ".github/workflows/ci.yaml";
   const verifyPath = ".github/workflows/verify.yaml";
