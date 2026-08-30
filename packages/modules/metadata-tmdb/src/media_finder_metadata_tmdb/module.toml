@@ -1,6 +1,6 @@
 module_id = "tmdb"
 module_kind = "metadata-provider"
-module_version = "0.3.0"
+module_version = "0.4.0"
 sdk_compatibility = ">=1,<2"
 contract_version = "1"
 name_key = "module.tmdb.name"

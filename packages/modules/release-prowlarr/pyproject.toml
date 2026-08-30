@@ -1,6 +1,6 @@
 [project]
 name = "media-finder-release-prowlarr"
-version = "0.3.0"
+version = "0.4.0"
 description = "Prowlarr release provider module for Media Finder"
 requires-python = ">=3.13,<3.14"
 license = "MIT"

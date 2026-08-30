@@ -67,7 +67,7 @@ class BackendControlGateway(ControlFacade):
         download_manifest: ModuleManifest,
         environment: Mapping[str, str] | None = None,
         attribution_notices: Mapping[str, str] | None = None,
-        build_version: str = "0.3.0",
+        build_version: str = "0.4.0",
     ) -> None:
         catalog_queries = SqlAlchemyCatalogQueries(sessions)
         catalog_uow = SqlAlchemyCatalogUnitOfWork(sessions)
