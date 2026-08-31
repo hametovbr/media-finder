@@ -1,0 +1,51 @@
+.detailLayout {
+  align-items: start;
+  display: grid;
+  gap: var(--mantine-spacing-xl);
+  grid-template-columns: minmax(9rem, 12rem) minmax(0, 1fr);
+  min-width: 0;
+}
+
+.poster {
+  aspect-ratio: 2 / 3;
+  background: linear-gradient(
+    145deg,
+    var(--mantine-color-blue-8),
+    var(--mantine-color-dark-7)
+  );
+  border-radius: var(--mantine-radius-md);
+  color: white;
+  display: grid;
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  max-width: 12rem;
+  overflow: hidden;
+  place-items: center;
+  width: 100%;
+}
+
+.poster img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.content {
+  min-width: 0;
+}
+
+.wrappingText {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 48em) {
+  .detailLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .poster {
+    width: min(10rem, 45vw);
+  }
+}

@@ -34,6 +34,8 @@
   },
   "detail": {
     "empty": "No overview is available for this item.",
+    "genres": "Genres",
+    "originalTitle": "Original title",
     "loading": "Loading media item"
   },
   "metadata": {

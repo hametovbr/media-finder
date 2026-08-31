@@ -6,6 +6,7 @@ const session = {
   supported_locales: ["en", "ru"],
   ui_locale: "en",
 };
+const detailPosterUrl = "http://127.0.0.1:4173/detail-poster.jpg";
 let savedManual: ReturnType<typeof manualItem> | null = null;
 
 function manualItem(kind: "movie" | "series", title: string) {
@@ -17,11 +18,13 @@ function manualItem(kind: "movie" | "series", title: string) {
     id: `manual-${kind}`,
     kind,
     metadata: {
-      artwork: [],
+      artwork: [{ kind: "poster", url: detailPosterUrl }],
       countries: [],
-      genres: [],
+      genres: [" Mystery ", " ", "Drama"],
       kind,
+      original_title: `${title} original`,
       people: [],
+      plot: `A deterministic ${kind} detail.`,
       ratings: [],
       seasons:
         kind === "series"
@@ -30,6 +33,7 @@ function manualItem(kind: "movie" | "series", title: string) {
       studios: [],
       tags: [],
       titles: { en: title, ru: title },
+      year: 2026,
     },
     provider_key: "manual",
   };
@@ -70,7 +74,27 @@ test.beforeEach(async ({ page }) => {
               external_id: "item-42",
               id: "item-42",
               kind: "movie",
-              metadata: { kind: "movie", titles: { en: "Media overview" } },
+              metadata: {
+                artwork: [
+                  {
+                    kind: "backdrop",
+                    url: "https://images.example.invalid/backdrop.jpg",
+                  },
+                  { kind: "POSTER", url: detailPosterUrl },
+                ],
+                countries: [],
+                genres: [" Science Fiction ", " ", "Drama"],
+                kind: "movie",
+                original_title: "Media overview original",
+                people: [],
+                plot: "A deterministic provider detail.",
+                ratings: [],
+                seasons: [],
+                studios: [],
+                tags: [],
+                titles: { en: "Media overview" },
+                year: 2024,
+              },
               provider_key: "fixture",
             };
     return route.fulfill({ json: item });
@@ -217,6 +241,64 @@ test("creates structured Manual metadata without processor traffic", async ({
     page.getByRole("heading", { name: "Browser Manual" }),
   ).toBeVisible();
   expect(requests.some((path) => path.startsWith("/api/v1"))).toBe(false);
+});
+
+test("rich provider and Manual detail preserve exact poster metadata and actions", async ({
+  page,
+}) => {
+  await page.route("**/detail-poster.jpg", (route) =>
+    route.fulfill({
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="2" height="3"/>',
+      contentType: "image/svg+xml",
+    }),
+  );
+
+  await page.goto("/items/item-42");
+  const providerPoster = page.getByRole("img", {
+    name: "Poster for Media overview",
+  });
+  await expect(providerPoster).toBeVisible();
+  await expect(providerPoster).toHaveAttribute("src", detailPosterUrl);
+  await expect(providerPoster).toHaveAttribute("loading", "lazy");
+  await expect(providerPoster).toHaveAttribute("referrerpolicy", "no-referrer");
+  await expect(page.getByText("Original title")).toBeVisible();
+  await expect(page.getByText("Media overview original")).toBeVisible();
+  await expect(page.getByText("Science Fiction")).toBeVisible();
+  await expect(page.getByText("Drama")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Find release" })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Edit Manual metadata" }),
+  ).toBeHidden();
+
+  await page.goto("/items/manual-movie");
+  await expect(
+    page.getByRole("img", { name: "Poster for Manual Movie" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Edit Manual metadata" }),
+  ).toBeVisible();
+});
+
+test("failed detail poster falls back locally without mobile overflow", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/detail-poster.jpg", (route) => route.abort());
+
+  await page.goto("/items/item-42");
+  await expect(
+    page.getByRole("img", { name: "Poster unavailable for Media overview" }),
+  ).toBeVisible();
+  await expect(page.getByText("Media overview original")).toBeVisible();
+  await expect(page.getByText("Science Fiction")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Find release" })).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    )
+    .toBe(true);
 });
 
 test("bookmarked Manual edit renders nested Season 00 controls", async ({

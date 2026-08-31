@@ -67,9 +67,22 @@ export const mediaDetail = {
   id: "arrival-2016",
   kind: "movie",
   metadata: {
-    artwork: [],
+    artwork: [
+      {
+        kind: "backdrop",
+        url: "https://images.example.invalid/backdrops/arrival.jpg",
+      },
+      {
+        kind: "PoStEr",
+        url: "http://127.0.0.1:8080/manual-poster.jpg",
+      },
+      {
+        kind: "poster",
+        url: "https://images.example.invalid/posters/arrival-second.jpg",
+      },
+    ],
     countries: ["US"],
-    genres: ["Science Fiction"],
+    genres: [" Science Fiction ", " ", "Drama", ""],
     kind: "movie",
     original_title: "Arrival",
     people: [],
