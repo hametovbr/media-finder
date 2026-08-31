@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { HttpResponse, delay, http } from "msw";
 import { setupServer } from "msw/node";
 import { I18nextProvider } from "react-i18next";
@@ -38,6 +38,7 @@ function renderDetail(itemId = mediaDetail.id) {
       </QueryClientProvider>
     </I18nextProvider>,
   );
+  return router;
 }
 
 function useSession() {
@@ -47,7 +48,7 @@ function useSession() {
 }
 
 describe("MediaDetailPage", () => {
-  it("shows a normalized movie overview and Find release without omitted claims", async () => {
+  it("shows rich normalized metadata and the first poster without rewriting it", async () => {
     useSession();
     server.use(
       http.get(`${baseUrl}/v1/media-items/:itemId`, () =>
@@ -61,6 +62,21 @@ describe("MediaDetailPage", () => {
     ).toBeVisible();
     expect(screen.getByText(mediaDetail.metadata.plot!)).toBeVisible();
     expect(screen.getByText("2016")).toBeVisible();
+    expect(screen.getByText("Original title")).toBeVisible();
+    expect(screen.getAllByText("Arrival")).toHaveLength(2);
+    expect(screen.getByText("Genres")).toBeVisible();
+    expect(
+      screen
+        .getAllByText(/^(Science Fiction|Drama)$/)
+        .map((element) => element.textContent),
+    ).toEqual(["Science Fiction", "Drama"]);
+    const poster = screen.getByRole("img", { name: "Poster for Arrival" });
+    expect(poster).toHaveAttribute(
+      "src",
+      "http://127.0.0.1:8080/manual-poster.jpg",
+    );
+    expect(poster).toHaveAttribute("loading", "lazy");
+    expect(poster).toHaveAttribute("referrerpolicy", "no-referrer");
     expect(screen.getByRole("link", { name: "Find release" })).toHaveAttribute(
       "href",
       `/items/${mediaDetail.id}/releases`,
@@ -68,6 +84,86 @@ describe("MediaDetailPage", () => {
     expect(
       screen.queryByText(/season|episode|acquisition history/i),
     ).not.toBeInTheDocument();
+  });
+
+  it("omits whitespace-only metadata and keeps actions beside the local poster fallback", async () => {
+    useSession();
+    server.use(
+      http.get(`${baseUrl}/v1/media-items/:itemId`, () =>
+        HttpResponse.json({
+          ...mediaDetail,
+          id: "empty-detail",
+          metadata: {
+            ...mediaDetail.metadata,
+            artwork: [],
+            genres: [" ", ""],
+            original_title: "   ",
+            plot: null,
+            titles: { en: "Empty detail" },
+            year: null,
+          },
+        }),
+      ),
+    );
+    renderDetail("empty-detail");
+
+    expect(
+      await screen.findByRole("img", {
+        name: "Poster unavailable for Empty detail",
+      }),
+    ).toBeVisible();
+    expect(screen.queryByText("Original title")).not.toBeInTheDocument();
+    expect(screen.queryByText("Genres")).not.toBeInTheDocument();
+    expect(screen.queryByText("2016")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("No overview is available for this item."),
+    ).toBeVisible();
+    expect(screen.getByRole("link", { name: "Find release" })).toBeVisible();
+  });
+
+  it("replaces a failed poster locally and resets failure for a new item URL", async () => {
+    useSession();
+    const secondDetail = {
+      ...mediaDetail,
+      external_id: "second",
+      id: "second-detail",
+      metadata: {
+        ...mediaDetail.metadata,
+        artwork: [
+          {
+            kind: "poster",
+            url: "https://images.example.invalid/posters/second.jpg",
+          },
+        ],
+        original_title: "Second original",
+        titles: { en: "Second detail" },
+      },
+    };
+    server.use(
+      http.get(`${baseUrl}/v1/media-items/:itemId`, ({ params }) =>
+        HttpResponse.json(
+          params.itemId === secondDetail.id ? secondDetail : mediaDetail,
+        ),
+      ),
+    );
+    const router = renderDetail();
+
+    fireEvent.error(
+      await screen.findByRole("img", { name: "Poster for Arrival" }),
+    );
+    expect(
+      screen.getByRole("img", { name: "Poster unavailable for Arrival" }),
+    ).toBeVisible();
+    expect(screen.getByText(mediaDetail.metadata.plot!)).toBeVisible();
+    expect(screen.getByRole("link", { name: "Find release" })).toBeVisible();
+
+    await router.navigate(`/items/${secondDetail.id}`);
+    expect(
+      await screen.findByRole("img", { name: "Poster for Second detail" }),
+    ).toHaveAttribute(
+      "src",
+      "https://images.example.invalid/posters/second.jpg",
+    );
   });
 
   it("does not expose season or episode hierarchy for a normalized series", async () => {
@@ -142,5 +238,28 @@ describe("MediaDetailPage", () => {
       "The requested media item was not found.",
     );
     expect(screen.getByRole("alert")).toHaveTextContent("request-missing");
+  });
+
+  it("retains the safe metadata-unavailable response", async () => {
+    useSession();
+    server.use(
+      http.get(`${baseUrl}/v1/media-items/:itemId`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: "metadata_unavailable",
+              request_id: "request-purged",
+            },
+          },
+          { status: 410 },
+        ),
+      ),
+    );
+    renderDetail("purged");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Metadata for this item is no longer available.",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("request-purged");
   });
 });

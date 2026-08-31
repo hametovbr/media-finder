@@ -65,6 +65,46 @@ describe("accessibility", () => {
   });
 
   for (const locale of ["en", "ru"] as const) {
+    it(`has no serious axe violations in rich media detail (${locale})`, async () => {
+      const client = {
+        bootstrapSession: vi.fn().mockResolvedValue({
+          csrf_token: "axe-csrf",
+          metadata_locale: locale,
+          supported_locales: ["en", "ru"],
+          ui_locale: locale,
+        }),
+        getMediaItem: vi.fn().mockResolvedValue(mediaDetail),
+      } as unknown as ControlClient;
+      const router = createMemoryRouter(appRoutes, {
+        initialEntries: [`/items/${mediaDetail.id}`],
+      });
+      render(
+        <I18nextProvider i18n={createUiI18n(locale)}>
+          <QueryClientProvider
+            client={
+              new QueryClient({ defaultOptions: { queries: { retry: false } } })
+            }
+          >
+            <MantineProvider>
+              <ControlProvider client={client}>
+                <RouterProvider router={router} />
+              </ControlProvider>
+            </MantineProvider>
+          </QueryClientProvider>
+        </I18nextProvider>,
+      );
+
+      expect(
+        await screen.findByRole("img", {
+          name:
+            locale === "en"
+              ? "Poster for Arrival"
+              : "\u041f\u043e\u0441\u0442\u0435\u0440 \u00ab\u041f\u0440\u0438\u0431\u044b\u0442\u0438\u0435\u00bb",
+        }),
+      ).toBeVisible();
+      await expectNoSeriousViolations();
+    });
+
     it(`has no serious axe violations in the Manual editor (${locale})`, async () => {
       const client = {
         bootstrapSession: vi.fn().mockResolvedValue({

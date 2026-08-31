@@ -10,6 +10,7 @@ import type { ControlClient } from "./api/control-client";
 import { ControlProvider } from "./api/control-provider";
 import { appRoutes } from "./app-router";
 import { createUiI18n } from "./i18n";
+import { mediaDetail } from "./mocks/fixtures";
 
 const session = {
   csrf_token: "csrf-test-token",
@@ -22,13 +23,13 @@ async function renderRoute(path: string) {
   const client = {
     bootstrapSession: vi.fn().mockResolvedValue(session),
     getMediaItem: vi.fn().mockResolvedValue({
-      acquisitions: [],
-      archived: false,
-      collection_id: null,
+      ...mediaDetail,
       external_id: "item-42",
       id: "item-42",
-      kind: "movie",
-      metadata: { kind: "movie", titles: { en: "Media overview" } },
+      metadata: {
+        ...mediaDetail.metadata,
+        titles: { en: "Media overview" },
+      },
       provider_key: "fixture",
     }),
     listCatalog: vi.fn().mockResolvedValue({ items: [], next_cursor: null }),
