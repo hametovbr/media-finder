@@ -1,173 +1,59 @@
-# Agent instructions
+# Media Finder agent instructions
 
-## Repository rules
+## Start with the task
 
-- Write repository documentation and developer-facing prose in English. Russian is limited to localization catalogs, localization tests, and user metadata fixtures.
-- Treat `openspec/` as the source of truth for behavior, UX, architecture, APIs, schemas, and module contracts.
+1. Confirm the checkout, branch, diff, and applicable nested instructions. Preserve unrelated user work; isolate the candidate when necessary.
+2. Identify the outcome, OpenSpec phase, and existing authorization. Read relevant canonical `openspec/specs/` and the selected active change; archives are historical evidence.
+3. Load applicable lifecycle and project skills in full, then only the references needed for this task. Read every context file returned by OpenSpec. Reuse guidance while its contents and applicability remain current.
+
+`openspec/` owns behavior, UX, architecture, APIs, schemas, and module contracts. Code/tests establish actual behavior; report conflicts instead of assuming alignment. This file owns stable invariants and routing; skills own conditional procedures; tests/CI enforce mechanical constraints.
+
+Use project-local `.agents/skills/<name>/SKILL.md` before overlapping global skills, subject to system, developer, and explicit user instructions. Global skills may supplement missing expertise; they do not replace the lifecycle, add a competing plan, or authorize a transition. A clean checkout must suffice without personal skill paths, installed model profiles, or a specific harness.
+
+## Repository map and invariants
+
+- Write documentation and developer-facing prose in English. Russian is limited to localization catalogs, localization tests, and user metadata fixtures.
 - Keep Media Finder a catalog and acquisition control plane. It does not scan, mux, move, or monitor media files and does not invoke Jellyfin.
-- Keep secrets in environment variables and redact secrets and sensitive URLs from errors and logs. First-party integrations declare exact environment variables and never persist integration values or environment references.
-- Keep `packages/builtin-ui` dependent only on `media-finder-control-contracts` and presentation-layer libraries. It must not import the backend package, SQLAlchemy, persistence models, repositories, runtime composition, or integration modules.
-- Treat `/api/control/v1` as the only supported boundary for an external browser UI. Any control-contract change requires an OpenSpec change, an updated deterministic OpenAPI snapshot, gateway/HTTP conformance tests, and browser-security tests.
+- The root is a virtual uv workspace; `apps/server` is the only concrete composition root. Core depends only on the module SDK and control contracts; module wheels depend only on `media-finder-module-sdk` and implementation libraries; `packages/builtin-ui` depends only on control contracts and presentation libraries. No core-to-module, module-to-core/persistence, or UI-to-backend imports or compatibility shims. See `tests/architecture/test_package_boundaries.py` and `docs/architecture.md`.
+- Modules are trusted static build-time dependencies under `packages/modules/<kind-name>/`, explicitly registered in `apps/server/src/media_finder_server/modules.py`. No discovery, runtime installation, hot loading, marketplaces, generic hooks, module routes/migrations/assets, or module service container. Additional registrations must not change explicit release/download selection. Follow `docs/module-authoring.md` for typed `registration()`, value-free `module.toml`, translations, and conformance fixtures.
+- Keep secrets in environment variables; redact secrets and sensitive URLs. Modules receive only manifest-declared `ResolvedModuleEnvironment`, never process-wide environment access or core/database/UI objects. Never persist integration values or environment references. Follow `docs/module-authoring.md` for transport ownership, validation before caching, failed/losing-attempt cleanup, idempotent close, and reverse shutdown.
+- `/api/control/v1` is the only supported external browser UI boundary. Control-contract changes require OpenSpec, deterministic OpenAPI, gateway/HTTP conformance, and browser-security tests. Keep runtime, executable/serialized conformance, schemas, fixtures, and validators aligned through `evolving-media-finder-contracts`. Follow `docs/module-authoring.md` for safe fixture content; never serialize credentials or sensitive acquisition/upstream artifacts.
+- Edit browser source in `packages/builtin-ui/web`; regenerate packaged `static` assets and generated contracts through their owning tools. Never hand-edit generated `.agents/skills/openspec-*`; regenerate with the repository-pinned OpenSpec CLI.
 
-## Modular package and module rules
+Read `CONTRIBUTING.md` for setup/checks, `docs/operations.md` for deployment, and `SECURITY.md` for security findings, exceptions, and security-affecting delivery. Consult `docs/agent-skills.md` for provenance/evaluation evidence when needed, not on every task.
 
-The root is a virtual uv workspace. The server host (`apps/server`) is the only
-concrete composition root: it may depend on core, control contracts, the built-in
-UI, and selected first-party modules. Core depends only on the module SDK and
-control contracts; a module wheel depends only on `media-finder-module-sdk` and
-its own implementation libraries; the built-in UI depends only on control
-contracts and presentation libraries. Do not introduce core-to-module imports,
-module-to-core/persistence imports, UI-to-backend imports, or compatibility
-shims; `tests/architecture/test_package_boundaries.py` enforces this graph.
+## OpenSpec lifecycle
 
-Modules are trusted, reviewed, static build-time dependencies. Add them as one
-workspace wheel under `packages/modules/<kind-name>/` with a public typed
-`registration()`, `module.toml`, translations, and `fixtures/conformance.json`.
-Register concrete modules explicitly in `apps/server/src/media_finder_server/modules.py`.
-Do not add discovery, entry-point scanning, runtime installation, hot loading,
-marketplaces, generic hooks, module routes, module migrations, module assets, or
-a module service container. A second registration must not silently change the
-explicit release/download selection.
+Every change that can affect runtime behavior, UX, architecture, APIs, schemas, module contracts, security, persistence, deployment, or operator behavior MUST follow OpenSpec. Only behavior-neutral typo, comment, formatting, and safe repository-maintenance changes may bypass it. If impact is uncertain, use OpenSpec.
 
-`module.toml` is the value-free contract for identity, kind, version, SDK and
-contract compatibility, capabilities, attribution, translation keys, and exact
-environment declarations. Module factories receive only
-`ResolvedModuleEnvironment`; modules do not read process-wide environment,
-persist configuration or environment references, receive database/core/UI
-objects, or disclose secrets. A module owns its transport and idempotent
-`close()`; the root `ModuleRuntime` validates before caching, closes failed or
-losing attempts, and the root lifespan closes shared resources in reverse order.
+| Phase | Required lifecycle skill |
+|---|---|
+| Investigate or compare; no implementation | `openspec-explore` |
+| Create planning artifacts; present for review and stop | `openspec-propose` |
+| Revise existing scope, requirements, design, or tasks; planning only | `openspec-update-change` |
+| Implement an approved active change, task by task | `openspec-apply-change` |
+| Synchronize deltas while intentionally keeping the change active | `openspec-sync-specs` |
+| Assess, synchronize, and archive verified completed work | `openspec-archive-change` |
 
-Keep executable SDK conformance and serialized conformance aligned. The former
-uses the capability-specific `assert_*_registration_conforms` assertions; the
-latter validates `fixtures/conformance.json` against
-`schemas/module-sdk/v1/` without importing Python core. Update checked JSON
-Schema/OpenAPI artifacts and deterministic validators with contract changes.
-Serialized fixtures never contain credentials, magnets, torrent bytes,
-authenticated URLs, or raw upstream payloads; executable fixtures may keep
-bounded safe artifacts in memory.
+Approval is retrospective: implementation requires a user message received after the planning artifacts were presented. A build/fix request cannot pre-approve artifacts that do not yet exist. Proposal, update, and apply are terminal for the current user turn; never chain proposal into apply or apply into archive. Report phase, overall status, and next required action or authorization. Archive requires a separate user request; its workflow may perform inline synchronization.
 
-## Spec-driven development
+Direct OpenSpec CLI commands do not replace lifecycle skills. Before creating or revising each planning artifact, fetch and follow `openspec instructions <artifact> --change <name> --json`. Justify workflow metadata such as `skip_specs` in artifacts and obtain later approval before apply. Never edit canonical specs during apply or use `openspec archive --yes` to bypass assessment and user selection.
 
-Every change that can affect runtime behavior, UX, architecture, APIs, schemas, module contracts, security, persistence, deployment, or operator behavior MUST follow the OpenSpec spec-driven development workflow.
+During apply, trace each test to an approved scenario or a reproduced defect in approved behavior: observe focused RED, implement the minimum change, verify GREEN, then run applicable regressions and repository gates. Mark tasks complete only after all specified behavior is implemented and verified. Mutation tests do not create requirements.
 
-Only behavior-neutral typo, comment, formatting, and safe repository-maintenance changes may bypass OpenSpec. If the impact is uncertain, use OpenSpec.
-
-Use the installed OpenSpec skills as follows:
-
-- `openspec-explore`: investigate a problem, clarify requirements, or compare approaches. It may read the codebase but must not implement behavior.
-- `openspec-propose`: create a new change and all planning artifacts. This workflow is planning-only and must stop after presenting the artifacts for review.
-- `openspec-update-change`: revise and reconcile planning artifacts for an existing active change when requirements, scope, design, or tasks change. It never edits implementation code.
-- `openspec-apply-change`: implement an approved active change. Read every context file returned by OpenSpec, work task by task, and mark a task complete only after all of its specified behavior is implemented and verified.
-- `openspec-sync-specs`: merge delta specifications into canonical `openspec/specs/` while intentionally keeping the change active.
-- `openspec-archive-change`: finalize a completed change after implementation, verification, and specification synchronization.
-
-Planning and implementation are separate authorization boundaries. Completing `openspec-propose` does not authorize implementation; implementation begins only through `openspec-apply-change` after the planning artifacts are approved.
-
-Approval is retrospective: only a user message received after the planning
-artifacts were presented can authorize implementation. Requests such as
-"build", "fix", or "start implementation" cannot pre-approve artifacts that do
-not yet exist. Proposal, update, and apply are terminal for the current user
-turn; never chain proposal into apply or apply into archive. A completed apply
-reports status and stops. Archive requires a separate user request and may
-perform only the inline sync required by its own workflow.
-
-### Work-item completion
-
-Phase completion is not overall work completion. A terminal OpenSpec handoff
-MUST report the phase completed, the overall work status, and the next required
-action or authorization. Until every applicable gate below succeeds, overall
-work remains incomplete or blocked and MUST NOT be described as complete:
-
-1. approved implementation and pre-archive verification;
-2. canonical specification synchronization for every applicable delta;
-3. archive of every completed active change;
-4. one cohesive squashed commit or a small set of logically separated commits;
-5. exact-candidate local verification and a clean worktree;
-6. push of a non-`main` branch and creation of a pull request;
-7. successful required checks and review for the exact pull-request head;
-8. merge of that verified result and confirmation that the delivered result is
-   present on `main`.
-
-Do not finalize or publish a delivery commit that omits an applicable canonical
-specification synchronization or archive. When delta specs exist, selecting an
-archive path that skips synchronization cannot satisfy overall completion.
-After a separately authorized archive succeeds, continue the already requested
-commit, push, pull-request, check, review, and merge sequence without another
-completion handoff unless the user narrows or stops it or an external gate
-blocks progress.
-
-For a behavior-neutral change that legitimately bypasses OpenSpec, report
-OpenSpec closure as not applicable rather than silently omitting it. Commit,
-push, pull-request verification, merge, and post-merge confirmation remain
-mandatory. Failed, pending, skipped, stale-SHA, unavailable, or unconfirmed
-evidence is blocking evidence, never a pass.
-
-Direct OpenSpec CLI commands do not replace lifecycle skills. Before creating or
-revising each planning artifact, fetch and follow its current
-`openspec instructions <artifact> --change <name> --json` response. Treat
-`skip_specs` and other workflow metadata as reviewed planning decisions: record
-their justification in the artifacts and obtain later approval before apply.
-Never edit canonical specs during apply or use `openspec archive --yes` to bypass
-archive assessment and user selection.
-
-Project-local skills under `.agents/skills` are the self-contained Media Finder
-workflow. Subject to system, developer, and explicit user instructions, use them
-before overlapping workstation-local skills. A clean checkout must be sufficient;
-never depend on a personal skill path or installation.
-
-## Host-execution boundaries
-
-Run a verification command directly on the host, with the required authorization,
-when its supported boundary depends on capabilities that the restricted sandbox
-does not provide. This is required from the first attempt for:
-
-- Playwright and browser/E2E commands that launch Chromium or a local web server,
-  including `pnpm ui:browser`;
-- the full Python suite and any focused suite that enters Starlette `TestClient`,
-  ASGI lifespan, or local-socket behavior;
-- `pnpm delivery:test`, whose repository-security tests exercise subprocess and
-  timeout behavior, and authenticated live checks such as
-  `pnpm security:verify`;
-- every independent `uv build --wheel` invocation and any dependency/bootstrap
-  command that must reach a package registry;
-- Docker, Compose, Buildx, production-image smoke, and local integration-stack
-  commands;
-- observations of real localhost or LAN listeners, host processes, systemd units,
-  IDE IPC sockets, and other already-running host services;
-- GitHub delivery operations (`git fetch`/`push`, `gh` API, PR, checks, review,
-  merge, workflow, and package queries), and Git index/ref mutations when the
-  sandbox exposes `.git` read-only.
-
-Keep deterministic offline checks in the sandbox when they do not cross one of
-those boundaries: OpenSpec, documentation, formatting, linting, type checking,
-static validators, frontend unit/accessibility tests, and production asset builds.
-Use `UV_CACHE_DIR=/tmp/developer-uv-cache` for sandboxed uv commands when the
-default user cache is read-only.
-
-For any command not listed above, start in the sandbox. If it fails with a likely
-network, DNS, bind, socket, subprocess, browser, Docker, credential, permission,
-IPC, or read-only-filesystem limitation, treat the sandbox result as provisional
-and rerun the identical command on the host before changing repository code or
-tests. Preserve the command, working directory, relevant non-secret environment,
-exit status, and candidate SHA across the rerun. Classify an environment
-limitation only when the host evidence confirms sandbox isolation or an unavailable
-external capability. If the failure reproduces on the host, follow
-`debugging-media-finder-failures` and classify the supported-environment evidence
-normally. Do not report the gate as passed until the host run succeeds, and do not
-infer that a host service, credential, or dependency is broken from sandbox
-evidence. Never print tokens, integration values, authenticated URLs, or raw
-sensitive upstream payloads while diagnosing either environment.
+Use the lowest sufficient rung: `configuration → script/adapter → module → package → process/service`. A missing requirement/design decision, higher rung, new owner/business path, expanded public scope, or new compatibility obligation requires stopping apply, `openspec-update-change`, and renewed approval. Never silently defer behavior or edit plans ad hoc. Inspect actual users, stored data, consumers, published contracts, and rollout coordination before preserving or breaking compatibility. Custom auxiliary parsers, interpreters, platforms, or services need an approved requirement and ownership decision.
 
 ## Project skill routing
+
+Use applicable project skills together with the lifecycle skill; do not load the entire catalog.
 
 | Work | Required project skill |
 |---|---|
 | Architecture, ownership, compatibility, or increased complexity | `making-pragmatic-media-finder-decisions` |
-| Implementing an approved change or moving a business path | `developing-media-finder-changes` |
+| Approved implementation or moving a business path | `developing-media-finder-changes` |
 | Test, CI, packaging, migration, browser, image, or runtime failure | `debugging-media-finder-failures` |
 | Design, implementation, PR, auxiliary mechanism, or release review | `reviewing-media-finder-changes` |
-| API, SDK, schema, manifest, bound, error, or serialized-contract change | `evolving-media-finder-contracts` |
+| API, SDK, schema, manifest, bound, error, or serialized contract | `evolving-media-finder-contracts` |
 | Metadata provider | `adding-metadata-provider` |
 | Release provider | `adding-release-provider` |
 | Download client | `adding-download-client` |
@@ -175,36 +61,41 @@ sensitive upstream payloads while diagnosing either environment.
 | Creating, editing, routing, or evaluating project skills | `maintaining-media-finder-skills` |
 | Verification, commit, PR, merge, image publication, or stable release | `verifying-and-publishing-media-finder` |
 
-Use the applicable OpenSpec lifecycle skill together with the routed skill. The
-OpenSpec skills are generated and never manually edited.
+## Efficient execution
 
-## Complexity and compatibility circuit breaker
+- Minimize total work and rework without weakening correctness, required reading, verification, or authorization. Use targeted `rg` searches and bounded output, retaining decisive evidence and full relevant errors. Batch independent reads; serialize dependent edits and shared Git/build resources.
+- Use one agent for a small task. When delegation is authorized and useful, give each worker a bounded outcome, source paths, constraints, writable scope, checks, and stop conditions. Prefer task-local context; reuse workers for corrections; avoid recursive delegation. Parallelize only with independent interfaces/resources. Respect the available harness and authorized model/effort profile.
+- Reuse checks only for the same candidate, command, dependencies, and relevant environment. Rerun affected checks after changes/failures and required final gates for the final candidate. Repeat optional tests/reviews for changed scope or unresolved findings, not by default.
+- Prefer completion notifications or bounded waits to unchanged polling. Keep updates concise. For long work, keep one checkpoint with candidate, decisions, checks, unresolved items, and next action; reconcile it with actual state on resume. Do not add recurring administrative work or promise unmeasured token savings.
 
-Use the lowest sufficient rung:
+## Verification and execution environment
 
-`configuration → script/adapter → module → package → process/service`
+Run from the repository root. `CONTRIBUTING.md` and `.github/workflows/verify.yaml` define the full gates; `package.json`, `pyproject.toml`, and lockfiles define exact scripts and pinned tools. Do not invent commands or upgrade tools to fit a workflow.
 
-If implementation crosses an approved rung, adds an owner or business path, or
-expands public scope, stop apply. Use `openspec-update-change`, compare simpler
-alternatives, and obtain renewed approval; earlier apply authorization no longer
-covers the escalated design. Prefer direct execution or maintained structured
-tools over interpreting source text. Custom parsers, interpreters, platforms, or
-services for auxiliary work require their own approved requirement and ownership
-decision.
+- Setup: `pnpm install --frozen-lockfile`; `uv sync --frozen --all-groups`.
+- Start: `pnpm spec:list` for active changes; `pnpm ui:dev` for the UI against fixtures.
+- Documentation: `pnpm docs:check`; `pnpm spec:validate`.
+- Python: `pnpm py:format`, `pnpm py:lint`, `pnpm py:type`, `pnpm py:test`.
+- UI: `pnpm ui:format`, `pnpm ui:lint`, `pnpm ui:type`, `pnpm ui:test`, `pnpm ui:a11y`, `pnpm ui:browser`, `pnpm ui:contract`, `pnpm ui:build`.
+- Delivery policy: `pnpm delivery:test`; `pnpm delivery:validate`.
 
-Every test must trace to an approved scenario or a reproduced defect in approved
-behavior. Mutation tests do not create requirements. Before preserving or
-breaking compatibility, inspect actual users, stored data, external consumers,
-published contracts, and rollout coordination; neither answer is assumed.
+Before handoff run `pnpm spec:validate` and the format, lint, type, test, production-build, and other gates applicable to the scope/current project stage. Follow `verifying-and-publishing-media-finder` for proportional local verification and every required PR check. Security-affecting delivery also requires the authenticated live check in `SECURITY.md`.
 
-During `openspec-apply-change`, use test-driven development for every behavior or contract change:
+Before browser/socket/subprocess tests, wheel builds, dependency bootstrap, Docker, host-service observations, authenticated checks, or GitHub delivery, read `docs/agent-execution.md` and use the authorized execution boundary it specifies. Keep deterministic offline checks in the sandbox. Environment failures require supported-host evidence before product fixes; unavailable host access leaves the gate blocked. Repository instructions never grant permissions or bypass a denial.
 
-1. Add or update a focused test that expresses the approved requirement.
-2. Run it and record the expected RED failure.
-3. Implement the minimum production change.
-4. Run focused tests to GREEN.
-5. Run the relevant regression and repository verification gates.
+Preserve command exit status: avoid output pipelines or use `pipefail`. Unavailable gates are `not run` or `blocked`, never passed. Never expose secrets or sensitive upstream payloads during diagnosis.
 
-If implementation exposes a missing or incorrect requirement or design decision, stop implementation and use `openspec-update-change`. Do not silently change scope, defer specified behavior, or modify planning artifacts ad hoc.
+## Delivery and completion
 
-Before handoff, run `pnpm spec:validate` plus the format, lint, type, test, and production-build commands documented for the current project stage. Preserve the originating command's exit status when filtering output; use `pipefail` or avoid pipelines. Report any unavailable gate as `not run` or `blocked`, never passed.
+Phase completion is not overall work completion. Until every applicable gate below succeeds, overall work remains incomplete or blocked:
+
+1. approved implementation and pre-archive verification.
+2. canonical specification synchronization for every applicable delta, and archive of every completed active change belonging to the delivered work.
+3. one cohesive squashed commit or a small set of logically separated commits; exact-candidate local verification and a clean worktree.
+4. push of a non-`main` branch and creation of a pull request.
+5. successful required checks and review for the exact pull-request head.
+6. merge of that verified result and confirmation that the delivered result is present on `main`.
+
+Do not finalize/publish a delivery commit omitting applicable synchronization or archive; skipping synchronization cannot close a change with deltas. After separately authorized archive, continue the already requested commit, push, PR, check, review, and merge sequence unless the user narrows/stops it or an external gate blocks progress.
+
+For legitimate behavior-neutral maintenance, report OpenSpec closure as not applicable; protected-branch delivery remains mandatory. Failed, pending, skipped, stale-SHA, unavailable, or unconfirmed required evidence blocks completion. Report phase/overall status, exact candidate, verification, PR/merge state, and unresolved next gate without reproducing full logs.
