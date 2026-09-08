@@ -77,6 +77,38 @@
     "series": "Series"
   },
   "manual": {
+    "drafts": {
+      "title": "Review unsaved draft",
+      "description": "After saving, {{draft}} will be discarded. Continue?",
+      "cancel": "Cancel",
+      "continue": "Continue saving",
+      "json": "the unsaved JSON text",
+      "csv": "the unsaved CSV text",
+      "structured": "the unsaved form draft"
+    },
+    "navigation": {
+      "title": "Unsaved changes",
+      "description": "Leave this page and discard all unsaved changes?",
+      "stay": "Stay",
+      "leave": "Discard and leave"
+    },
+    "secondaryFields": "Additional fields",
+    "hierarchySummary": "Seasons: {{seasons}} · Episodes: {{episodes}}",
+    "destructive": {
+      "removeEpisodeTitle": "Remove episode {{number}}?",
+      "removeEpisodeDescription": "This removes 1 episode.",
+      "removeSeasonTitle": "Remove season {{number}}?",
+      "removeSeasonDescription": "Remove season {{number}} and its {{count}} episodes?",
+      "changeSeriesToMovieTitle": "Change this series to a movie?",
+      "changeSeriesToMovieDescription": "Changing this new series to a movie removes {{seasons}} seasons and {{episodes}} episodes.",
+      "cancel": "Cancel",
+      "confirm": "Continue"
+    },
+    "operation": {
+      "pending": "Saving Manual metadata…",
+      "reading": "Reading file…",
+      "fileReadFailed": "Could not read the file. Previous text was kept."
+    },
     "introduction": "Create structured metadata or import a complete version-1 Manual document.",
     "loadingCollections": "Loading collections",
     "save": "Save Manual metadata",
@@ -101,8 +133,12 @@
       "nonManual": "This item is not editable as Manual metadata."
     },
     "csv": {
+      "unsaved": "Save the form first or discard its changes before importing CSV.",
+      "discardStructured": "Discard form changes",
+      "discardTitle": "Discard form changes?",
+      "discardDescription": "The form will return to its saved values. Your CSV text will be kept.",
       "title": "Import episode CSV",
-      "description": "Paste or load the complete CSV. The server applies every row atomically.",
+      "description": "CSV updates the saved series. If any row is invalid, no episodes are changed.",
       "loadFile": "Load episode CSV file",
       "source": "Episode CSV",
       "submit": "Import episode CSV"

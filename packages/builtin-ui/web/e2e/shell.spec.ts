@@ -1,5 +1,15 @@
-import { expect, test } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type TestInfo,
+} from "@playwright/test";
 import en from "../src/locales/en.json" assert { type: "json" };
+import ru from "../src/locales/ru.json" assert { type: "json" };
+
+type UiLocale = "en" | "ru";
+const localeCatalogs = { en, ru } as const;
 
 const session = {
   csrf_token: "csrf-browser-test",
@@ -9,6 +19,34 @@ const session = {
 };
 const detailPosterUrl = "http://127.0.0.1:4173/detail-poster.jpg";
 let savedManual: ReturnType<typeof manualItem> | null = null;
+
+async function attachManualScreenshot(
+  page: Page,
+  testInfo: TestInfo,
+  scenario: string,
+  locale: UiLocale,
+  width: number,
+) {
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+  });
+  const path = testInfo.outputPath(`${scenario}-${locale}-${width}.png`);
+  await page.screenshot({ path, fullPage: true });
+  await testInfo.attach(`${scenario}-${locale}-${width}`, {
+    path,
+    contentType: "image/png",
+  });
+}
+
+async function expectNoHorizontalOverflow(page: Page) {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    )
+    .toBe(true);
+}
 
 function manualItem(kind: "movie" | "series", title: string) {
   return {
@@ -385,6 +423,329 @@ test("episode CSV success and atomic failure use the control boundary", async ({
     "The episode CSV is invalid; no episodes were changed.",
   );
   await expect(page.getByLabel("Title (English)")).toHaveValue("Manual Series");
+});
+
+test("Manual raw list typing stays visible across modes and normalizes on submit", async ({
+  page,
+}) => {
+  let submitted: {
+    collection_id: string | null;
+    document: ReturnType<typeof manualItem>["metadata"] & {
+      kind: "movie" | "series";
+      locale: "en" | "ru";
+      schema_version: string;
+      titles: { en?: string; ru?: string };
+    };
+  } | null = null;
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === "/api/control/v1/manual-imports"
+    ) {
+      submitted = request.postDataJSON() as typeof submitted;
+    }
+  });
+
+  await page.goto("/add/manual");
+  await page.getByLabel("Title (English)").fill("Raw browser title");
+  await page.getByRole("button", { name: "Additional fields" }).click();
+  const rawLists = {
+    Countries: "US, CA, ",
+    Genres: "Drama, Comedy, ",
+    Studios: "North, South, ",
+    Tags: "one, two, ",
+  } as const;
+  for (const [label, value] of Object.entries(rawLists)) {
+    await page.getByLabel(label).fill(value);
+  }
+
+  await page.getByRole("button", { name: "Complete JSON" }).click();
+  await page.getByRole("button", { name: "Structured entry" }).click();
+  await page.getByRole("button", { name: "Additional fields" }).click();
+  for (const [label, value] of Object.entries(rawLists)) {
+    await expect(page.getByLabel(label)).toHaveValue(value);
+  }
+
+  await page.getByRole("button", { name: "Save Manual metadata" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Raw browser title" }),
+  ).toBeVisible();
+  expect(submitted).toMatchObject({
+    collection_id: null,
+    document: {
+      countries: ["US", "CA"],
+      genres: ["Drama", "Comedy"],
+      studios: ["North", "South"],
+      tags: ["one", "two"],
+      titles: { en: "Raw browser title" },
+    },
+  });
+});
+
+test("Manual create keeps one delayed request and blocks competing actions", async ({
+  page,
+}) => {
+  await page.unroute("**/api/control/v1/manual-imports");
+  let requestCount = 0;
+  let submitted: Record<string, unknown> | null = null;
+  let releaseRequest: (() => void) | undefined;
+  await page.route(
+    "**/api/control/v1/manual-imports",
+    async (route, request) => {
+      requestCount += 1;
+      submitted = request.postDataJSON() as Record<string, unknown>;
+      await new Promise<void>((resolve) => {
+        releaseRequest = resolve;
+      });
+      savedManual = manualItem("movie", "Delayed Manual");
+      await route.fulfill({ status: 201, json: savedManual });
+    },
+  );
+
+  await page.goto("/add/manual");
+  await page.getByLabel("Title (English)").fill("Delayed Manual");
+  const save = page.getByRole("button", { name: "Save Manual metadata" });
+  await save.click();
+  await expect(save).toBeDisabled();
+  await expect(page.getByRole("status")).toContainText(
+    "Saving Manual metadata…",
+  );
+
+  await save.dispatchEvent("click");
+  await page
+    .getByRole("button", { name: "Complete JSON" })
+    .dispatchEvent("click");
+  await page.getByRole("link", { name: "Catalog" }).first().click();
+  await expect(page).toHaveURL(/\/add\/manual$/);
+  expect(requestCount).toBe(1);
+  expect(submitted).toMatchObject({
+    document: { titles: { en: "Delayed Manual" } },
+  });
+
+  releaseRequest?.();
+  await expect(
+    page.getByRole("heading", { name: "Delayed Manual" }),
+  ).toBeVisible();
+});
+
+test("Manual destructive removal requires review, preserves cancel, and confirms the exact target", async ({
+  page,
+}) => {
+  await page.goto("/items/manual-series/edit");
+  const removeSeason = page.getByRole("button", { name: "Remove season 0" });
+  await removeSeason.click();
+  const dialog = page.getByRole("dialog", { name: "Remove season 0?" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("Remove season 0 and its 1 episodes?");
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("group", { name: "Season 0" })).toBeVisible();
+  await expect(removeSeason).toBeFocused();
+
+  await removeSeason.click();
+  const confirmDialog = page.getByRole("dialog", {
+    name: "Remove season 0?",
+  });
+  await expect(confirmDialog).toBeVisible();
+  await confirmDialog.getByRole("button", { name: "Continue" }).click();
+  await expect(confirmDialog).toBeHidden();
+  await expect(page.getByText("Seasons: 0 · Episodes: 0")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add season" })).toBeFocused();
+});
+
+test("Manual dirty navigation offers Stay first and discards only after explicit leave", async ({
+  page,
+}) => {
+  await page.goto("/items/manual-series/edit");
+  const title = page.getByLabel("Title (English)");
+  await title.fill("Unsaved browser title");
+
+  const catalog = page.getByRole("link", { name: "Catalog" }).first();
+  await catalog.click();
+  const dialog = page.getByRole("dialog", { name: "Unsaved changes" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Stay" })).toBeFocused();
+  await dialog.getByRole("button", { name: "Stay" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page).toHaveURL(/\/items\/manual-series\/edit$/);
+  await expect(title).toHaveValue("Unsaved browser title");
+
+  await catalog.click();
+  const leaveDialog = page.getByRole("dialog", { name: "Unsaved changes" });
+  await expect(leaveDialog).toBeVisible();
+  await leaveDialog.getByRole("button", { name: "Discard and leave" }).click();
+  await expect(page.getByRole("heading", { name: "Catalog" })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+});
+
+test("Manual add browser history blocks forward navigation until Stay or explicit leave", async ({
+  page,
+}) => {
+  await page.goto("/add/manual");
+  await expect(
+    page.getByRole("heading", { name: "Manual metadata" }),
+  ).toBeVisible();
+
+  await page.getByRole("link", { name: "Catalog" }).first().click();
+  await expect(page.getByRole("heading", { name: "Catalog" })).toBeVisible();
+  await page.goBack();
+  await expect(
+    page.getByRole("heading", { name: "Manual metadata" }),
+  ).toBeVisible();
+
+  await page.getByLabel("Title (English)").fill("Forward history draft");
+  await page.goForward();
+  const stayDialog = page.getByRole("dialog", { name: "Unsaved changes" });
+  await expect(stayDialog).toBeVisible();
+  await stayDialog.getByRole("button", { name: "Stay" }).click();
+  await expect(stayDialog).toBeHidden();
+  await expect(page).toHaveURL(/\/add\/manual$/);
+  await expect(page.getByLabel("Title (English)")).toHaveValue(
+    "Forward history draft",
+  );
+
+  await page.goForward();
+  const leaveDialog = page.getByRole("dialog", { name: "Unsaved changes" });
+  await expect(leaveDialog).toBeVisible();
+  await leaveDialog.getByRole("button", { name: "Discard and leave" }).click();
+  await expect(leaveDialog).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Catalog" })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+});
+
+test("Manual alternate JSON review retains both drafts and continues only the structured request", async ({
+  page,
+}) => {
+  const requests: Record<string, unknown>[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === "/api/control/v1/manual-imports"
+    ) {
+      requests.push(request.postDataJSON() as Record<string, unknown>);
+    }
+  });
+  const jsonDraft = JSON.stringify({
+    artwork: [],
+    countries: [],
+    external_id: "alternate-json-draft",
+    genres: [],
+    kind: "movie",
+    locale: "en",
+    people: [],
+    plot: null,
+    provider_ids: {},
+    ratings: [],
+    release_date: null,
+    runtime_minutes: null,
+    schema_version: "1",
+    seasons: [],
+    studios: [],
+    tags: [],
+    titles: { en: "JSON draft" },
+    year: 2026,
+  });
+
+  await page.goto("/add/manual");
+  await page.getByLabel("Title (English)").fill("Structured draft");
+  await page.getByRole("button", { name: "Complete JSON" }).click();
+  await page.getByLabel("Manual JSON").fill(jsonDraft);
+  await page.getByRole("button", { name: "Structured entry" }).click();
+  await expect(page.getByLabel("Title (English)")).toHaveValue(
+    "Structured draft",
+  );
+  await page.getByRole("button", { name: "Save Manual metadata" }).click();
+
+  const review = page.getByRole("dialog", { name: "Review unsaved draft" });
+  await expect(review).toBeVisible();
+  await expect(review).toContainText("the unsaved JSON text");
+  expect(requests).toHaveLength(0);
+  await review.getByRole("button", { name: "Cancel" }).click();
+  await expect(review).toBeHidden();
+
+  await page.getByRole("button", { name: "Complete JSON" }).click();
+  await expect(page.getByLabel("Manual JSON")).toHaveValue(jsonDraft);
+  await page.getByRole("button", { name: "Structured entry" }).click();
+  await expect(page.getByLabel("Title (English)")).toHaveValue(
+    "Structured draft",
+  );
+  await page.getByRole("button", { name: "Save Manual metadata" }).click();
+  await expect(review).toBeVisible();
+  await review.getByRole("button", { name: "Continue saving" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Structured draft" }),
+  ).toBeVisible();
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({
+    document: { titles: { en: "Structured draft" } },
+  });
+  expect(JSON.stringify(requests[0])).not.toContain("alternate-json-draft");
+});
+
+test("Manual CSV blocking preserves both drafts through cancel and reset before one CSV request", async ({
+  page,
+}) => {
+  let csvRequests = 0;
+  let editRequests = 0;
+  page.on("request", (request) => {
+    if (request.method() !== "POST" && request.method() !== "PUT") return;
+    const pathname = new URL(request.url()).pathname;
+    if (pathname.endsWith("/episode-imports")) csvRequests += 1;
+    if (pathname.endsWith("/manual-metadata")) editRequests += 1;
+  });
+
+  const csv = "season_number,episode_number,title\n1,1,Blocked\n";
+  await page.goto("/items/manual-series/edit");
+  await page.getByLabel("Title (English)").fill("Dirty form");
+  const csvSource = page.getByRole("textbox", {
+    name: "Episode CSV",
+    exact: true,
+  });
+  await csvSource.fill(csv);
+  await page.getByRole("button", { name: "Import episode CSV" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Save the form first or discard its changes before importing CSV.",
+  );
+  await expect(
+    page.getByRole("button", { name: "Discard form changes" }),
+  ).toBeVisible();
+  expect(csvRequests).toBe(0);
+  expect(editRequests).toBe(0);
+
+  const discardTrigger = page.getByRole("button", {
+    name: "Discard form changes",
+  });
+  await discardTrigger.click();
+  const resetReview = page.getByRole("dialog", {
+    name: "Discard form changes?",
+  });
+  await expect(resetReview).toBeVisible();
+  await resetReview.getByRole("button", { name: "Cancel" }).click();
+  await expect(resetReview).toBeHidden();
+  await expect(page.getByLabel("Title (English)")).toHaveValue("Dirty form");
+  await expect(csvSource).toHaveValue(csv);
+  expect(csvRequests).toBe(0);
+  expect(editRequests).toBe(0);
+
+  await discardTrigger.click();
+  await expect(resetReview).toBeVisible();
+  await resetReview
+    .getByRole("button", { name: "Discard form changes" })
+    .click();
+  await expect(resetReview).toBeHidden();
+  await expect(page.getByLabel("Title (English)")).toHaveValue("Manual Series");
+  await expect(csvSource).toHaveValue(csv);
+  expect(csvRequests).toBe(0);
+  expect(editRequests).toBe(0);
+
+  await page.getByRole("button", { name: "Import episode CSV" }).click();
+  await expect(
+    page.getByRole("heading", { name: "CSV revision" }),
+  ).toBeVisible();
+  expect(csvRequests).toBe(1);
+  expect(editRequests).toBe(0);
 });
 
 test("Manual create remains localized and responsive in Russian", async ({
@@ -848,3 +1209,211 @@ test("failed locale update retains the Manual field until keyboard retry succeed
   ).toHaveValue("Retained Manual title");
   expect(patchAttempts).toBe(2);
 });
+
+type ManualEvidenceScenario =
+  "secondary" | "destructive" | "dirty" | "alternate" | "csv-blocked";
+
+const manualEvidenceScenarios: readonly ManualEvidenceScenario[] = [
+  "secondary",
+  "destructive",
+  "dirty",
+  "alternate",
+  "csv-blocked",
+];
+
+const manualEvidenceWidths = [360, 1280] as const;
+
+async function switchManualEvidenceLocale(page: Page, locale: UiLocale) {
+  if (locale === "ru") {
+    await page.getByRole("button", { name: en.locale.switchToRussian }).click();
+    await expect(
+      page.getByRole("button", { name: ru.locale.switchToEnglish }),
+    ).toBeVisible();
+  }
+}
+
+function localizedTitleLabel(locale: UiLocale) {
+  const labels = localeCatalogs[locale];
+  return labels.manual.fields.title.replace(
+    "{{locale}}",
+    labels.manual.locales.en,
+  );
+}
+
+async function exerciseManualEvidenceScenario(
+  page: Page,
+  locale: UiLocale,
+  scenario: ManualEvidenceScenario,
+  width: number,
+): Promise<Locator | null> {
+  const labels = localeCatalogs[locale];
+  if (scenario === "alternate") {
+    await page.goto("/add/manual");
+    await switchManualEvidenceLocale(page, locale);
+    await page.getByRole("button", { name: labels.manual.modes.json }).click();
+    await page.getByLabel(labels.manual.json.source).fill('{"alternate":true}');
+    await page
+      .getByRole("button", { name: labels.manual.modes.structured })
+      .click();
+    await page.getByLabel(localizedTitleLabel(locale)).fill("Alternate draft");
+    await page.getByRole("button", { name: labels.manual.save }).click();
+    const dialog = page.getByRole("dialog", {
+      name: labels.manual.drafts.title,
+    });
+    await expect(dialog).toBeVisible();
+    await expect(
+      dialog.getByRole("button", { name: labels.manual.drafts.cancel }),
+    ).toBeFocused();
+    return dialog;
+  }
+
+  await page.goto("/items/manual-series/edit");
+  await switchManualEvidenceLocale(page, locale);
+
+  if (scenario === "secondary") {
+    await page
+      .getByRole("button", { name: labels.manual.secondaryFields })
+      .click();
+    await expect(
+      page.getByRole("button", { name: labels.manual.secondaryFields }),
+    ).toHaveAttribute("aria-expanded", "true");
+    const secondaryFields = page.locator("#manual-editor-secondary-fields");
+    await expect(secondaryFields).toBeVisible();
+    for (const field of [
+      labels.manual.fields.originalTitle,
+      labels.manual.fields.releaseDate,
+      labels.manual.fields.runtimeMinutes,
+      labels.manual.fields.genres,
+      labels.manual.fields.tags,
+      labels.manual.fields.countries,
+      labels.manual.fields.studios,
+    ]) {
+      await expect(
+        secondaryFields.getByLabel(field, { exact: true }),
+      ).toBeVisible();
+    }
+    await expect(
+      page.getByText(
+        labels.manual.hierarchySummary
+          .replace("{{seasons}}", "1")
+          .replace("{{episodes}}", "1"),
+      ),
+    ).toBeVisible();
+    return null;
+  }
+
+  if (scenario === "destructive") {
+    const removeSeasonLabel = labels.manual.season.remove.replace(
+      "{{number}}",
+      "0",
+    );
+    await page.getByRole("button", { name: removeSeasonLabel }).click();
+    const dialog = page.getByRole("dialog", {
+      name: labels.manual.destructive.removeSeasonTitle.replace(
+        "{{number}}",
+        "0",
+      ),
+    });
+    await expect(dialog).toBeVisible();
+    await expect(
+      dialog.getByRole("button", { name: labels.manual.destructive.cancel }),
+    ).toBeFocused();
+    return dialog;
+  }
+
+  if (scenario === "dirty") {
+    await page.getByLabel(localizedTitleLabel(locale)).fill("Dirty draft");
+    if (width <= 768) {
+      const menuButton = page.getByRole("button", {
+        name: labels.navigation.open,
+        exact: true,
+      });
+      await expect(menuButton).toBeVisible();
+      await menuButton.click();
+      const drawer = page.getByRole("dialog", {
+        name: labels.appName,
+        exact: true,
+      });
+      await expect(drawer).toBeVisible();
+      await drawer
+        .getByRole("link", { name: labels.navigation.catalog, exact: true })
+        .click();
+      await expect(drawer).toBeHidden();
+    } else {
+      const catalog = page
+        .locator("aside")
+        .getByRole("link", { name: labels.navigation.catalog, exact: true });
+      await expect(catalog).toBeVisible();
+      await catalog.click();
+    }
+    const dialog = page.getByRole("dialog", {
+      name: labels.manual.navigation.title,
+    });
+    await expect(dialog).toBeVisible();
+    await expect(
+      dialog.getByRole("button", { name: labels.manual.navigation.stay }),
+    ).toBeFocused();
+    return dialog;
+  }
+
+  await page.getByLabel(localizedTitleLabel(locale)).fill("CSV blocked");
+  const csv = "season_number,episode_number,title\n1,1,Blocked\n";
+  const csvSource = page.getByRole("textbox", {
+    name: labels.manual.csv.source,
+    exact: true,
+  });
+  await csvSource.fill(csv);
+  await page.getByRole("button", { name: labels.manual.csv.submit }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    labels.manual.csv.unsaved,
+  );
+  await expect(
+    page.getByRole("button", { name: labels.manual.csv.discardStructured }),
+  ).toBeVisible();
+  await expect(page.getByLabel(localizedTitleLabel(locale))).toHaveValue(
+    "CSV blocked",
+  );
+  await expect(csvSource).toHaveValue(csv);
+  return null;
+}
+
+for (const scenario of manualEvidenceScenarios) {
+  for (const locale of ["en", "ru"] as const) {
+    for (const width of manualEvidenceWidths) {
+      test(`Manual ${scenario} evidence ${locale} ${width}`, async ({
+        page,
+      }, testInfo) => {
+        await page.setViewportSize({ width, height: 800 });
+        await page.addInitScript((requestedLocale) => {
+          const language = requestedLocale === "ru" ? "ru-RU" : "en-US";
+          Object.defineProperty(navigator, "language", {
+            configurable: true,
+            value: language,
+          });
+          Object.defineProperty(navigator, "languages", {
+            configurable: true,
+            value: [language, "en-US"],
+          });
+        }, locale);
+        const dialog = await exerciseManualEvidenceScenario(
+          page,
+          locale,
+          scenario,
+          width,
+        );
+        if (dialog) {
+          await expect(dialog).toBeVisible();
+          await expect(dialog).toHaveCSS("opacity", "1");
+        }
+        await expectNoHorizontalOverflow(page);
+        await attachManualScreenshot(
+          page,
+          testInfo,
+          `manual-${scenario}`,
+          locale,
+          width,
+        );
+      });
+    }
+  }
+}
