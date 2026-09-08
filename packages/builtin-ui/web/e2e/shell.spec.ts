@@ -1,4 +1,10 @@
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type TestInfo,
+} from "@playwright/test";
 import en from "../src/locales/en.json" assert { type: "json" };
 import ru from "../src/locales/ru.json" assert { type: "json" };
 
@@ -693,7 +699,11 @@ test("Manual CSV blocking preserves both drafts through cancel and reset before 
   const csv = "season_number,episode_number,title\n1,1,Blocked\n";
   await page.goto("/items/manual-series/edit");
   await page.getByLabel("Title (English)").fill("Dirty form");
-  await page.getByLabel("Episode CSV").fill(csv);
+  const csvSource = page.getByRole("textbox", {
+    name: "Episode CSV",
+    exact: true,
+  });
+  await csvSource.fill(csv);
   await page.getByRole("button", { name: "Import episode CSV" }).click();
   await expect(page.getByRole("alert")).toContainText(
     "Save the form first or discard its changes before importing CSV.",
@@ -715,7 +725,7 @@ test("Manual CSV blocking preserves both drafts through cancel and reset before 
   await resetReview.getByRole("button", { name: "Cancel" }).click();
   await expect(resetReview).toBeHidden();
   await expect(page.getByLabel("Title (English)")).toHaveValue("Dirty form");
-  await expect(page.getByLabel("Episode CSV")).toHaveValue(csv);
+  await expect(csvSource).toHaveValue(csv);
   expect(csvRequests).toBe(0);
   expect(editRequests).toBe(0);
 
@@ -726,7 +736,7 @@ test("Manual CSV blocking preserves both drafts through cancel and reset before 
     .click();
   await expect(resetReview).toBeHidden();
   await expect(page.getByLabel("Title (English)")).toHaveValue("Manual Series");
-  await expect(page.getByLabel("Episode CSV")).toHaveValue(csv);
+  await expect(csvSource).toHaveValue(csv);
   expect(csvRequests).toBe(0);
   expect(editRequests).toBe(0);
 
@@ -1234,7 +1244,8 @@ async function exerciseManualEvidenceScenario(
   page: Page,
   locale: UiLocale,
   scenario: ManualEvidenceScenario,
-) {
+  width: number,
+): Promise<Locator | null> {
   const labels = localeCatalogs[locale];
   if (scenario === "alternate") {
     await page.goto("/add/manual");
@@ -1253,7 +1264,7 @@ async function exerciseManualEvidenceScenario(
     await expect(
       dialog.getByRole("button", { name: labels.manual.drafts.cancel }),
     ).toBeFocused();
-    return;
+    return dialog;
   }
 
   await page.goto("/items/manual-series/edit");
@@ -1266,6 +1277,8 @@ async function exerciseManualEvidenceScenario(
     await expect(
       page.getByRole("button", { name: labels.manual.secondaryFields }),
     ).toHaveAttribute("aria-expanded", "true");
+    const secondaryFields = page.locator("#manual-editor-secondary-fields");
+    await expect(secondaryFields).toBeVisible();
     for (const field of [
       labels.manual.fields.originalTitle,
       labels.manual.fields.releaseDate,
@@ -1275,7 +1288,9 @@ async function exerciseManualEvidenceScenario(
       labels.manual.fields.countries,
       labels.manual.fields.studios,
     ]) {
-      await expect(page.getByLabel(field)).toBeVisible();
+      await expect(
+        secondaryFields.getByLabel(field, { exact: true }),
+      ).toBeVisible();
     }
     await expect(
       page.getByText(
@@ -1284,7 +1299,7 @@ async function exerciseManualEvidenceScenario(
           .replace("{{episodes}}", "1"),
       ),
     ).toBeVisible();
-    return;
+    return null;
   }
 
   if (scenario === "destructive") {
@@ -1303,15 +1318,34 @@ async function exerciseManualEvidenceScenario(
     await expect(
       dialog.getByRole("button", { name: labels.manual.destructive.cancel }),
     ).toBeFocused();
-    return;
+    return dialog;
   }
 
   if (scenario === "dirty") {
     await page.getByLabel(localizedTitleLabel(locale)).fill("Dirty draft");
-    await page
-      .getByRole("link", { name: labels.navigation.catalog })
-      .first()
-      .click();
+    if (width <= 768) {
+      const menuButton = page.getByRole("button", {
+        name: labels.navigation.open,
+        exact: true,
+      });
+      await expect(menuButton).toBeVisible();
+      await menuButton.click();
+      const drawer = page.getByRole("dialog", {
+        name: labels.appName,
+        exact: true,
+      });
+      await expect(drawer).toBeVisible();
+      await drawer
+        .getByRole("link", { name: labels.navigation.catalog, exact: true })
+        .click();
+      await expect(drawer).toBeHidden();
+    } else {
+      const catalog = page
+        .locator("aside")
+        .getByRole("link", { name: labels.navigation.catalog, exact: true });
+      await expect(catalog).toBeVisible();
+      await catalog.click();
+    }
     const dialog = page.getByRole("dialog", {
       name: labels.manual.navigation.title,
     });
@@ -1319,12 +1353,16 @@ async function exerciseManualEvidenceScenario(
     await expect(
       dialog.getByRole("button", { name: labels.manual.navigation.stay }),
     ).toBeFocused();
-    return;
+    return dialog;
   }
 
   await page.getByLabel(localizedTitleLabel(locale)).fill("CSV blocked");
   const csv = "season_number,episode_number,title\n1,1,Blocked\n";
-  await page.getByLabel(labels.manual.csv.source).fill(csv);
+  const csvSource = page.getByRole("textbox", {
+    name: labels.manual.csv.source,
+    exact: true,
+  });
+  await csvSource.fill(csv);
   await page.getByRole("button", { name: labels.manual.csv.submit }).click();
   await expect(page.getByRole("alert")).toContainText(
     labels.manual.csv.unsaved,
@@ -1335,7 +1373,8 @@ async function exerciseManualEvidenceScenario(
   await expect(page.getByLabel(localizedTitleLabel(locale))).toHaveValue(
     "CSV blocked",
   );
-  await expect(page.getByLabel(labels.manual.csv.source)).toHaveValue(csv);
+  await expect(csvSource).toHaveValue(csv);
+  return null;
 }
 
 for (const scenario of manualEvidenceScenarios) {
@@ -1356,7 +1395,16 @@ for (const scenario of manualEvidenceScenarios) {
             value: [language, "en-US"],
           });
         }, locale);
-        await exerciseManualEvidenceScenario(page, locale, scenario);
+        const dialog = await exerciseManualEvidenceScenario(
+          page,
+          locale,
+          scenario,
+          width,
+        );
+        if (dialog) {
+          await expect(dialog).toBeVisible();
+          await expect(dialog).toHaveCSS("opacity", "1");
+        }
         await expectNoHorizontalOverflow(page);
         await attachManualScreenshot(
           page,

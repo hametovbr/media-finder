@@ -1,6 +1,18 @@
 # Incremental implementation evidence
 
-## Preliminary publication blocker
+## Hosted checkpoint and browser correction — 2026-09-08
+
+The preliminary publication blocker below is historical and resolved. Draft PR [31](https://github.com/hametovbr/media-finder/pull/31) tests head `ae7d78b455b372c7154d7066960bc7611ca02fb3`, base `3e47f352f0830b0bd5fd9f00f6a52a35b5d2ab47`. Its tree `db2a37d0e0d0852fd36ff8b6cbfb6a4344afe91e` exactly matches local checkpoint `6858005c1436caa29cd1cb82a4ae58c8f2b8e83d`; commit metadata differs. The change remains active, tasks 5.1–5.4 pending; no merge or archive acceptance.
+
+- Run [34279131084](https://github.com/hametovbr/media-finder/actions/runs/34279131084), attempt 1: six required non-browser jobs passed. Browser job `102239375035` ran the pinned browser successfully: **75 passed / 11 failed**, exit 1. This is valid hosted RED, not a local environment failure.
+- Failures: five CSV cases selected both the file button and textarea; four secondary-field cases selected common and episode fields; two mobile dirty-navigation cases targeted hidden desktop navigation. Repair is bounded to exact/scoped E2E locators and the real mobile menu, without changing product behavior or weakening assertions.
+- Artifact `10076981978`, SHA256 `5bd6391f961ceaf98b6af1eeaa81d889ffc3b77efe03e388e806be426e12dafc`, was downloaded completely and verified. Provenance: checkout/event `9ca21d59a795b6261580928047121820ef2a48e6`, the head/base above, Node `v24.20.0`, Playwright `1.62.1`, Chrome for Testing `151.0.7922.34`. This is synthetic-merge evidence for that head/base pair.
+- Only 10 of 20 Manual captures exist. The report's empty `missingCaptures` array applies to the preserved recovery matrix, not Manual acceptance. Primary inspection of destructive RU/360, alternate RU/360 and dirty RU/1280 also found partially transparent dialogs captured during entry transitions. Add an observable settled-opacity wait before capture; do not change production animation or introduce fixed sleeps. Missing/unstable captures block task 5.2.
+- Correction unit `manual_e2e_repair`: Luna Max, shared clean baseline above, sole implementation ownership of `packages/builtin-ui/web/e2e/shell.spec.ts`; primary owns evidence and verification. A fresh hosted run and screenshot inspection are required after repair. Test discovery is not runtime GREEN.
+- Repair source SHA256 `40a96d41b68619e88fd2de0938d04605fc45051d7048339e53b0e5968574ed4c`: primary inspected the diff and reran targeted Prettier/Oxlint, UI TypeScript, and pinned Playwright discovery (86 tests: 50 shell including 20 Manual captures, 36 recovery), all exit 0. Full `pnpm ui:test`: 14 files / 162 passed; `pnpm ui:a11y`: 17 passed / 145 filtered skips. Contract check and production build passed with unchanged packaged assets (`index-CYtf72WC.js`). No tests removed/skipped, assertion relaxation, fixed sleeps, production animation or workflow changes. Hosted runtime GREEN remains outstanding.
+- Independent Terra review of that exact source hash: Critical 0 / Important 0 / Minor 0; GO for hosted rerun only, not merge. Primary full UI format/lint/type, documentation (454 files), strict OpenSpec (10/10) and diff checks passed. Only E2E and this evidence ledger differ from the preliminary checkpoint.
+
+## Historical preliminary publication blocker
 
 Local implementation and pre-checkpoint review passed. Automatic approval review rejected uploading the design blob to `hametovbr/media-finder`, classifying the full internal design as sensitive egress without sufficiently specific payload/destination authorization. The rejected action was not retried through another mechanism. Only the small `.openspec.yaml` blob was uploaded before the rejection; no remote branch, commit or PR was created. Browser execution and screenshot inspection remain blocked pending publication. Preserve the complete local checkpoint; do not omit planning artifacts to evade the rejection.
 
