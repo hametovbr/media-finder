@@ -303,6 +303,7 @@ export function ReleasePage() {
         (searchOutcome.kind === "failed" ||
           searchOutcome.kind === "pending") && (
           <Button
+            color="blue.8"
             disabled={
               searchPending ||
               acquisitionStarting ||
@@ -310,7 +311,6 @@ export function ReleasePage() {
             }
             onClick={() => startSearch(retryRequest)}
             ref={retryButton}
-            variant="light"
           >
             {t("recovery.retry")}
           </Button>

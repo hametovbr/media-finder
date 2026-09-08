@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import en from "../src/locales/en.json" assert { type: "json" };
 
 const session = {
   csrf_token: "csrf-browser-test",
@@ -830,9 +831,7 @@ test("failed locale update retains the Manual field until keyboard retry succeed
   await page
     .getByRole("button", { name: "\u0420\u0443\u0441\u0441\u043a\u0438\u0439" })
     .click();
-  await expect(page.getByRole("alert")).toContainText(
-    "The interface language could not be changed.",
-  );
+  await expect(page.getByRole("alert")).toContainText(en.locale.failed);
   await expect(title).toHaveValue("Retained Manual title");
   const retry = page.getByRole("button", { name: "Retry" });
   await retry.focus();

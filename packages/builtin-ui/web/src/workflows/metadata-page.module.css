@@ -34,6 +34,11 @@
   min-width: 0;
 }
 
+.resultTitle {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .description {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -46,6 +51,19 @@
 
 .selectButton {
   align-self: center;
+}
+
+.manualButton {
+  height: auto;
+  max-width: 100%;
+  min-height: var(--button-height-sm);
+}
+
+.manualButtonLabel {
+  height: auto;
+  min-height: var(--button-height-sm);
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .selectButton:focus-visible {

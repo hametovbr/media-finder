@@ -90,6 +90,7 @@ export function ControlProvider({
             <Text role="status">{t("recovery.loading")}</Text>
           ) : null}
           <Button
+            color="blue.8"
             onClick={() => {
               if (retryInFlight.current) return;
               retryInFlight.current = true;

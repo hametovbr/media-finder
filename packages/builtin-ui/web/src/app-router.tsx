@@ -155,6 +155,7 @@ function ApplicationShell() {
           )}
           {failedLocale !== null && (
             <Button
+              color="blue.8"
               ref={localeRetryButton}
               style={{ alignSelf: "flex-start" }}
               disabled={localeMutation.isPending}

@@ -78,7 +78,7 @@ function ResultRow({
       <ResultPoster result={result} />
       <Stack className={styles.resultContent} gap="xs">
         <Group gap="xs" wrap="wrap">
-          <Title order={3} size="h4">
+          <Title className={styles.resultTitle} order={3} size="h4">
             {result.title}
           </Title>
           {result.year !== null && result.year !== undefined && (
@@ -332,7 +332,14 @@ export function MetadataPage() {
           <Button onClick={() => setMode("provider")}>
             {t("metadata.chooseProvider")}
           </Button>
-          <Button component={Link} to="/add/manual" variant="light">
+          <Button
+            className={styles.manualButton}
+            classNames={{ label: styles.manualButtonLabel }}
+            color="blue.8"
+            component={Link}
+            to="/add/manual"
+            variant="light"
+          >
             {t("metadata.chooseManual")}
           </Button>
         </Group>
@@ -357,12 +364,20 @@ export function MetadataPage() {
         <Group>
           <Button
             aria-disabled={providerRetryPending}
+            color="blue.8"
             onClick={retryProviders}
             ref={providerRetryButton}
           >
             {t("recovery.retry")}
           </Button>
-          <Button component={Link} to="/add/manual" variant="light">
+          <Button
+            className={styles.manualButton}
+            classNames={{ label: styles.manualButtonLabel }}
+            color="blue.8"
+            component={Link}
+            to="/add/manual"
+            variant="light"
+          >
             {t("metadata.chooseManual")}
           </Button>
         </Group>
@@ -380,7 +395,14 @@ export function MetadataPage() {
           <Loader aria-hidden="true" size="sm" />
           <Text role="status">{t("metadata.providersLoading")}</Text>
         </Group>
-        <Button component={Link} to="/add/manual" variant="light">
+        <Button
+          className={styles.manualButton}
+          classNames={{ label: styles.manualButtonLabel }}
+          color="blue.8"
+          component={Link}
+          to="/add/manual"
+          variant="light"
+        >
           {t("metadata.chooseManual")}
         </Button>
       </Stack>
@@ -393,7 +415,14 @@ export function MetadataPage() {
         <Text className={styles.feedback} role="alert">
           {t("metadata.providersUnavailable")}
         </Text>
-        <Button component={Link} to="/add/manual" variant="light">
+        <Button
+          className={styles.manualButton}
+          classNames={{ label: styles.manualButtonLabel }}
+          color="blue.8"
+          component={Link}
+          to="/add/manual"
+          variant="light"
+        >
           {t("metadata.chooseManual")}
         </Button>
       </Stack>
@@ -470,6 +499,7 @@ export function MetadataPage() {
           </Text>
           {searchOutcome === "error" && (
             <Button
+              color="blue.8"
               disabled={searchMutation.isPending}
               loading={searchMutation.isPending}
               onClick={retrySearch}
