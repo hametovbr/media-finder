@@ -338,7 +338,7 @@ export function MetadataPage() {
             color="blue.8"
             component={Link}
             to="/add/manual"
-            variant="light"
+            variant="outline"
           >
             {t("metadata.chooseManual")}
           </Button>
@@ -376,7 +376,7 @@ export function MetadataPage() {
             color="blue.8"
             component={Link}
             to="/add/manual"
-            variant="light"
+            variant="outline"
           >
             {t("metadata.chooseManual")}
           </Button>
@@ -401,7 +401,7 @@ export function MetadataPage() {
           color="blue.8"
           component={Link}
           to="/add/manual"
-          variant="light"
+          variant="outline"
         >
           {t("metadata.chooseManual")}
         </Button>
@@ -421,7 +421,7 @@ export function MetadataPage() {
           color="blue.8"
           component={Link}
           to="/add/manual"
-          variant="light"
+          variant="outline"
         >
           {t("metadata.chooseManual")}
         </Button>
