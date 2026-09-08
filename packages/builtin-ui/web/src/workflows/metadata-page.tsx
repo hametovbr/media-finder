@@ -335,7 +335,7 @@ export function MetadataPage() {
           <Button
             className={styles.manualButton}
             classNames={{ label: styles.manualButtonLabel }}
-            color="blue.8"
+            color="blue.9"
             component={Link}
             to="/add/manual"
             variant="outline"
@@ -373,7 +373,7 @@ export function MetadataPage() {
           <Button
             className={styles.manualButton}
             classNames={{ label: styles.manualButtonLabel }}
-            color="blue.8"
+            color="blue.9"
             component={Link}
             to="/add/manual"
             variant="outline"
@@ -398,7 +398,7 @@ export function MetadataPage() {
         <Button
           className={styles.manualButton}
           classNames={{ label: styles.manualButtonLabel }}
-          color="blue.8"
+          color="blue.9"
           component={Link}
           to="/add/manual"
           variant="outline"
@@ -418,7 +418,7 @@ export function MetadataPage() {
         <Button
           className={styles.manualButton}
           classNames={{ label: styles.manualButtonLabel }}
-          color="blue.8"
+          color="blue.9"
           component={Link}
           to="/add/manual"
           variant="outline"

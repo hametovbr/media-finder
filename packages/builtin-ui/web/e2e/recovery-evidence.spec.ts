@@ -303,55 +303,62 @@ async function assertRecoveryControls(page: Page, locale: Locale) {
     .or(page.getByRole("link", { name: t.metadata.chooseManual, exact: true }));
   for (const control of await controls.all()) {
     await expect(control).toBeVisible();
-    const metrics = await control.evaluate((element) => {
-      const rgb = (value: string) => value.match(/[\d.]+/g)!.map(Number);
-      const over = (front: number[], back: number[]) => {
-        const alpha = front[3] ?? 1;
-        return back
-          .slice(0, 3)
-          .map(
-            (channel, index) => front[index] * alpha + channel * (1 - alpha),
-          );
-      };
-      const background = (node: Element | null): number[] =>
-        node
-          ? over(
-              rgb(getComputedStyle(node).backgroundColor),
-              background(node.parentElement),
-            )
-          : [255, 255, 255];
-      const luminance = (channels: number[]) => {
-        const linear = channels.map((channel) => {
-          const value = channel / 255;
-          return value <= 0.04045
-            ? value / 12.92
-            : ((value + 0.055) / 1.055) ** 2.4;
-        });
-        return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
-      };
-      const bg = background(element);
-      const fg = over(rgb(getComputedStyle(element).color), bg);
-      const light = Math.max(luminance(bg), luminance(fg));
-      const dark = Math.min(luminance(bg), luminance(fg));
-      const box = element.getBoundingClientRect();
-      const label = element.querySelector(".mantine-Button-label")!;
-      return {
-        contrast: (light + 0.05) / (dark + 0.05),
-        width: box.width,
-        height: box.height,
-        labelFits:
-          label.scrollWidth <= label.clientWidth + 1 &&
-          label.scrollHeight <= label.clientHeight + 1,
-      };
-    });
-    expect(
-      metrics.contrast,
-      "recovery control text contrast",
-    ).toBeGreaterThanOrEqual(4.5);
-    expect(metrics.width, "recovery target width").toBeGreaterThanOrEqual(24);
-    expect(metrics.height, "recovery target height").toBeGreaterThanOrEqual(24);
-    expect(metrics.labelFits, "unclipped recovery control label").toBe(true);
+    for (const hovered of [false, true]) {
+      await page.mouse.move(0, 0);
+      if (hovered) await control.hover();
+      const metrics = await control.evaluate((element) => {
+        const rgb = (value: string) => value.match(/[\d.]+/g)!.map(Number);
+        const over = (front: number[], back: number[]) => {
+          const alpha = front[3] ?? 1;
+          return back
+            .slice(0, 3)
+            .map(
+              (channel, index) => front[index] * alpha + channel * (1 - alpha),
+            );
+        };
+        const background = (node: Element | null): number[] =>
+          node
+            ? over(
+                rgb(getComputedStyle(node).backgroundColor),
+                background(node.parentElement),
+              )
+            : [255, 255, 255];
+        const luminance = (channels: number[]) => {
+          const linear = channels.map((channel) => {
+            const value = channel / 255;
+            return value <= 0.04045
+              ? value / 12.92
+              : ((value + 0.055) / 1.055) ** 2.4;
+          });
+          return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+        };
+        const bg = background(element);
+        const fg = over(rgb(getComputedStyle(element).color), bg);
+        const light = Math.max(luminance(bg), luminance(fg));
+        const dark = Math.min(luminance(bg), luminance(fg));
+        const box = element.getBoundingClientRect();
+        const label = element.querySelector(".mantine-Button-label")!;
+        return {
+          contrast: (light + 0.05) / (dark + 0.05),
+          width: box.width,
+          height: box.height,
+          labelFits:
+            label.scrollWidth <= label.clientWidth + 1 &&
+            label.scrollHeight <= label.clientHeight + 1,
+        };
+      });
+      expect(
+        metrics.contrast,
+        "recovery control text contrast",
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(metrics.width, "recovery target width").toBeGreaterThanOrEqual(24);
+      expect(metrics.height, "recovery target height").toBeGreaterThanOrEqual(
+        24,
+      );
+      expect(metrics.labelFits, "unclipped recovery control label").toBe(true);
+    }
   }
+  await page.mouse.move(0, 0);
 }
 
 async function exercise(page: Page, locale: Locale, scenario: Scenario) {
