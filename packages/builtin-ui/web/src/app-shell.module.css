@@ -74,3 +74,8 @@
     display: block;
   }
 }
+
+.localeFeedback {
+  padding: var(--mantine-spacing-md);
+  overflow-wrap: anywhere;
+}

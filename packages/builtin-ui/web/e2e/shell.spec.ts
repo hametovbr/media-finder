@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import en from "../src/locales/en.json" assert { type: "json" };
 
 const session = {
   csrf_token: "csrf-browser-test",
@@ -588,4 +589,262 @@ test("unknown routes and locale switching are localized", async ({ page }) => {
       name: "\u0421\u0442\u0440\u0430\u043d\u0438\u0446\u0430 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u0430",
     }),
   ).toBeVisible();
+});
+
+test("keyboard bootstrap retry keeps the requested route and recovers in English", async ({
+  page,
+}) => {
+  await page.unroute("**/api/control/v1/session");
+  let attempts = 0;
+  await page.route("**/api/control/v1/session", async (route) => {
+    attempts += 1;
+    if (attempts === 1) {
+      await route.fulfill({
+        status: 503,
+        json: { error: { code: "internal_error" } },
+      });
+      return;
+    }
+    await route.fulfill({ json: session });
+  });
+  await page.goto("/items/item-42/releases");
+  await expect(
+    page.getByRole("heading", { name: "Could not load Media Finder" }),
+  ).toBeVisible();
+  const retry = page.getByRole("button", { name: "Retry" });
+  await retry.focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByRole("heading", { name: "Find release" }),
+  ).toBeVisible();
+  await expect(page.locator("main")).toBeFocused();
+  expect(attempts).toBe(2);
+});
+
+test("Russian bootstrap failure is retryable and adopts the returned English session", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "languages", {
+      configurable: true,
+      value: ["ru-RU", "en-US"],
+    });
+    Object.defineProperty(navigator, "language", {
+      configurable: true,
+      value: "ru-RU",
+    });
+  });
+  await page.unroute("**/api/control/v1/session");
+  let attempts = 0;
+  await page.route("**/api/control/v1/session", async (route) => {
+    attempts += 1;
+    if (attempts === 1) {
+      await route.fulfill({
+        status: 503,
+        json: { error: { code: "internal_error" } },
+      });
+      return;
+    }
+    await route.fulfill({ json: session });
+  });
+  await page.goto("/add");
+  await expect(
+    page.getByRole("heading", {
+      name: "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c Media Finder",
+    }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", {
+      name: "\u041f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u044c",
+    })
+    .click();
+  await expect(page.getByRole("heading", { name: "Add title" })).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: "\u0420\u0443\u0441\u0441\u043a\u0438\u0439",
+    }),
+  ).toBeVisible();
+  expect(attempts).toBe(2);
+});
+
+test("provider discovery retry is keyboard accessible and preserves the Manual alternative", async ({
+  page,
+}) => {
+  await page.unroute("**/api/control/v1/metadata-providers");
+  let attempts = 0;
+  await page.route("**/api/control/v1/metadata-providers", async (route) => {
+    attempts += 1;
+    if (attempts === 1) {
+      await route.fulfill({
+        status: 503,
+        json: { error: { code: "metadata_provider_unavailable" } },
+      });
+      return;
+    }
+    await route.fulfill({
+      json: [
+        {
+          capabilities: ["search", "select"],
+          key: "tmdb",
+          name_key: "tmdb.name",
+          ready: true,
+        },
+      ],
+    });
+  });
+  await page.goto("/add");
+  await page.getByRole("button", { name: "Search metadata providers" }).click();
+  const retry = page.getByRole("button", { name: "Retry" });
+  await expect(retry).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Enter or import Manual metadata" }),
+  ).toBeVisible();
+  await retry.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("searchbox", { name: "Title" })).toBeVisible();
+  expect(attempts).toBe(2);
+});
+
+test("metadata retry uses the failed snapshot while edited input stays available", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.unroute("**/api/control/v1/metadata-searches");
+  const requests: string[] = [];
+  await page.route(
+    "**/api/control/v1/metadata-searches",
+    async (route, request) => {
+      const body = request.postDataJSON() as { query: string };
+      requests.push(body.query);
+      if (requests.length === 1) {
+        await route.fulfill({
+          status: 503,
+          json: { error: { code: "internal_error" } },
+        });
+        return;
+      }
+      await route.fulfill({
+        json: [
+          {
+            description: "Recovered result",
+            external_id: "recovered",
+            kind: "movie",
+            locale: "en",
+            poster_url: null,
+            provider_key: "tmdb",
+            title: body.query,
+            token: "metadata-recovered",
+            year: 2026,
+          },
+        ],
+      });
+    },
+  );
+  await page.goto("/add");
+  await page.getByRole("button", { name: "Search metadata providers" }).click();
+  const input = page.getByRole("searchbox", { name: "Title" });
+  const longQuery = "LongQuery".repeat(30);
+  await input.fill(longQuery);
+  await page.getByRole("button", { name: "Search" }).click();
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  await input.fill("edited query");
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByRole("article", { name: /LongQuery/ })).toBeVisible();
+  expect(requests).toEqual([longQuery, longQuery]);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    )
+    .toBe(true);
+  await test.info().attach("metadata-long-query-360", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  });
+});
+
+test("release retry keeps the submitted snapshot and ignores a late response after navigation", async ({
+  page,
+}) => {
+  await page.unroute("**/api/control/v1/media-items/*/release-searches");
+  let resolveLate: (() => void) | undefined;
+  const requests: string[] = [];
+  await page.route(
+    "**/api/control/v1/media-items/*/release-searches",
+    async (route, request) => {
+      const body = request.postDataJSON() as { query: string };
+      requests.push(body.query);
+      if (requests.length === 1) {
+        await route.fulfill({
+          status: 503,
+          json: { error: { code: "internal_error" } },
+        });
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        resolveLate = resolve;
+      });
+      await route.fulfill({ json: [] });
+    },
+  );
+  await page.goto("/items/item-42/releases");
+  const input = page.getByRole("searchbox", { name: "Release query" });
+  await input.fill("Arrival");
+  await page.getByRole("button", { name: "Search releases" }).click();
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  await input.fill("Edited");
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByRole("status")).toContainText("Arrival");
+  await page.keyboard.press("Enter");
+  expect(requests).toEqual(["Arrival", "Arrival"]);
+  await page.getByRole("link", { name: "Catalog" }).first().click();
+  resolveLate?.();
+  await expect(page.getByRole("heading", { name: "Catalog" })).toBeVisible();
+  expect(requests).toEqual(["Arrival", "Arrival"]);
+});
+
+test("failed locale update retains the Manual field until keyboard retry succeeds", async ({
+  page,
+}) => {
+  await page.unroute("**/api/control/v1/session");
+  let patchAttempts = 0;
+  await page.route("**/api/control/v1/session", async (route, request) => {
+    if (request.method() !== "PATCH") {
+      await route.fulfill({ json: session });
+      return;
+    }
+    patchAttempts += 1;
+    if (patchAttempts === 1) {
+      await route.fulfill({
+        status: 503,
+        json: { error: { code: "internal_error" } },
+      });
+      return;
+    }
+    await route.fulfill({ json: { ...session, ui_locale: "ru" } });
+  });
+
+  await page.goto("/add/manual");
+  const title = page.getByLabel("Title (English)");
+  await title.fill("Retained Manual title");
+  await page
+    .getByRole("button", { name: "\u0420\u0443\u0441\u0441\u043a\u0438\u0439" })
+    .click();
+  await expect(page.getByRole("alert")).toContainText(en.locale.failed);
+  await expect(title).toHaveValue("Retained Manual title");
+  const retry = page.getByRole("button", { name: "Retry" });
+  await retry.focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByRole("heading", {
+      name: "\u0420\u0443\u0447\u043d\u044b\u0435 \u043c\u0435\u0442\u0430\u0434\u0430\u043d\u043d\u044b\u0435",
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByLabel(
+      "\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435 (\u0430\u043d\u0433\u043b\u0438\u0439\u0441\u043a\u0438\u0439)",
+    ),
+  ).toHaveValue("Retained Manual title");
+  expect(patchAttempts).toBe(2);
 });

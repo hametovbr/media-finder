@@ -8,7 +8,9 @@
   },
   "locale": {
     "switchToEnglish": "English",
-    "switchToRussian": "Русский"
+    "switchToRussian": "Русский",
+    "failed": "Could not change the interface language.",
+    "updating": "Updating interface language"
   },
   "routes": {
     "catalog": "Catalog",
@@ -54,7 +56,10 @@
     "select": "Select",
     "selecting": "Selecting {{title}}",
     "title": "Title",
-    "viewItem": "View item"
+    "viewItem": "View item",
+    "providersLoading": "Loading metadata providers",
+    "providersUnavailable": "No metadata providers are available. Enter metadata manually.",
+    "providersFailed": "Could not load metadata providers."
   },
   "release": {
     "chooseDestination": "Choose a destination",
@@ -176,5 +181,18 @@
     "selection_expired": "The selection expired. Search again.",
     "session_invalid": "Your browser session is no longer valid.",
     "unexpected_response": "The server returned an unexpected response."
+  },
+  "recovery": {
+    "retry": "Retry",
+    "loading": "Retrying request"
+  },
+  "bootstrap": {
+    "title": "Could not load Media Finder"
+  },
+  "search": {
+    "pending": "Searching for “{{query}}”",
+    "complete": "Results for “{{query}}”",
+    "empty": "No results for “{{query}}”",
+    "failed": "Search failed for “{{query}}”"
   }
 }

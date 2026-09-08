@@ -42,3 +42,20 @@ normally. Do not report the gate as passed until the host run succeeds, and do n
 infer that a host service, credential, or dependency is broken from sandbox
 evidence. Never print tokens, integration values, authenticated URLs, or raw
 sensitive upstream payloads while diagnosing either environment.
+
+## Hosted evidence before archive
+
+When a browser is unavailable locally, do not substitute test discovery, unit
+tests, a previous CI run, or a different browser for the required evidence.
+After the apply turn, a separately authorized verification turn may create the
+non-final checkpoint and draft PR described in
+`verifying-and-publishing-media-finder`. Include active planning artifacts,
+preserve all implementation work, and state the unresolved gates. This is not
+final delivery and does not authorize archive, merge, or image publication.
+
+Use the existing browser job's downloadable report, fixture screenshots and
+provenance. Match actual checkout, event, PR head/base and run attempt before
+reviewing screenshots. A synthetic merge checkout is evidence for that head/base
+combination; a changed head or base requires new evidence. Record setup failures,
+missing captures and expired artifacts as blocked. After separately authorized
+synchronization/archive, rerun final-head checks and review for delivery.
