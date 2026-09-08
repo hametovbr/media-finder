@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { components } from "../api/control.generated";
 import {
   createManualDocument,
+  createManualRawLists,
+  manualDraftEquals,
   manualDocumentFromItem,
+  projectManualDocument,
   toManualDocument,
   withManualRowKeys,
 } from "./manual-document";
@@ -172,5 +175,75 @@ describe("Manual document mapping", () => {
       ].sort(),
     ).toEqual([...keys].sort());
     expect(toManualDocument(editorDocument)).toEqual(document);
+  });
+
+  it("normalizes only raw lists changed from their initial text and keeps rich metadata intact", () => {
+    const document = manualDocumentFromItem(richManualSeries, "en");
+    document.genres = ["Science, Fiction", "Drama"];
+    const editorDocument = withManualRowKeys(document, () => "row-key");
+    const initialRawLists = createManualRawLists(editorDocument);
+
+    expect(
+      projectManualDocument(editorDocument, initialRawLists, {
+        ...initialRawLists,
+        tags: "manual, updated, ",
+      }),
+    ).toEqual({
+      ...document,
+      genres: ["Science, Fiction", "Drama"],
+      tags: ["manual", "updated"],
+    });
+    expect(
+      projectManualDocument(editorDocument, initialRawLists, initialRawLists),
+    ).toEqual(document);
+    expect(
+      projectManualDocument(editorDocument, initialRawLists, {
+        ...initialRawLists,
+        genres: "",
+      }),
+    ).toEqual({ ...document, genres: [] });
+  });
+
+  it("treats raw-list reverts as clean while excluding row keys and retaining shared collection state", () => {
+    const document = manualDocumentFromItem(richManualSeries, "en");
+    const initial = withManualRowKeys(document, () => "initial-row");
+    const rerendered = withManualRowKeys(document, () => "rerendered-row");
+    const rawLists = createManualRawLists(initial);
+
+    expect(
+      manualDraftEquals(
+        initial,
+        rerendered,
+        rawLists,
+        { ...rawLists, genres: "Mystery, " },
+        "collection-1",
+        "collection-1",
+      ),
+    ).toBe(false);
+    expect(
+      manualDraftEquals(
+        initial,
+        rerendered,
+        rawLists,
+        {
+          tags: rawLists.tags,
+          studios: rawLists.studios,
+          genres: rawLists.genres,
+          countries: rawLists.countries,
+        },
+        "collection-1",
+        "collection-1",
+      ),
+    ).toBe(true);
+    expect(
+      manualDraftEquals(
+        initial,
+        rerendered,
+        rawLists,
+        rawLists,
+        "collection-1",
+        null,
+      ),
+    ).toBe(false);
   });
 });
