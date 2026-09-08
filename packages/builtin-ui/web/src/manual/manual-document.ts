@@ -16,6 +16,18 @@ export type ManualEditorDocument = Omit<ManualDocument, "seasons"> & {
   seasons: ManualEditorSeason[];
 };
 
+export const MANUAL_LIST_FIELDS = [
+  "genres",
+  "tags",
+  "countries",
+  "studios",
+] as const;
+
+export type ManualRawLists = Record<
+  (typeof MANUAL_LIST_FIELDS)[number],
+  string
+>;
+
 export function createManualDocument(
   kind: MediaKind,
   locale: Locale,
@@ -90,4 +102,58 @@ export function toManualDocument(
       };
     }),
   };
+}
+
+function commaSeparated(values: string[]): string {
+  return values.join(", ");
+}
+
+function parseCommaSeparated(value: string): string[] {
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+export function createManualRawLists(
+  document: ManualEditorDocument,
+): ManualRawLists {
+  return {
+    countries: commaSeparated(document.countries),
+    genres: commaSeparated(document.genres),
+    studios: commaSeparated(document.studios),
+    tags: commaSeparated(document.tags),
+  };
+}
+
+export function projectManualDocument(
+  editorDocument: ManualEditorDocument,
+  initialRawLists: ManualRawLists,
+  rawLists: ManualRawLists,
+): ManualDocument {
+  const document = toManualDocument(editorDocument);
+  for (const field of MANUAL_LIST_FIELDS) {
+    if (rawLists[field] !== initialRawLists[field]) {
+      document[field] = parseCommaSeparated(rawLists[field]);
+    }
+  }
+  return document;
+}
+
+export function manualDraftEquals(
+  initialDocument: ManualEditorDocument,
+  document: ManualEditorDocument,
+  initialRawLists: ManualRawLists,
+  rawLists: ManualRawLists,
+  initialCollectionId: string | null,
+  collectionId: string | null,
+): boolean {
+  return (
+    JSON.stringify(toManualDocument(initialDocument)) ===
+      JSON.stringify(toManualDocument(document)) &&
+    MANUAL_LIST_FIELDS.every(
+      (field) => initialRawLists[field] === rawLists[field],
+    ) &&
+    initialCollectionId === collectionId
+  );
 }

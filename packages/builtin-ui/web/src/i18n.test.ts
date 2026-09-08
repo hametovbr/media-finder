@@ -19,6 +19,17 @@ describe("UI locale catalogs", () => {
     expect(leafKeys(ru).sort()).toEqual(leafKeys(en).sort());
   });
 
+  it("localizes Manual pending and safe file-read feedback in both languages", () => {
+    for (const locale of ["en", "ru"] as const) {
+      const i18n = createUiI18n(locale);
+      for (const name of ["pending", "reading", "fileReadFailed"]) {
+        const key = `manual.operation.${name}`;
+        expect(i18n.t(key)).not.toBe(key);
+        expect(i18n.t(key).length).toBeGreaterThan(0);
+      }
+    }
+  });
+
   it("chooses the first supported primary browser language in order", () => {
     vi.spyOn(window.navigator, "languages", "get").mockReturnValue([
       "de-DE",
