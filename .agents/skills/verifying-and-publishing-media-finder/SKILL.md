@@ -33,7 +33,32 @@ its delta differs from the canonical spec. After the separately authorized
 archive workflow returns successfully, continue ordinary publication unless the
 user narrowed or stopped it or an external gate blocks progress.
 
-## Verify the candidate
+## Preliminary hosted verification
+
+Use this narrow exception only when a user request received after the apply turn
+authorizes hosted verification of approved work whose evidence is unavailable
+locally. Planning and apply turns remain terminal; do not publish from them.
+
+1. Preserve existing work. Inspect the full diff, active changes, local evidence
+   and unresolved gates. Commit a clean, explicitly non-final checkpoint on a
+   non-main branch including applicable active planning artifacts. Necessary WIP
+   commits are acceptable only for this preliminary checkpoint.
+2. Open a draft PR labeled non-final, with scope, checkpoint SHA and outstanding
+   acceptance gates. Do not merge, publish an image/release, or archive changes.
+3. Inspect its exact run/attempt. Record actual checkout SHA separately from
+   event SHA and PR head/base. A synthetic merge checkout tests that integration
+   candidate, not the head alone. Head or base changes invalidate acceptance for
+   the changed candidate.
+4. Download and open the required report and screenshots. Check declared
+   scenarios/locales/viewports, assertions and visible results. Missing, expired,
+   failed, skipped or unavailable evidence stays blocked. Screenshots alone do
+   not prove contrast or full accessibility compliance.
+5. Record verification only for the tested checkpoint. Route defects to the
+   owning approved change; request scope updates when necessary. Successful
+   preliminary evidence never closes delivery. Request separate sync/archive,
+   then shape and verify the final delivery candidate with fresh checks/review.
+
+## Verify the final delivery candidate
 
 1. Confirm applicable OpenSpec changes are synchronized and archived. Inspect
    the complete diff and shape it on a non-`main` branch as one cohesive squashed

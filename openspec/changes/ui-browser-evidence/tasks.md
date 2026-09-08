@@ -1,18 +1,18 @@
 ## 1. Preliminary verification guidance
 
-- [ ] 1.1 Run and record the existing publication skill against the realistic blocked-browser/pre-archive checkpoint scenario before editing; label prior exposure and do not claim an isolated control.
-- [ ] 1.2 Align AGENTS.md, docs/agent-execution.md and the manually maintained publication skill with the approved narrow preliminary-verification exception; repeat the same scenario and review phase boundaries, candidate identity and final delivery gates. Do not edit generated skills.
+- [x] 1.1 Run and record the existing publication skill against the realistic blocked-browser/pre-archive checkpoint scenario before editing; label prior exposure and do not claim an isolated control.
+- [x] 1.2 Align AGENTS.md, docs/agent-execution.md and the manually maintained publication skill with the approved narrow preliminary-verification exception; repeat the same scenario and review phase boundaries, candidate identity and final delivery gates. Do not edit generated skills.
 
 ## 2. Evidence implementation
 
-- [ ] 2.1 Add failing delivery-validator mutation tests for missing evidence upload, mutable pin, missing failure-path upload, widened permissions, invalid paths/retention and masked browser failure; confirm meaningful failures before implementation.
-- [ ] 2.2 Extend the existing browser job, delivery validator and Playwright configuration with declared HTML/attachment outputs, seven-day retention and actual checkout/event/PR head/base/run-attempt/tool provenance. Resolve the official upload action's immutable SHA from its authoritative repository; preserve seven contexts and failure status.
+- [x] 2.1 Add failing delivery-validator mutation tests for missing evidence upload, mutable pin, missing failure-path upload, widened permissions, invalid paths/retention and masked browser failure; confirm meaningful failures before implementation.
+- [x] 2.2 Extend the existing browser job, delivery validator and Playwright configuration with declared HTML/attachment outputs, seven-day retention and actual checkout/event/PR head/base/run-attempt/tool provenance. Resolve the official upload action's immutable SHA from its authoritative repository; preserve seven contexts and failure status.
 - [ ] 2.3 Add fixture browser cases for the 36-image matrix, deferred pending/recovery, long-query overflow and keyboard focus; use local assets, reject unexpected external traffic, attach named screenshots and settle requests. Record browser execution as blocked when unavailable; test discovery is not a passing run.
 
 ## 3. Local validation and apply handoff
 
 - [ ] 3.1 Run strict OpenSpec, documentation, delivery and applicable UI format/lint/type/contract/unit/accessibility/build checks; inspect generated outputs and preserve the existing ui-feedback-recovery work. Record exact candidate/diff and environmental limitations.
-- [ ] 3.2 Obtain independent Terra review of implementation and guidance, resolve material findings, and finish the apply turn with a durable status/next-step handoff. Do not publish a checkpoint, archive or claim remote acceptance in this turn.
+- [x] 3.2 Obtain independent Terra review of implementation and guidance, resolve material findings, and finish the apply turn with a durable status/next-step handoff. Do not publish a checkpoint, archive or claim remote acceptance in this turn.
 
 ## 4. Subsequent authorized hosted verification
 

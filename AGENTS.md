@@ -98,4 +98,6 @@ Phase completion is not overall work completion. Until every applicable gate bel
 
 Do not finalize/publish a delivery commit omitting applicable synchronization or archive; skipping synchronization cannot close a change with deltas. After separately authorized archive, continue the already requested commit, push, PR, check, review, and merge sequence unless the user narrows/stops it or an external gate blocks progress.
 
+A user-authorized verification turn after apply may publish an explicitly non-final, clean checkpoint with active planning artifacts to a non-main branch and draft PR solely to obtain unavailable hosted evidence. Follow `verifying-and-publishing-media-finder` for candidate provenance and unresolved gates. This exception does not permit publication in planning/apply turns, merge, image/release publication, automatic archive, or final completion. After separately authorized sync/archive, rerun checks and review for the final delivery head.
+
 For legitimate behavior-neutral maintenance, report OpenSpec closure as not applicable; protected-branch delivery remains mandatory. Failed, pending, skipped, stale-SHA, unavailable, or unconfirmed required evidence blocks completion. Report phase/overall status, exact candidate, verification, PR/merge state, and unresolved next gate without reproducing full logs.

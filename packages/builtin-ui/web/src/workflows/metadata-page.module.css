@@ -39,6 +39,11 @@
   white-space: pre-wrap;
 }
 
+.feedback {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .selectButton {
   align-self: center;
 }

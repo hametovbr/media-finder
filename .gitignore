@@ -9,6 +9,7 @@ __pycache__/
 *.db
 media-finder-local.db*
 packages/builtin-ui/test-results/
+packages/builtin-ui/web/browser-evidence/
 .superpowers/
 .DS_Store
 Thumbs.db

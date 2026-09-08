@@ -1,7 +1,7 @@
 import { Burger, Button, Drawer, Stack, Text, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   isRouteErrorResponse,
@@ -53,10 +53,19 @@ function ApplicationShell() {
   const navigation = useNavigation();
   const mainRef = useRef<HTMLElement>(null);
   const previousPath = useRef(location.pathname);
+  const localeRequestPending = useRef(false);
+  const localeButton = useRef<HTMLButtonElement>(null);
+  const localeRetryButton = useRef<HTMLButtonElement>(null);
+  const restoreLocaleFocus = useRef(false);
+  const [failedLocale, setFailedLocale] = useState<"en" | "ru" | null>(null);
   const localeMutation = useMutation({
+    retry: false,
     mutationFn: (locale: "en" | "ru") =>
       client.updateSession({ ui_locale: locale }),
     onSuccess: async (updatedSession) => {
+      restoreLocaleFocus.current =
+        document.activeElement === localeRetryButton.current;
+      setFailedLocale(null);
       queryClient.setQueryData(sessionQueryKey, updatedSession);
       await i18n.changeLanguage(updatedSession.ui_locale);
       await queryClient.invalidateQueries({
@@ -64,7 +73,25 @@ function ApplicationShell() {
           queryKey[0] === "control" && queryKey[1] !== "session",
       });
     },
+    onError: (_error, locale) => setFailedLocale(locale),
+    onSettled: () => {
+      localeRequestPending.current = false;
+    },
   });
+
+  useEffect(() => {
+    if (!localeMutation.isPending && restoreLocaleFocus.current) {
+      restoreLocaleFocus.current = false;
+      if (document.activeElement === document.body)
+        localeButton.current?.focus();
+    }
+  }, [localeMutation.isPending]);
+
+  function changeLocale(locale: "en" | "ru") {
+    if (localeRequestPending.current) return;
+    localeRequestPending.current = true;
+    localeMutation.mutate(locale);
+  }
 
   useEffect(() => {
     if (i18n.resolvedLanguage !== session.ui_locale) {
@@ -100,14 +127,45 @@ function ApplicationShell() {
           {t("appName")}
         </Text>
         <Button
+          ref={localeButton}
           loading={localeMutation.isPending}
-          onClick={() => localeMutation.mutate(nextLocale)}
-          size="compact-sm"
+          disabled={localeMutation.isPending}
+          onClick={() => changeLocale(nextLocale)}
+          size="sm"
           variant="subtle"
         >
           {localeLabel}
         </Button>
       </header>
+      {(localeMutation.isPending || failedLocale !== null) && (
+        <Stack className={styles.localeFeedback} gap="xs">
+          {localeMutation.isError && (
+            <div role="alert">
+              <Text>{t("locale.failed")}</Text>
+              <Text>
+                {t(
+                  `errors.${localeMutation.error instanceof ControlFailure ? localeMutation.error.code : "unexpected_response"}`,
+                  { defaultValue: t("errors.unexpected_response") },
+                )}
+              </Text>
+            </div>
+          )}
+          {localeMutation.isPending && (
+            <Text role="status">{t("locale.updating")}</Text>
+          )}
+          {failedLocale !== null && (
+            <Button
+              ref={localeRetryButton}
+              style={{ alignSelf: "flex-start" }}
+              disabled={localeMutation.isPending}
+              loading={localeMutation.isPending}
+              onClick={() => changeLocale(failedLocale)}
+            >
+              {t("recovery.retry")}
+            </Button>
+          )}
+        </Stack>
+      )}
       <Drawer onClose={closeDrawer} opened={drawerOpened} title={t("appName")}>
         <Navigation onNavigate={closeDrawer} />
       </Drawer>

@@ -226,7 +226,27 @@ jobs:
       - name: Install Chromium
         run: pnpm --filter @media-finder/builtin-ui exec playwright install --with-deps chromium
       - name: Built-in UI browser tests
+        id: browser-tests
         run: pnpm ui:browser
+      - name: Generate browser evidence
+        if: ${{ always() }}
+        env:
+          BROWSER_TEST_OUTCOME: ${{ steps.browser-tests.outcome }}
+          MF_EVENT_SHA: ${{ github.sha }}
+          MF_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MF_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node packages/builtin-ui/scripts/browser-evidence.mjs
+      - name: Upload browser evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-evidence
+          path: |
+            packages/builtin-ui/web/browser-evidence/report
+            packages/builtin-ui/web/browser-evidence/results
+            packages/builtin-ui/web/browser-evidence/provenance.json
+          if-no-files-found: error
+          retention-days: 7
 
   image:
     runs-on: ubuntu-latest

@@ -8,7 +8,9 @@
   },
   "locale": {
     "switchToEnglish": "English",
-    "switchToRussian": "Русский"
+    "switchToRussian": "Русский",
+    "failed": "Не удалось изменить язык интерфейса.",
+    "updating": "Изменение языка интерфейса"
   },
   "routes": {
     "catalog": "Каталог",
@@ -54,7 +56,10 @@
     "select": "Выбрать",
     "selecting": "Выбираем «{{title}}»",
     "title": "Название",
-    "viewItem": "Открыть произведение"
+    "viewItem": "Открыть произведение",
+    "providersLoading": "Загрузка источников метаданных",
+    "providersUnavailable": "Источники метаданных недоступны. Введите метаданные вручную.",
+    "providersFailed": "Не удалось загрузить источники метаданных."
   },
   "release": {
     "chooseDestination": "Выберите назначение",
@@ -176,5 +181,18 @@
     "selection_expired": "Срок выбора истёк. Выполните поиск снова.",
     "session_invalid": "Сессия браузера больше недействительна.",
     "unexpected_response": "Сервер вернул неожиданный ответ."
+  },
+  "recovery": {
+    "retry": "Повторить",
+    "loading": "Повторяем запрос"
+  },
+  "bootstrap": {
+    "title": "Не удалось загрузить Media Finder"
+  },
+  "search": {
+    "pending": "Поиск «{{query}}»",
+    "complete": "Результаты для «{{query}}»",
+    "empty": "По запросу «{{query}}» ничего не найдено",
+    "failed": "Не удалось выполнить поиск «{{query}}»"
   }
 }

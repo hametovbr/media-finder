@@ -366,6 +366,144 @@ test("browser verification must run the Playwright built-in UI suite", (context)
   );
 });
 
+test("browser evidence upload is required", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace(/\n      - name: Upload browser evidence[\s\S]*?(?=\n  [a-z]|\n$)/, ""),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /browser job must upload browser evidence/);
+});
+
+test("browser evidence upload action must use the approved immutable pin", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace(/actions\/upload-artifact@[0-9a-f]{40}/, "actions/upload-artifact@v4"),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /approved immutable upload-artifact SHA/);
+});
+
+test("browser evidence upload runs after failed browser assertions", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace("if: ${{ always() }}\n        uses: actions/upload-artifact", "uses: actions/upload-artifact"),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /browser evidence upload must run with always\(\)/);
+});
+
+test("browser evidence upload keeps the declared outputs for seven days", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value
+      .replace("retention-days: 7", "retention-days: 30")
+      .replace("packages/builtin-ui/web/browser-evidence/results", "packages/builtin-ui/web/browser-evidence/omitted"),
+  );
+
+  const failures = validateDelivery(root).join("\n");
+  assert.match(failures, /browser evidence upload must retain artifacts for seven days/);
+  assert.match(failures, /browser evidence upload paths must be the declared report, results, and provenance outputs/);
+});
+
+test("browser evidence upload fails when a declared output is missing", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace("if-no-files-found: error", "if-no-files-found: warn"),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /browser evidence upload must fail when required evidence is missing/);
+});
+
+test("browser failures cannot be masked while collecting evidence", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace("id: browser-tests\n        run: pnpm ui:browser", "id: browser-tests\n        continue-on-error: true\n        run: pnpm ui:browser"),
+  );
+
+  assert.match(validateDelivery(root).join("\n"), /browser test failure must not be masked/);
+});
+
+test("browser evidence steps reject dynamic failure masking", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value
+      .replace("id: browser-tests\n        run", "id: browser-tests\n        continue-on-error: ${{ true }}\n        run")
+      .replace("- name: Generate browser evidence\n        if", "- name: Generate browser evidence\n        continue-on-error: ${{ true }}\n        if")
+      .replace("- name: Upload browser evidence\n        if", "- name: Upload browser evidence\n        continue-on-error: ${{ true }}\n        if"),
+  );
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /browser evidence steps must not mask failures with continue-on-error/,
+  );
+});
+
+test("browser evidence steps preserve browser, provenance, and upload order", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value
+      .replace("- name: Generate browser evidence", "- name: temporary browser evidence step")
+      .replace("- name: Upload browser evidence", "- name: Generate browser evidence")
+      .replace("- name: temporary browser evidence step", "- name: Upload browser evidence"),
+  );
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /browser tests, provenance, and upload must run in that order/,
+  );
+});
+
+test("browser evidence keeps read-only repository permissions", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace("  browser:\n    runs-on: ubuntu-latest", "  browser:\n    permissions:\n      contents: write\n    runs-on: ubuntu-latest"),
+  );
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /browser evidence must preserve read-only repository permissions/,
+  );
+});
+
+test("browser evidence provenance records the browser test outcome", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value.replace("BROWSER_TEST_OUTCOME: ${{ steps.browser-tests.outcome }}", "BROWSER_TEST_OUTCOME: success"),
+  );
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /browser evidence provenance must run after browser tests with their outcome/,
+  );
+});
+
+test("browser evidence provenance records exact event and pull-request commits", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutate(root, ".github/workflows/verify.yaml", (value) =>
+    value
+      .replace("MF_EVENT_SHA: ${{ github.sha }}", "MF_EVENT_SHA: ${{ github.ref }}")
+      .replace("MF_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}", "MF_PR_HEAD_SHA: omitted")
+      .replace("MF_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}", "MF_PR_BASE_SHA: omitted"),
+  );
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /browser evidence provenance must record the exact event and pull-request commit expressions/,
+  );
+});
+
 test("real browser-control conformance remains in the contract job", (context) => {
   const root = copyDeliveryFixture();
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));

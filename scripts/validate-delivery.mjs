@@ -309,6 +309,13 @@ const VERIFICATION_JOBS = [
   "browser",
   "image",
 ];
+const BROWSER_EVIDENCE_UPLOAD_ACTION =
+  "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
+const BROWSER_EVIDENCE_OUTPUTS = [
+  "packages/builtin-ui/web/browser-evidence/report",
+  "packages/builtin-ui/web/browser-evidence/results",
+  "packages/builtin-ui/web/browser-evidence/provenance.json",
+];
 
 const WORKSPACE_DISTRIBUTIONS = [
   "media-finder",
@@ -800,6 +807,96 @@ function validateVerification(root, verify, verifyText, failures) {
       .split("\n")
       .some((line) => line.trim() === "pnpm ui:browser"),
     ".github/workflows/verify.yaml: browser job must run the Playwright built-in UI suite",
+  );
+  const browser = verify.jobs?.browser;
+  const browserTestStep = (browser?.steps ?? []).find((step) => step.id === "browser-tests");
+  requireValue(
+    failures,
+    browserTestStep?.run === "pnpm ui:browser",
+    ".github/workflows/verify.yaml: browser tests must use the browser-tests step identity",
+  );
+  requireValue(
+    failures,
+    browser?.["continue-on-error"] !== true && browserTestStep?.["continue-on-error"] !== true,
+    ".github/workflows/verify.yaml: browser test failure must not be masked",
+  );
+  const provenanceStep = (browser?.steps ?? []).find(
+    (step) => step.name === "Generate browser evidence",
+  );
+  requireValue(
+    failures,
+    provenanceStep?.if === "${{ always() }}" &&
+      provenanceStep?.run === "node packages/builtin-ui/scripts/browser-evidence.mjs" &&
+      provenanceStep?.env?.BROWSER_TEST_OUTCOME === "${{ steps.browser-tests.outcome }}",
+    ".github/workflows/verify.yaml: browser evidence provenance must run after browser tests with their outcome",
+  );
+  requireValue(
+    failures,
+    provenanceStep?.env?.MF_EVENT_SHA === "${{ github.sha }}" &&
+      provenanceStep?.env?.MF_PR_HEAD_SHA === "${{ github.event.pull_request.head.sha }}" &&
+      provenanceStep?.env?.MF_PR_BASE_SHA === "${{ github.event.pull_request.base.sha }}",
+    ".github/workflows/verify.yaml: browser evidence provenance must record the exact event and pull-request commit expressions",
+  );
+  const evidenceUpload = (browser?.steps ?? []).find(
+    (step) => step.name === "Upload browser evidence",
+  );
+  requireValue(
+    failures,
+    Boolean(evidenceUpload),
+    ".github/workflows/verify.yaml: browser job must upload browser evidence",
+  );
+  requireValue(
+    failures,
+    evidenceUpload?.uses === BROWSER_EVIDENCE_UPLOAD_ACTION,
+    ".github/workflows/verify.yaml: browser evidence upload must use the approved immutable upload-artifact SHA",
+  );
+  requireValue(
+    failures,
+    evidenceUpload?.if === "${{ always() }}",
+    ".github/workflows/verify.yaml: browser evidence upload must run with always()",
+  );
+  const browserSteps = browser?.steps ?? [];
+  const browserTestIndex = browserSteps.indexOf(browserTestStep);
+  const provenanceIndex = browserSteps.indexOf(provenanceStep);
+  const evidenceUploadIndex = browserSteps.indexOf(evidenceUpload);
+  requireValue(
+    failures,
+    browserTestIndex >= 0 &&
+      provenanceIndex > browserTestIndex &&
+      evidenceUploadIndex > provenanceIndex,
+    ".github/workflows/verify.yaml: browser tests, provenance, and upload must run in that order",
+  );
+  requireValue(
+    failures,
+    [browserTestStep, provenanceStep, evidenceUpload].every(
+      (step) => step?.["continue-on-error"] === undefined || step["continue-on-error"] === false,
+    ),
+    ".github/workflows/verify.yaml: browser evidence steps must not mask failures with continue-on-error",
+  );
+  requireValue(
+    failures,
+    evidenceUpload?.with?.["if-no-files-found"] === "error",
+    ".github/workflows/verify.yaml: browser evidence upload must fail when required evidence is missing",
+  );
+  requireValue(
+    failures,
+    evidenceUpload?.with?.["retention-days"] === 7,
+    ".github/workflows/verify.yaml: browser evidence upload must retain artifacts for seven days",
+  );
+  const evidencePaths = String(evidenceUpload?.with?.path ?? "")
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  requireValue(
+    failures,
+    JSON.stringify(evidencePaths) === JSON.stringify(BROWSER_EVIDENCE_OUTPUTS),
+    ".github/workflows/verify.yaml: browser evidence upload paths must be the declared report, results, and provenance outputs",
+  );
+  requireValue(
+    failures,
+    JSON.stringify(verify.permissions) === JSON.stringify({ contents: "read" }) &&
+      browser?.permissions === undefined,
+    ".github/workflows/verify.yaml: browser evidence must preserve read-only repository permissions",
   );
   requireValue(
     failures,

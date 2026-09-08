@@ -230,3 +230,116 @@ describe("accessibility", () => {
     });
   }
 });
+
+describe("accessibility recovery", () => {
+  for (const locale of ["en", "ru"] as const) {
+    for (const failure of [
+      "bootstrap",
+      "providers",
+      "metadata",
+      "release",
+      "locale",
+    ] as const) {
+      it(`announces safe ${failure} failure with keyboard retry (${locale})`, async () => {
+        const user = userEvent.setup();
+        const i18n = createUiI18n(locale);
+        const reject = () =>
+          Promise.reject(new Error("private upstream details"));
+        const client = {
+          bootstrapSession:
+            failure === "bootstrap"
+              ? vi.fn(reject)
+              : vi.fn().mockResolvedValue({
+                  csrf_token: "axe-csrf",
+                  metadata_locale: "en",
+                  supported_locales: ["en", "ru"],
+                  ui_locale: locale,
+                }),
+          listMetadataProviders:
+            failure === "providers"
+              ? vi.fn(reject)
+              : vi.fn().mockResolvedValue(metadataProviders),
+          searchMetadata: vi.fn(reject),
+          searchReleases: vi.fn(reject),
+          listDownloadDestinations: vi.fn().mockResolvedValue([]),
+          listCollections: vi
+            .fn()
+            .mockResolvedValue({ items: [], next_cursor: null }),
+          updateSession: vi.fn(reject),
+        } as unknown as ControlClient;
+        const path =
+          failure === "release"
+            ? "/items/item-42/releases"
+            : failure === "locale"
+              ? "/add/manual"
+              : "/add";
+        const router = createMemoryRouter(appRoutes, {
+          initialEntries: [path],
+        });
+        render(
+          <I18nextProvider i18n={i18n}>
+            <QueryClientProvider
+              client={
+                new QueryClient({
+                  defaultOptions: { queries: { retry: false } },
+                })
+              }
+            >
+              <MantineProvider>
+                <ControlProvider client={client}>
+                  <RouterProvider router={router} />
+                </ControlProvider>
+              </MantineProvider>
+            </QueryClientProvider>
+          </I18nextProvider>,
+        );
+        if (failure === "providers" || failure === "metadata") {
+          await user.click(
+            await screen.findByRole("button", {
+              name: i18n.t("metadata.chooseProvider"),
+            }),
+          );
+        }
+        if (failure === "metadata") {
+          await user.type(await screen.findByRole("searchbox"), "Arrival");
+          await user.click(
+            screen.getByRole("button", {
+              name: i18n.t("metadata.search"),
+            }),
+          );
+        }
+        if (failure === "release") {
+          await user.type(
+            await screen.findByLabelText(i18n.t("release.query")),
+            "Arrival",
+          );
+          await user.click(
+            screen.getByRole("button", { name: i18n.t("release.search") }),
+          );
+        }
+        if (failure === "locale") {
+          await user.click(
+            await screen.findByRole("button", {
+              name:
+                locale === "en"
+                  ? "\u0420\u0443\u0441\u0441\u043a\u0438\u0439"
+                  : "English",
+            }),
+          );
+        }
+        expect(await screen.findByRole("alert")).toHaveTextContent(
+          i18n.t("errors.unexpected_response"),
+        );
+        expect(
+          screen.queryByText("private upstream details"),
+        ).not.toBeInTheDocument();
+        const retry = screen.getByRole("button", {
+          name: i18n.t("recovery.retry"),
+        });
+        retry.focus();
+        expect(retry).toHaveFocus();
+        await expectNoSeriousViolations();
+      });
+    }
+  }
+});
