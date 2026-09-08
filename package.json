@@ -6,7 +6,7 @@
   "scripts": {
     "assets:build": "pnpm ui:build",
     "delivery:validate": "node scripts/validate-delivery.mjs",
-    "delivery:test": "node --test scripts/validate-delivery.test.mjs scripts/verify-repository-security.test.mjs",
+    "delivery:test": "node --test scripts/validate-delivery.test.mjs scripts/verify-repository-security.test.mjs packages/builtin-ui/scripts/browser-evidence.test.mjs",
     "docs:check": "python scripts/check_documentation_language.py",
     "ui:dev": "pnpm --filter @media-finder/builtin-ui dev",
     "ui:format": "pnpm --filter @media-finder/builtin-ui format",

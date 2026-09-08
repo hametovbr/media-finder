@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import en from "./locales/en.json";
 import ru from "./locales/ru.json";
+import { createUiI18n } from "./i18n";
 
 function leafKeys(value: unknown, prefix = ""): string[] {
   if (typeof value !== "object" || value === null) {
@@ -13,8 +14,36 @@ function leafKeys(value: unknown, prefix = ""): string[] {
 }
 
 describe("UI locale catalogs", () => {
+  afterEach(() => vi.restoreAllMocks());
   it("keep English and Russian keys complete and deterministic", () => {
     expect(leafKeys(ru).sort()).toEqual(leafKeys(en).sort());
+  });
+
+  it("chooses the first supported primary browser language in order", () => {
+    vi.spyOn(window.navigator, "languages", "get").mockReturnValue([
+      "de-DE",
+      "ru-RU",
+      "en-US",
+    ]);
+    expect(createUiI18n().language).toBe("ru");
+  });
+
+  it("falls back to English when no supported language is present", () => {
+    vi.spyOn(window.navigator, "languages", "get").mockReturnValue(["de-DE"]);
+    vi.spyOn(window.navigator, "language", "get").mockReturnValue("fr-FR");
+    expect(createUiI18n().language).toBe("en");
+  });
+
+  it("uses navigator.language when languages is missing or empty", () => {
+    vi.spyOn(window.navigator, "languages", "get").mockReturnValue([]);
+    vi.spyOn(window.navigator, "language", "get").mockReturnValue("ru-RU");
+    expect(createUiI18n().language).toBe("ru");
+
+    vi.spyOn(window.navigator, "languages", "get").mockReturnValue(
+      undefined as unknown as readonly string[],
+    );
+    vi.spyOn(window.navigator, "language", "get").mockReturnValue("en-GB");
+    expect(createUiI18n().language).toBe("en");
   });
 
   it("provide localized messages for the invariant workflow error codes", () => {

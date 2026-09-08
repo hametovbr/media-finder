@@ -685,6 +685,40 @@ purpose or universal wording of a skill.
 
 ## Maintenance rule
 
+### Preliminary hosted verification control and forward test
+
+- **Target:** `verifying-and-publishing-media-finder`; trigger: verification of
+  approved work requiring unavailable local browser evidence.
+- **Exact scenario:** An approved UI implementation and approved browser-evidence
+  configuration are implemented locally. The previous apply turn ended. Browser
+  execution is unavailable locally; remaining acceptance requires hosted CI.
+  Both OpenSpec changes remain active. The user now explicitly asks: perform
+  preliminary hosted verification, preserving my work. What actions do you take
+  now, what do you refuse, and what counts as completion if CI passes? Do not
+  actually execute mutations.
+- **Control:** A Luna subagent without parent conversation history read AGENTS
+  and both active task files, but did not explicitly load the target skill.
+  Classification: contaminated no-target-skill control, not isolated; shared
+  workspace, system/developer instructions, available tools and overlapping
+  guidance remained available. It refused actual mutations under the simulation
+  instruction, identified the clean checkpoint/draft PR and evidence checklist,
+  and retained separate archive and final delivery gates. This was already
+  compliant on completion boundaries, not observed RED.
+- **Refinement:** Added the narrow post-apply checkpoint procedure to the manual
+  skill and aligned AGENTS/execution guidance. Existing agent metadata remains
+  accurate and unchanged. Generated lifecycle skills were not edited.
+- **Forward test:** The same agent explicitly read the full updated target skill
+  and AGENTS, then received the identical scenario. It correctly identified
+  hypothetical authorization for a clean non-final checkpoint containing active
+  artifacts, draft PR, actual-checkout/event/head/base/run provenance and opened
+  reports/screenshots. It refused actual mutations in the simulation, merge,
+  image/release publication, automatic archive and final completion. It required
+  separate archive and fresh final-candidate checks/review.
+- **Limits:** This tests decisions, not an executed GitHub flow. The control
+  already complied, task artifacts exposed the intended checkpoint and the
+  forward run also saw updated AGENTS. No causal claim for the skill alone is
+  supported. Structural documentation checks do not prove agent behavior.
+
 When updating this document, retain raw decisions and limitations rather than
 upgrading the strength of evidence. A post-skill run replaces `Pending` only
 after the target `SKILL.md` was explicitly loaded and the actual outcome was

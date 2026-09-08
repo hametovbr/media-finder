@@ -10,7 +10,7 @@ import {
   Title,
 } from "@mantine/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 
@@ -21,6 +21,17 @@ import { createAcquisitionAttempt } from "./acquisition-attempt";
 
 type ReleaseResult = components["schemas"]["ReleaseSearchResult"];
 type Acquisition = components["schemas"]["AcquisitionView"];
+type ReleaseSearchRequest = {
+  indexerIds: number[];
+  itemId: string;
+  query: string;
+};
+type SearchOutcome =
+  | { kind: "initial" }
+  | { kind: "pending"; request: ReleaseSearchRequest }
+  | { kind: "complete"; request: ReleaseSearchRequest }
+  | { kind: "empty"; request: ReleaseSearchRequest }
+  | { code: string; kind: "failed"; request: ReleaseSearchRequest };
 
 function parseIndexerIds(value: string): number[] | null {
   if (value.trim().length === 0) return [];
@@ -43,17 +54,57 @@ export function ReleasePage() {
   const [destination, setDestination] = useState("");
   const [feedbackCode, setFeedbackCode] = useState<string | null>(null);
   const [acquisition, setAcquisition] = useState<Acquisition | null>(null);
+  const [searchOutcome, setSearchOutcome] = useState<SearchOutcome>({
+    kind: "initial",
+  });
+  const [retryRequest, setRetryRequest] = useState<ReleaseSearchRequest | null>(
+    null,
+  );
+  const [acquisitionStarting, setAcquisitionStarting] = useState(false);
+  const [restoreSearchFocus, setRestoreSearchFocus] = useState(false);
+  const mounted = useRef(true);
+  const activeSearch = useRef<ReleaseSearchRequest | null>(null);
+  const searchButton = useRef<HTMLButtonElement>(null);
+  const retryButton = useRef<HTMLButtonElement>(null);
+  const searchInFlight = useRef(false);
+  const acquisitionInFlight = useRef(false);
+  const searchPending = searchOutcome.kind === "pending";
   const searchMutation = useMutation({
-    mutationFn: (selectedIndexerIds: number[]) =>
-      client.searchReleases(itemId, query.trim(), selectedIndexerIds),
-    onSuccess: (values) => {
-      setResults(values);
-      setReleaseToken(null);
-      setDestination("");
-      setFeedbackCode(null);
+    mutationFn: (request: ReleaseSearchRequest) =>
+      client.searchReleases(request.itemId, request.query, request.indexerIds),
+    onError: (error, request) => {
+      if (!mounted.current || activeSearch.current !== request) return;
+      setSearchOutcome({
+        code:
+          error instanceof ControlFailure ? error.code : "unexpected_response",
+        kind: "failed",
+        request,
+      });
+      setRetryRequest(request);
       setAcquisition(null);
-      setIndexerIdsInvalid(false);
+      setFeedbackCode(null);
     },
+    onSuccess: (values, request) => {
+      if (!mounted.current || activeSearch.current !== request) return;
+      if (document.activeElement === retryButton.current) {
+        setRestoreSearchFocus(true);
+      }
+      setResults(values);
+      setSearchOutcome({
+        kind: values.length === 0 ? "empty" : "complete",
+        request,
+      });
+      setAcquisition(null);
+      setFeedbackCode(null);
+      setIndexerIdsInvalid(false);
+      setRetryRequest(null);
+    },
+    onSettled: (_data, _error, request) => {
+      if (activeSearch.current === request) {
+        searchInFlight.current = false;
+      }
+    },
+    retry: false,
   });
   const destinationsQuery = useQuery({
     queryKey: ["control", "download-destinations", releaseToken],
@@ -84,11 +135,50 @@ export function ReleasePage() {
         setDestination("");
       }
     },
+    onSettled: () => {
+      acquisitionInFlight.current = false;
+      setAcquisitionStarting(false);
+    },
   });
 
   useEffect(() => {
     if (destinationsQuery.isError) setDestination("");
   }, [destinationsQuery.isError]);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    activeSearch.current = null;
+    searchInFlight.current = false;
+    setResults([]);
+    setReleaseToken(null);
+    setDestination("");
+    setSearchOutcome({ kind: "initial" });
+    setRetryRequest(null);
+  }, [itemId]);
+
+  useEffect(() => {
+    if (!restoreSearchFocus) return;
+    searchButton.current?.focus();
+    setRestoreSearchFocus(false);
+  }, [restoreSearchFocus]);
+
+  const startSearch = (request: ReleaseSearchRequest) => {
+    if (searchInFlight.current || acquisitionInFlight.current) return;
+    searchInFlight.current = true;
+    activeSearch.current = request;
+    setResults([]);
+    setReleaseToken(null);
+    setDestination("");
+    setSearchOutcome({ kind: "pending", request });
+    if (retryRequest !== request) setRetryRequest(null);
+    searchMutation.mutate(request);
+  };
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
@@ -98,14 +188,30 @@ export function ReleasePage() {
       return;
     }
     setIndexerIdsInvalid(false);
-    if (query.trim().length > 0) searchMutation.mutate(selectedIndexerIds);
+    const submittedQuery = query.trim();
+    if (submittedQuery.length > 0) {
+      startSearch({
+        indexerIds: selectedIndexerIds,
+        itemId,
+        query: submittedQuery,
+      });
+    }
   };
   const confirm = async () => {
-    if (releaseToken === null || destination.length === 0) return;
+    if (
+      acquisitionInFlight.current ||
+      releaseToken === null ||
+      destination.length === 0
+    )
+      return;
+    acquisitionInFlight.current = true;
+    setAcquisitionStarting(true);
     const liveDestinations = await destinationsQuery.refetch();
     if (!liveDestinations.data?.some((value) => value.key === destination)) {
       setFeedbackCode("download_destination_unavailable");
       setDestination("");
+      acquisitionInFlight.current = false;
+      setAcquisitionStarting(false);
       return;
     }
     submissionMutation.mutate(
@@ -140,11 +246,75 @@ export function ReleasePage() {
             }}
             value={indexerIds}
           />
-          <Button loading={searchMutation.isPending} type="submit">
+          <Button
+            disabled={
+              searchPending ||
+              submissionMutation.isPending ||
+              acquisitionStarting
+            }
+            loading={searchPending}
+            ref={searchButton}
+            type="submit"
+          >
             {t("release.search")}
           </Button>
         </Group>
       </form>
+      {searchOutcome.kind === "pending" && (
+        <Text
+          aria-live="polite"
+          role="status"
+          style={{ overflowWrap: "anywhere" }}
+        >
+          {t("search.pending", { query: searchOutcome.request.query })}
+        </Text>
+      )}
+      {searchOutcome.kind === "complete" && (
+        <Text
+          aria-live="polite"
+          role="status"
+          style={{ overflowWrap: "anywhere" }}
+        >
+          {t("search.complete", { query: searchOutcome.request.query })}
+        </Text>
+      )}
+      {searchOutcome.kind === "empty" && (
+        <Text
+          aria-live="polite"
+          role="status"
+          style={{ overflowWrap: "anywhere" }}
+        >
+          {t("search.empty", { query: searchOutcome.request.query })}
+        </Text>
+      )}
+      {searchOutcome.kind === "failed" && (
+        <Stack gap="xs" role="alert">
+          <Text style={{ overflowWrap: "anywhere" }}>
+            {t("search.failed", { query: searchOutcome.request.query })}
+          </Text>
+          <Text>
+            {t(`errors.${searchOutcome.code}`, {
+              defaultValue: t("errors.unexpected_response"),
+            })}
+          </Text>
+        </Stack>
+      )}
+      {retryRequest !== null &&
+        (searchOutcome.kind === "failed" ||
+          searchOutcome.kind === "pending") && (
+          <Button
+            color="blue.8"
+            disabled={
+              searchPending ||
+              acquisitionStarting ||
+              submissionMutation.isPending
+            }
+            onClick={() => startSearch(retryRequest)}
+            ref={retryButton}
+          >
+            {t("recovery.retry")}
+          </Button>
+        )}
       {feedbackCode !== null && (
         <Text role="alert">
           {t(`errors.${feedbackCode}`, {
@@ -166,6 +336,9 @@ export function ReleasePage() {
       )}
       {results.length > 0 && (
         <Radio.Group
+          disabled={
+            searchPending || submissionMutation.isPending || acquisitionStarting
+          }
           label={t("release.results")}
           onChange={(value) => {
             setReleaseToken(value);
@@ -196,6 +369,11 @@ export function ReleasePage() {
               })),
             ]}
             label={t("release.destination")}
+            disabled={
+              searchPending ||
+              submissionMutation.isPending ||
+              acquisitionStarting
+            }
             onChange={(event) => setDestination(event.currentTarget.value)}
             value={destination}
           />
@@ -204,7 +382,9 @@ export function ReleasePage() {
         disabled={
           releaseToken === null ||
           destination.length === 0 ||
-          destinationsQuery.isError
+          destinationsQuery.isError ||
+          searchPending ||
+          acquisitionStarting
         }
         loading={submissionMutation.isPending}
         onClick={() => void confirm()}

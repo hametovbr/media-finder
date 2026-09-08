@@ -9,13 +9,33 @@ export const uiResources = {
   ru: { translation: ru },
 } as const;
 
-export function createUiI18n(locale: "en" | "ru" = "en"): i18n {
+const supportedLocales = ["en", "ru"] as const;
+
+function browserLocale(): "en" | "ru" {
+  const languages =
+    typeof navigator !== "undefined" && navigator.languages?.length
+      ? navigator.languages
+      : typeof navigator !== "undefined" && navigator.language
+        ? [navigator.language]
+        : [];
+  for (const language of languages) {
+    const primary = language.split("-")[0]?.toLowerCase();
+    if (
+      supportedLocales.includes(primary as (typeof supportedLocales)[number])
+    ) {
+      return primary as "en" | "ru";
+    }
+  }
+  return "en";
+}
+
+export function createUiI18n(locale?: "en" | "ru"): i18n {
   const instance = i18next.createInstance();
   void instance.use(initReactI18next).init({
     fallbackLng: "en",
     initAsync: false,
     interpolation: { escapeValue: false },
-    lng: locale,
+    lng: locale ?? browserLocale(),
     resources: uiResources,
     returnNull: false,
   });
