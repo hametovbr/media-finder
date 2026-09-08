@@ -3,3 +3,5 @@ packages:
 allowBuilds:
   '@fission-ai/openspec': false
   msw: false
+overrides:
+  'ajv@8.17.1>fast-uri': '3.1.7'
