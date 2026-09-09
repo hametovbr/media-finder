@@ -70,6 +70,74 @@ def _release_fixture() -> dict[str, object]:
     }
 
 
+def test_serialized_release_metrics_default_to_unknown_members() -> None:
+    parsed = parse_serialized_conformance_fixture(json.dumps(_release_fixture()).encode())
+
+    assert isinstance(parsed, SerializedReleaseProviderConformance)
+    assert parsed.success.results[0].metrics.model_dump(mode="json") == {
+        "size": None,
+        "seeders": None,
+    }
+
+
+@pytest.mark.parametrize(
+    "metrics",
+    (
+        {"size": None, "seeders": None},
+        {"size": 1},
+        {"size": 1.0, "seeders": 1.0},
+        {"size": 9_007_199_254_740_991, "seeders": 9_007_199_254_740_991},
+        {"size": 1, "seeders": 0},
+    ),
+)
+def test_serialized_release_metrics_accept_portable_values(
+    metrics: dict[str, object],
+) -> None:
+    fixture = _release_fixture()
+    fixture["success"]["results"][0]["metrics"] = metrics  # type: ignore[index]
+
+    parsed = parse_serialized_conformance_fixture(json.dumps(fixture).encode())
+
+    assert isinstance(parsed, SerializedReleaseProviderConformance)
+    assert parsed.success.results[0].metrics.model_dump(mode="json") == {
+        "size": metrics.get("size"),
+        "seeders": metrics.get("seeders"),
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("size", 0),
+        ("size", -1),
+        ("size", 9_007_199_254_740_992),
+        ("size", 1.5),
+        ("size", True),
+        ("size", "1"),
+        ("size", float("inf")),
+        ("size", float("-inf")),
+        ("size", float("nan")),
+        ("seeders", -1),
+        ("seeders", 9_007_199_254_740_992),
+        ("seeders", 1.5),
+        ("seeders", True),
+        ("seeders", "1"),
+        ("seeders", float("inf")),
+        ("seeders", float("-inf")),
+        ("seeders", float("nan")),
+    ),
+)
+def test_serialized_release_metrics_reject_non_portable_values(
+    field: str,
+    value: object,
+) -> None:
+    fixture = _release_fixture()
+    fixture["success"]["results"][0]["metrics"] = {field: value}  # type: ignore[index]
+
+    with pytest.raises(ValidationError):
+        parse_serialized_conformance_fixture(json.dumps(fixture).encode())
+
+
 def _metadata_fixture() -> dict[str, object]:
     return _common("metadata-provider") | {
         "success": {

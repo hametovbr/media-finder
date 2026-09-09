@@ -79,6 +79,22 @@ def test_schemas_preserve_semantic_module_boundaries() -> None:
     release_definitions = schemas["release.schema.json"]["$defs"]
     assert release_definitions["PrivateReleaseSelection"]["writeOnly"] is True
     assert release_definitions["TorrentArtifact"]["maxLength"] > 0
+    metrics = release_definitions["ReleaseSearchMetrics"]
+    assert set(metrics["properties"]) == {"size", "seeders"}
+    assert metrics["properties"]["size"]["anyOf"][0] == {
+        "maximum": 9_007_199_254_740_991,
+        "minimum": 1,
+        "type": "integer",
+    }
+    assert metrics["properties"]["seeders"]["anyOf"][0] == {
+        "maximum": 9_007_199_254_740_991,
+        "minimum": 0,
+        "type": "integer",
+    }
+    assert metrics["properties"]["size"]["default"] is None
+    assert metrics["properties"]["seeders"]["default"] is None
+    assert "metrics" in schemas["release.schema.json"]["properties"]
+    assert "metrics" not in schemas["release.schema.json"]["required"]
 
 
 def test_metadata_search_preview_contract_is_optional_and_version_one() -> None:
@@ -153,6 +169,10 @@ def test_conformance_schema_is_discriminated_and_never_serializes_private_values
         },
     ]
     snapshot = definitions["SerializedSafeReleaseSnapshot"]
+    assert "metrics" not in snapshot["properties"]
+    serialized_result = definitions["SerializedReleaseResult"]
+    assert "metrics" in serialized_result["properties"]
+    assert "metrics" not in serialized_result["required"]
     assert snapshot["properties"]["guid"]["anyOf"][0] == {
         "maxLength": 255,
         "minLength": 1,

@@ -33,6 +33,7 @@ from media_finder_sdk import (
     ReleaseConformanceFixture,
     ReleaseProvider,
     ReleaseProviderRegistration,
+    ReleaseSearchMetrics,
     ReleaseSearchQuery,
     ResolvedModuleEnvironment,
     RetentionAction,
@@ -337,3 +338,36 @@ def test_release_and_magnet_only_download_conformance_are_capability_aware() -> 
 
     assert releases[0].closed
     assert downloads[0].closed
+
+
+def test_release_conformance_rejects_construction_bypassed_metrics() -> None:
+    selection = PrivateReleaseSelection.from_bytes(b"selection")
+    malformed_metrics = ReleaseSearchMetrics.model_construct(size=0, seeders=True)
+    candidate = ReleaseCandidate(
+        snapshot=SafeReleaseSnapshot(title="Fixture", indexer="Indexer"),
+        selection=selection,
+        metrics=malformed_metrics,
+    )
+    artifact = MagnetArtifact(uri="magnet:?xt=urn:btih:0123456789abcdef")
+
+    registration = ReleaseProviderRegistration(
+        manifest=parse_manifest(
+            manifest_toml(
+                module_id="fixture-release",
+                module_kind=ModuleKind.RELEASE_PROVIDER,
+                capabilities=("search", "resolve", "magnet"),
+            )
+        ),
+        build=lambda _environment: _Release(candidate, artifact),
+    )
+    fixture = ReleaseConformanceFixture(
+        environment={},
+        query=ReleaseSearchQuery(query="Fixture"),
+        expected_candidates=(candidate,),
+        expected_artifact=artifact,
+        invalid_selection=PrivateReleaseSelection.from_bytes(b"invalid"),
+        expected_error_code="fixture_selection_invalid",
+    )
+
+    with pytest.raises(AssertionError, match="release_search_metrics_invalid"):
+        assert_release_registration_conforms(registration, fixture)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 
 from media_finder_sdk import (
@@ -14,6 +15,7 @@ from media_finder_sdk import (
     ModuleFailureCategory,
     PrivateReleaseSelection,
     ReleaseCandidate,
+    ReleaseSearchMetrics,
     ReleaseSearchQuery,
     SafeReleaseSnapshot,
     TorrentArtifact,
@@ -57,7 +59,13 @@ class ProwlarrProvider:
                     sort_keys=True,
                 ).encode()
             )
-            candidates.append(ReleaseCandidate(snapshot=snapshot, selection=selection))
+            candidates.append(
+                ReleaseCandidate(
+                    snapshot=snapshot,
+                    selection=selection,
+                    metrics=_metrics(raw),
+                )
+            )
             if len(candidates) >= query.limit:
                 break
         return tuple(candidates)
@@ -120,6 +128,25 @@ def _snapshot(raw: Mapping[str, object]) -> SafeReleaseSnapshot:
             else None
         ),
     )
+
+
+def _metrics(raw: Mapping[str, object]) -> ReleaseSearchMetrics:
+    return ReleaseSearchMetrics(
+        size=_optional_metric(raw.get("size"), field="size"),
+        seeders=_optional_metric(raw.get("seeders"), field="seeders"),
+    )
+
+
+def _optional_metric(
+    value: object,
+    *,
+    field: Literal["size", "seeders"],
+) -> int | None:
+    try:
+        metrics = ReleaseSearchMetrics.model_validate({field: value})
+    except (TypeError, ValueError):
+        return None
+    return metrics.size if field == "size" else metrics.seeders
 
 
 def _safe_public_page(value: str | None) -> str | None:

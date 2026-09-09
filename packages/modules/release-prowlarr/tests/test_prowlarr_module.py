@@ -17,8 +17,10 @@ from pathlib import Path
 import httpx
 import pytest
 from media_finder_release_prowlarr import registration
+from media_finder_release_prowlarr.provider import _metrics
 from media_finder_release_prowlarr.transport import ProwlarrLimits
 from media_finder_sdk import (
+    MAX_RELEASE_SEARCH_METRIC,
     ArtifactDescriptor,
     EnvironmentVariableSpec,
     MagnetArtifact,
@@ -28,6 +30,7 @@ from media_finder_sdk import (
     PrivateReleaseSelection,
     ReleaseCandidate,
     ReleaseConformanceFixture,
+    ReleaseSearchMetrics,
     ReleaseSearchQuery,
     SerializedReleaseProviderConformance,
     TorrentArtifact,
@@ -49,6 +52,7 @@ DOWNLOAD_SECRET = "download-passkey-never-log"
 INFOHASH = "0123456789abcdef0123456789abcdef01234567"
 MAGNET = f"magnet:?xt=urn:btih:{INFOHASH}&dn=Fixture.Release"
 TORRENT_BYTES = b"d8:announce13:https://track4:infod4:name7:fixtureee"
+_OMITTED = object()
 
 
 def _search_payload(*, download_url: str | None = None) -> list[dict[str, object]]:
@@ -59,6 +63,8 @@ def _search_payload(*, download_url: str | None = None) -> list[dict[str, object
             "protocol": "torrent",
             "guid": "fixture-magnet-guid",
             "infoHash": INFOHASH,
+            "size": 123456789,
+            "seeders": 0,
             "magnetUrl": MAGNET,
             "infoUrl": "https://indexer.example.test/releases/magnet?api_key=source-page-secret#details",
         },
@@ -67,6 +73,8 @@ def _search_payload(*, download_url: str | None = None) -> list[dict[str, object
             "indexer": "Fixture Torrent Indexer",
             "protocol": "torrent",
             "guid": "fixture-torrent-guid",
+            "size": 987654321,
+            "seeders": 42,
             "downloadUrl": download_url
             or f"{BASE_URL}/download/fixture.torrent?passkey={DOWNLOAD_SECRET}",
             "infoUrl": "https://indexer.example.test/releases/torrent?token=secret",
@@ -275,6 +283,9 @@ def test_prowlarr_registration_passes_public_conformance_and_closes_resources() 
     assert tuple(candidate.snapshot.model_dump(mode="json") for candidate in expected) == tuple(
         result.snapshot.model_dump(mode="json") for result in serialized.success.results
     )
+    assert tuple(candidate.metrics.model_dump(mode="json") for candidate in expected) == tuple(
+        result.metrics.model_dump(mode="json") for result in serialized.success.results
+    )
     provider = _module().build(resolve_module_environment(module.manifest, _environment()))
     try:
         candidates = provider.search(serialized.success.query)
@@ -370,6 +381,86 @@ def test_prowlarr_search_is_torrent_only_bounded_and_keeps_selection_opaque() ->
     assert not hasattr(candidate.selection, "model_dump")
     with pytest.raises(ValueError, match="release_selection_too_large"):
         PrivateReleaseSelection.from_bytes(b"x" * (64 * 1024 + 1))
+
+
+@pytest.mark.parametrize(
+    ("field", "raw", "expected"),
+    (
+        ("size", _OMITTED, None),
+        ("size", None, None),
+        ("size", 0, None),
+        ("size", 1, 1),
+        ("size", 1.0, 1),
+        ("size", MAX_RELEASE_SEARCH_METRIC, MAX_RELEASE_SEARCH_METRIC),
+        ("size", MAX_RELEASE_SEARCH_METRIC + 1, None),
+        ("size", -1, None),
+        ("size", 1.5, None),
+        ("size", True, None),
+        ("size", "1", None),
+        ("seeders", _OMITTED, None),
+        ("seeders", None, None),
+        ("seeders", 0, 0),
+        ("seeders", 1, 1),
+        ("seeders", 1.0, 1),
+        ("seeders", MAX_RELEASE_SEARCH_METRIC, MAX_RELEASE_SEARCH_METRIC),
+        ("seeders", MAX_RELEASE_SEARCH_METRIC + 1, None),
+        ("seeders", -1, None),
+        ("seeders", 1.5, None),
+        ("seeders", True, None),
+        ("seeders", "1", None),
+    ),
+)
+def test_prowlarr_normalizes_optional_metrics_independently_without_dropping_candidates(
+    field: str,
+    raw: object,
+    expected: int | None,
+) -> None:
+    payload = _search_payload()[:2]
+    if raw is _OMITTED:
+        payload[0].pop(field)
+    else:
+        payload[0][field] = raw
+    if field == "size":
+        payload[0]["seeders"] = 0
+        expected_metrics = ReleaseSearchMetrics(size=expected, seeders=0)
+    else:
+        payload[0]["size"] = 1024
+        expected_metrics = ReleaseSearchMetrics(size=1024, seeders=expected)
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/search"):
+            return httpx.Response(200, json=payload)
+        return httpx.Response(404)
+
+    module = _module(RecordingClientFactory(respond))
+    provider = module.build(resolve_module_environment(module.manifest, _environment()))
+    try:
+        candidates = provider.search(ReleaseSearchQuery(query="Fixture", limit=10))
+    finally:
+        provider.close()
+
+    assert len(candidates) == 2
+    assert candidates[0].metrics == expected_metrics
+    assert candidates[1].metrics == ReleaseSearchMetrics(size=987654321, seeders=42)
+
+
+@pytest.mark.parametrize("field", ("size", "seeders"))
+@pytest.mark.parametrize("raw", (float("inf"), float("-inf"), float("nan")))
+def test_prowlarr_normalizes_nonfinite_metrics_without_invalid_json_fixture(
+    field: str,
+    raw: float,
+) -> None:
+    metrics = _metrics(
+        {
+            "size": raw if field == "size" else 1024,
+            "seeders": raw if field == "seeders" else 0,
+        }
+    )
+
+    assert metrics == ReleaseSearchMetrics(
+        size=None if field == "size" else 1024,
+        seeders=None if field == "seeders" else 0,
+    )
 
 
 def test_prowlarr_resolves_magnet_and_same_base_path_torrent_in_memory() -> None:

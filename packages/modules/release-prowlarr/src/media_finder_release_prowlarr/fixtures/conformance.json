@@ -114,6 +114,10 @@
     ],
     "results": [
       {
+        "metrics": {
+          "seeders": 0,
+          "size": 123456789
+        },
         "selection_ref": "fixture-magnet",
         "snapshot": {
           "guid": "fixture-magnet-guid",
@@ -124,6 +128,10 @@
         }
       },
       {
+        "metrics": {
+          "seeders": 42,
+          "size": 987654321
+        },
         "selection_ref": "fixture-torrent",
         "snapshot": {
           "guid": "fixture-torrent-guid",

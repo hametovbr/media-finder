@@ -116,7 +116,13 @@ class AcquisitionControlService:
         except Exception as error:
             raise _acquisition_error(error, "release_search_failed") from None
         return tuple(
-            ReleaseSearchResult(token=value.token, title=value.title, indexer=value.indexer)
+            ReleaseSearchResult(
+                token=value.token,
+                title=value.title,
+                indexer=value.indexer,
+                size=value.metrics.size,
+                seeders=value.metrics.seeders,
+            )
             for value in values
         )
 

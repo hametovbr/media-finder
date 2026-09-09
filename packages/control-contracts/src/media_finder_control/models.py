@@ -2,9 +2,10 @@
 
 from datetime import date, datetime
 from enum import StrEnum
+from math import isfinite
 from typing import Literal, Self
 
-from pydantic import Field, HttpUrl, model_validator
+from pydantic import Field, HttpUrl, field_validator, model_validator
 
 from .common import (
     AcquisitionStatus,
@@ -194,12 +195,30 @@ class ReleaseSearchRequest(ControlModel):
     indexer_ids: tuple[int, ...] = ()
 
 
+MAX_RELEASE_SEARCH_METRIC = 9_007_199_254_740_991
+
+
+def _validate_release_search_metric(value: object) -> object:
+    if value is None:
+        return None
+    if type(value) is int:
+        return value
+    if type(value) is float and isfinite(value) and value.is_integer():
+        return int(value)
+    raise ValueError("release_search_metric_integer_required")
+
+
 class ReleaseSearchResult(ControlModel):
     token: str
     title: str
     indexer: str | None = None
-    size: int | None = None
-    seeders: int | None = None
+    size: int | None = Field(default=None, ge=1, le=MAX_RELEASE_SEARCH_METRIC)
+    seeders: int | None = Field(default=None, ge=0, le=MAX_RELEASE_SEARCH_METRIC)
+
+    @field_validator("size", "seeders", mode="before")
+    @classmethod
+    def validate_portable_integer(cls, value: object) -> object:
+        return _validate_release_search_metric(value)
 
 
 class DownloadDestination(ControlModel):

@@ -265,6 +265,7 @@ describe("accessibility recovery", () => {
           listCollections: vi
             .fn()
             .mockResolvedValue({ items: [], next_cursor: null }),
+          getMediaItem: vi.fn().mockResolvedValue(mediaDetail),
           updateSession: vi.fn(reject),
         } as unknown as ControlClient;
         const path =
@@ -309,10 +310,9 @@ describe("accessibility recovery", () => {
           );
         }
         if (failure === "release") {
-          await user.type(
-            await screen.findByLabelText(i18n.t("release.query")),
-            "Arrival",
-          );
+          const query = await screen.findByLabelText(i18n.t("release.query"));
+          await user.clear(query);
+          await user.type(query, "Arrival");
           await user.click(
             screen.getByRole("button", { name: i18n.t("release.search") }),
           );

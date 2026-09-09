@@ -15,9 +15,63 @@ from media_finder_control import (
     Page,
     PageRequest,
 )
+from media_finder_control.models import ReleaseSearchResult
 from media_finder_metadata_manual import registration
 from media_finder_sdk import MetadataImportDocument, resolve_module_environment
 from pydantic import ValidationError
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("size", 0),
+        ("size", -1),
+        ("size", 9_007_199_254_740_992),
+        ("size", 1.5),
+        ("size", True),
+        ("size", "1"),
+        ("size", float("inf")),
+        ("size", float("-inf")),
+        ("size", float("nan")),
+        ("seeders", -1),
+        ("seeders", 9_007_199_254_740_992),
+        ("seeders", 1.5),
+        ("seeders", True),
+        ("seeders", "1"),
+        ("seeders", float("inf")),
+        ("seeders", float("-inf")),
+        ("seeders", float("nan")),
+    ),
+)
+def test_release_search_result_metrics_reject_non_portable_values(
+    field: str,
+    value: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        ReleaseSearchResult(token="token", title="Fixture", **{field: value})
+
+
+def test_release_search_result_metrics_accept_portable_values_and_zero_seeders() -> None:
+    unknown = ReleaseSearchResult(token="token", title="Fixture")
+    assert unknown.size is None
+    assert unknown.seeders is None
+    assert ReleaseSearchResult(token="token", title="Fixture", size=None, seeders=None)
+
+    result = ReleaseSearchResult(
+        token="token",
+        title="Fixture",
+        size=1.0,
+        seeders=0.0,
+    )
+
+    assert result.size == 1
+    assert result.seeders == 0
+    assert ReleaseSearchResult(
+        token="token",
+        title="Fixture",
+        size=9_007_199_254_740_991,
+        seeders=9_007_199_254_740_991,
+    )
 
 
 def test_public_models_are_immutable_and_errors_are_language_neutral() -> None:

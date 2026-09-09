@@ -35,6 +35,14 @@
     "uncategorized": "Uncategorized"
   },
   "detail": {
+    "latestAcquisition": "Latest acquisition",
+    "acquisitionRelease": "Release: {{release}}",
+    "acquisitionDestination": "Destination: {{destination}}",
+    "acquisitionExplanation": {
+      "pending": "The request may still be accepted; manual reconciliation may be required.",
+      "submitted": "Handed off to the download client; this does not mean it is downloaded.",
+      "failed": "The download request failed."
+    },
     "empty": "No overview is available for this item.",
     "genres": "Genres",
     "originalTitle": "Original title",
@@ -62,15 +70,51 @@
     "providersFailed": "Could not load metadata providers."
   },
   "release": {
+    "advancedFilters": "Advanced filters",
+    "backToItem": "Back to media item",
     "chooseDestination": "Choose a destination",
     "confirm": "Confirm acquisition",
+    "reviewTitle": "Review acquisition",
+    "reviewWork": "Work",
+    "reviewRelease": "Release",
+    "reviewDestination": "Destination",
+    "cancelReview": "Cancel review",
+    "confirmReview": "Confirm review",
+    "retryDestinations": "Retry destinations",
+    "retryRequest": "Retry request",
+    "requestUncertain": "The request may have been accepted; its outcome is uncertain.",
+    "localRetryWarning": "Leaving or reloading loses this local retry; it does not cancel a server-accepted request.",
+    "outcomeRelease": "Release: {{release}}",
+    "outcomeDestination": "Destination: {{destination}}",
+    "outcome": {
+      "pending": "The request may still be accepted; manual reconciliation may be required.",
+      "submitted": "The release was handed off to the download client; this does not mean it is downloaded.",
+      "failed": "The download request failed. Search again to start a new attempt."
+    },
+    "contextFailed": "Could not load the saved work.",
+    "contextLabel": "Saved work",
+    "contextLoading": "Loading saved work",
+    "retryContext": "Retry loading saved work",
     "destination": "Destination",
     "indexerIds": "Prowlarr indexer IDs (optional)",
     "indexerIdsDescription": "Comma-separated numeric IDs; leave empty to search all indexers.",
     "query": "Release query",
+    "queryTooLong": "Release query must be 500 characters or fewer.",
     "results": "Release results",
     "search": "Search releases",
-    "seeders": "seeders"
+    "seeders": "Seeders",
+    "size": "Size",
+    "exactBytes": "{{bytes}} bytes",
+    "indexer": "Indexer",
+    "unknown": "Unknown",
+    "units": {
+      "bytes": "B",
+      "kib": "KiB",
+      "mib": "MiB",
+      "gib": "GiB",
+      "tib": "TiB",
+      "pib": "PiB"
+    }
   },
   "mediaKind": {
     "movie": "Movie",

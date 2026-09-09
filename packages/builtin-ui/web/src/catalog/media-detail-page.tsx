@@ -96,6 +96,7 @@ export function MediaDetailPage() {
   const posterUrl =
     metadata.artwork.find((artwork) => artwork.kind.toLowerCase() === "poster")
       ?.url ?? null;
+  const latestAcquisition = item.acquisitions[0] ?? null;
 
   return (
     <div className={styles.detailLayout}>
@@ -157,6 +158,39 @@ export function MediaDetailPage() {
             {t("manual.edit.action")}
           </Button>
         ) : null}
+        {latestAcquisition !== null && (
+          <Stack aria-live="polite" gap="xs" role="status">
+            <Text c="dimmed" fw={600} size="sm">
+              {t("detail.latestAcquisition")}
+            </Text>
+            <Group gap="xs" wrap="wrap">
+              <Badge
+                color={
+                  latestAcquisition.status === "failed"
+                    ? "red"
+                    : latestAcquisition.status === "pending"
+                      ? "yellow"
+                      : "green"
+                }
+              >
+                {t(`acquisition.${latestAcquisition.status}`)}
+              </Badge>
+              <Text className={styles.wrappingText}>
+                {t("detail.acquisitionRelease", {
+                  release: latestAcquisition.release_title,
+                })}
+              </Text>
+              <Text className={styles.wrappingText}>
+                {t("detail.acquisitionDestination", {
+                  destination: latestAcquisition.destination,
+                })}
+              </Text>
+            </Group>
+            <Text className={styles.wrappingText}>
+              {t(`detail.acquisitionExplanation.${latestAcquisition.status}`)}
+            </Text>
+          </Stack>
+        )}
       </Stack>
     </div>
   );
