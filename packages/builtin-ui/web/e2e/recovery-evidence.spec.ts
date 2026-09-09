@@ -385,6 +385,10 @@ async function exercise(page: Page, locale: Locale, scenario: Scenario) {
   if (scenario.startsWith("release-")) {
     await page.goto("/items/item-evidence/releases");
     const input = page.getByRole("searchbox", { name: t.release.query });
+    await expect(
+      page.getByText(t.release.contextLabel, { exact: true }),
+    ).toBeVisible();
+    await expect(input).toHaveValue(/\S+/);
     await input.fill(longQuery);
     await page.getByRole("button", { name: t.release.search }).click();
     await expect(

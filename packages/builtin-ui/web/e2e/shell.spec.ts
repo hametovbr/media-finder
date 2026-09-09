@@ -1151,6 +1151,7 @@ test("release retry keeps the submitted snapshot and ignores a late response aft
   );
   await page.goto("/items/item-42/releases");
   const input = page.getByRole("searchbox", { name: "Release query" });
+  await expect(input).toHaveValue("Media overview");
   await input.fill("Arrival");
   await page.getByRole("button", { name: "Search releases" }).click();
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
@@ -1505,12 +1506,12 @@ async function exerciseReleaseEvidenceScenario(
     },
   ];
 
+  let contextAvailable = true;
   if (scenario === "context-recovery") {
-    let contextAttempts = 0;
+    contextAvailable = false;
     await page.unroute(contextRoute);
     await page.route(contextRoute, async (route) => {
-      contextAttempts += 1;
-      if (contextAttempts === 1) {
+      if (!contextAvailable) {
         await route.fulfill({
           status: 503,
           json: { error: { code: "media_item_not_found" } },
@@ -1579,6 +1580,7 @@ async function exerciseReleaseEvidenceScenario(
   if (scenario === "context-recovery") {
     const manualQuery = "Manual browser query";
     await queryInput.fill(manualQuery);
+    await expect(queryInput).toHaveValue(manualQuery);
     await expect(
       page.getByText(labels.release.contextFailed, { exact: true }),
     ).toBeVisible();
@@ -1587,6 +1589,7 @@ async function exerciseReleaseEvidenceScenario(
       name: labels.release.retryContext,
       exact: true,
     });
+    contextAvailable = true;
     await retryContext.focus();
     await retryContext.press("Enter");
     await expect(
