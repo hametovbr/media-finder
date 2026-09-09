@@ -21,6 +21,7 @@ from media_finder_sdk import (
     PrivateReleaseSelection,
     ReleaseCandidate,
     ReleaseProvider,
+    ReleaseSearchMetrics,
     ReleaseSearchQuery,
     SafeReleaseSnapshot,
     SubmissionResult,
@@ -50,6 +51,7 @@ class ReleaseSelectionExpired(ValueError):
 class SelectedRelease:
     token: str
     snapshot: SafeReleaseSnapshot
+    metrics: ReleaseSearchMetrics
 
     @property
     def title(self) -> str:
@@ -158,6 +160,7 @@ class ReleaseSelectionService:
                 SelectedRelease(
                     token=self._cache.put(validated),
                     snapshot=validated.snapshot,
+                    metrics=_release_search_metrics(validated.metrics),
                 )
             )
         return tuple(selected)
@@ -368,9 +371,24 @@ def _release_candidate(value: object) -> ReleaseCandidate:
     try:
         snapshot = _safe_release_snapshot(value.snapshot)
         selection = PrivateReleaseSelection.from_bytes(value.selection.payload())
+        metrics = _release_search_metrics(value.metrics)
     except (AttributeError, TypeError, ValueError) as error:
         raise ValueError("release_candidate_invalid") from error
-    return ReleaseCandidate(snapshot=snapshot, selection=selection)
+    return ReleaseCandidate(snapshot=snapshot, selection=selection, metrics=metrics)
+
+
+def _release_search_metrics(value: object) -> ReleaseSearchMetrics:
+    if not isinstance(value, ReleaseSearchMetrics):
+        raise ValueError("release_search_metrics_invalid")
+    try:
+        return ReleaseSearchMetrics.model_validate(
+            {
+                "size": value.size,
+                "seeders": value.seeders,
+            }
+        )
+    except (AttributeError, TypeError, ValueError) as error:
+        raise ValueError("release_search_metrics_invalid") from error
 
 
 def _safe_release_snapshot(value: object) -> SafeReleaseSnapshot:

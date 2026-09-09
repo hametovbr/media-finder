@@ -26,6 +26,20 @@ function copyFixtureTree() {
   return root;
 }
 
+function sortJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(sortJson);
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, sortJson(item)]),
+    );
+  }
+  return value;
+}
+
 function mutateFixture(root, moduleName, transform) {
   const fixturePath = fs
     .readdirSync(path.join(root, "packages", "modules", moduleName, "src"), {
@@ -37,7 +51,7 @@ function mutateFixture(root, moduleName, transform) {
   const target = path.join(root, "packages", "modules", moduleName, "src", fixturePath);
   const parsed = JSON.parse(fs.readFileSync(target, "utf8"));
   transform(parsed);
-  fs.writeFileSync(target, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+  fs.writeFileSync(target, `${JSON.stringify(sortJson(parsed), null, 2)}\n`, "utf8");
 }
 
 test("all first-party serialized conformance fixtures validate without Python", () => {
@@ -132,6 +146,50 @@ test("kind-specific release bounds are enforced beyond shape validation", (conte
 
   assert.match(validateModuleConformance(root).join("\n"), /release results exceed/);
 });
+
+test("portable release search metric corpus is accepted by the checked schema", (context) => {
+  const roots = [];
+  context.after(() => roots.forEach((root) => fs.rmSync(root, { recursive: true, force: true })));
+  const maximum = Number.MAX_SAFE_INTEGER;
+  for (const metrics of [
+    { size: null, seeders: null },
+    { size: 1 },
+    { size: 1.0, seeders: 1.0 },
+    { size: maximum, seeders: maximum },
+    { size: 1, seeders: 0 },
+  ]) {
+    const root = copyFixtureTree();
+    roots.push(root);
+    mutateFixture(root, "release-prowlarr", (fixture) => {
+      fixture.success.results[0].metrics = metrics;
+    });
+    assert.deepEqual(validateModuleConformance(root), []);
+  }
+});
+
+for (const [label, metrics] of [
+  ["zero size", { size: 0 }],
+  ["negative size", { size: -1 }],
+  ["size above maximum", { size: Number.MAX_SAFE_INTEGER + 1 }],
+  ["fractional size", { size: 1.5 }],
+  ["boolean size", { size: true }],
+  ["string size", { size: "1" }],
+  ["negative seeders", { seeders: -1 }],
+  ["seeders above maximum", { seeders: Number.MAX_SAFE_INTEGER + 1 }],
+  ["fractional seeders", { seeders: 1.5 }],
+  ["boolean seeders", { seeders: true }],
+  ["string seeders", { seeders: "1" }],
+]) {
+  test(`portable release search metric corpus rejects ${label}`, (context) => {
+    const root = copyFixtureTree();
+    context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    mutateFixture(root, "release-prowlarr", (fixture) => {
+      fixture.success.results[0].metrics = metrics;
+    });
+
+    assert.match(validateModuleConformance(root).join("\n"), /schema validation failed/);
+  });
+}
 
 test("magnet descriptors use the public 8192-byte bound", (context) => {
   const root = copyFixtureTree();

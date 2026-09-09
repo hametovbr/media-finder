@@ -20,6 +20,7 @@ from .types import (
     MetadataSearchQuery,
     MetadataSearchResult,
     NormalizedMetadata,
+    ReleaseSearchMetrics,
     ReleaseSearchQuery,
     RetentionAction,
     RetentionPolicy,
@@ -299,6 +300,7 @@ class SerializedReleaseResult(PublicModel):
         Field(max_length=128, pattern=r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"),
     ]
     snapshot: SerializedSafeReleaseSnapshot
+    metrics: ReleaseSearchMetrics = Field(default_factory=ReleaseSearchMetrics)
 
 
 class SerializedResolvedArtifact(PublicModel):

@@ -17,6 +17,7 @@ from media_finder_sdk import (
     Provenance,
     ReleaseCandidate,
     ReleaseSearchFilter,
+    ReleaseSearchMetrics,
     ReleaseSearchQuery,
     SafeReleaseSnapshot,
 )
@@ -40,6 +41,7 @@ class FixtureReleaseProvider:
                     indexer="Fixture",
                 ),
                 selection=PrivateReleaseSelection.from_bytes(b"fixture-release"),
+                metrics=ReleaseSearchMetrics(size=123456789, seeders=0),
             ),
         )
 
@@ -99,6 +101,7 @@ def test_release_search_destinations_and_idempotent_submission(
             request=ReleaseSearchRequest(query="Example", indexer_ids=(1, 2)),
         )
         assert [result.title for result in results] == ["Example.Release.1080p"]
+        assert [(result.size, result.seeders) for result in results] == [(123456789, 0)]
         destinations = await gateway.list_destinations()
         assert [destination.key for destination in destinations] == ["fixture"]
         request = AcquisitionSubmissionRequest(

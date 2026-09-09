@@ -14,5 +14,16 @@ export function createAcquisitionAttempt<Result>(
   randomUUID: () => string = () => crypto.randomUUID(),
 ): () => Promise<Result> {
   const idempotencyKey = randomUUID();
-  return () => submit({ ...input, idempotencyKey });
+  const payload = {
+    destination: input.destination,
+    mediaItemId: input.mediaItemId,
+    releaseToken: input.releaseToken,
+  };
+  return () =>
+    submit({
+      destination: payload.destination,
+      idempotencyKey,
+      mediaItemId: payload.mediaItemId,
+      releaseToken: payload.releaseToken,
+    });
 }

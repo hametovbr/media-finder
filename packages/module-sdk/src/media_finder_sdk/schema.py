@@ -28,6 +28,7 @@ from .types import (
     MetadataSearchResult,
     NormalizedMetadata,
     ProviderPayload,
+    ReleaseSearchMetrics,
     ReleaseSearchQuery,
     RetentionAction,
     RetentionPolicy,
@@ -58,6 +59,7 @@ class _RetentionContract(PublicModel):
 class _ReleaseContract(PublicModel):
     search_query: ReleaseSearchQuery
     safe_snapshot: SafeReleaseSnapshot
+    metrics: ReleaseSearchMetrics = ReleaseSearchMetrics()
     magnet_artifact: MagnetArtifact
 
 

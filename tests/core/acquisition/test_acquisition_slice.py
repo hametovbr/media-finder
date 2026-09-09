@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import warnings
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import FrozenInstanceError, fields, replace
@@ -22,6 +23,7 @@ from media_finder_sdk import (
     ModuleFailureCategory,
     PrivateReleaseSelection,
     ReleaseCandidate,
+    ReleaseSearchMetrics,
     ReleaseSearchQuery,
     SafeReleaseSnapshot,
     SubmissionResult,
@@ -74,10 +76,15 @@ def _release_snapshot(title: str = "Fixture.Release.2026") -> SafeReleaseSnapsho
     )
 
 
-def _candidate(title: str = "Fixture.Release.2026") -> ReleaseCandidate:
+def _candidate(
+    title: str = "Fixture.Release.2026",
+    *,
+    metrics: ReleaseSearchMetrics | None = None,
+) -> ReleaseCandidate:
     return ReleaseCandidate(
         snapshot=_release_snapshot(title),
         selection=PrivateReleaseSelection.from_bytes(f"private:{title}".encode()),
+        metrics=metrics if metrics is not None else ReleaseSearchMetrics(),
     )
 
 
@@ -644,6 +651,38 @@ def test_release_selection_uses_the_serialized_safe_snapshot_policy() -> None:
 
     assert selected.snapshot.guid is None
     assert selected.snapshot.source_page_url is None
+
+
+def test_release_selection_copies_metrics_before_cache_and_projection() -> None:
+    metrics = ReleaseSearchMetrics(size=123456789, seeders=0)
+    original = _candidate(metrics=metrics)
+    provider = _ReleaseProvider((original,))
+    service = _api().ReleaseSelectionService(
+        provider=provider,
+        cache=_api().ReleaseSelectionCache(),
+    )
+
+    selected = service.search(ReleaseSearchQuery(query="Fixture"))[0]
+
+    assert selected.metrics == metrics
+    assert selected.metrics is not metrics
+    cached = service._cache.get(selected.token)  # type: ignore[attr-defined]
+    assert cached.metrics == metrics
+    assert cached.metrics is not metrics
+
+
+def test_release_selection_rejects_construction_bypassed_metrics_before_caching() -> None:
+    malformed = ReleaseSearchMetrics.model_construct(size=0, seeders=True)
+    provider = _ReleaseProvider((_candidate(metrics=malformed),))
+    service = _api().ReleaseSelectionService(
+        provider=provider,
+        cache=_api().ReleaseSelectionCache(),
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(ValueError, match="release_candidate_invalid"):
+            service.search(ReleaseSearchQuery(query="Fixture"))
 
 
 def test_acquisition_ports_are_explicit_and_application_files_are_framework_free() -> None:

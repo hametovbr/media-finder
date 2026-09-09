@@ -18,6 +18,7 @@ from media_finder_sdk import (
     ProviderPayload,
     Rating,
     ReleaseProvider,
+    ReleaseSearchMetrics,
     TorrentArtifact,
 )
 from pydantic import ValidationError
@@ -118,3 +119,54 @@ def test_public_dtos_reject_non_finite_numbers() -> None:
         Rating(source="fixture", value=float("nan"))
     with pytest.raises(ValidationError, match="provider_payload_not_json"):
         ProviderPayload(data={"value": float("inf")})
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("size", 0),
+        ("size", -1),
+        ("size", 9_007_199_254_740_992),
+        ("size", 1.5),
+        ("size", True),
+        ("size", "1"),
+        ("size", float("inf")),
+        ("size", float("-inf")),
+        ("size", float("nan")),
+        ("seeders", -1),
+        ("seeders", 9_007_199_254_740_992),
+        ("seeders", 1.5),
+        ("seeders", True),
+        ("seeders", "1"),
+        ("seeders", float("inf")),
+        ("seeders", float("-inf")),
+        ("seeders", float("nan")),
+    ),
+)
+def test_release_search_metrics_reject_non_portable_values(field: str, value: object) -> None:
+    with pytest.raises(ValidationError):
+        ReleaseSearchMetrics(**{field: value})
+
+
+def test_release_search_metrics_accept_portable_values_and_candidate_defaults() -> None:
+    unknown = ReleaseSearchMetrics()
+    assert unknown.model_dump(mode="json") == {"size": None, "seeders": None}
+    assert ReleaseSearchMetrics(size=1, seeders=0).model_dump(mode="json") == {
+        "size": 1,
+        "seeders": 0,
+    }
+    assert ReleaseSearchMetrics(size=1.0, seeders=1.0).model_dump(mode="json") == {
+        "size": 1,
+        "seeders": 1,
+    }
+    assert ReleaseSearchMetrics(
+        size=9_007_199_254_740_991,
+        seeders=9_007_199_254_740_991,
+    )
+
+    snapshot = media_finder_sdk.SafeReleaseSnapshot(title="Fixture", indexer="Indexer")
+    selection = PrivateReleaseSelection.from_bytes(b"selection")
+    candidate = media_finder_sdk.ReleaseCandidate(snapshot=snapshot, selection=selection)
+
+    assert candidate.metrics == unknown
+    assert "metrics" not in snapshot.model_dump()
