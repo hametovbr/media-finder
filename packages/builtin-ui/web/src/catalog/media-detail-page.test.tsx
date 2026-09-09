@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { HttpResponse, delay, http } from "msw";
 import { setupServer } from "msw/node";
 import { I18nextProvider } from "react-i18next";
@@ -11,16 +11,24 @@ import { createControlClient } from "../api/control-client";
 import { ControlProvider } from "../api/control-provider";
 import { appRoutes } from "../app-router";
 import { createUiI18n } from "../i18n";
-import { manualSeriesDetail, mediaDetail, sessions } from "../mocks/fixtures";
+import {
+  acquisitions,
+  manualSeriesDetail,
+  mediaDetail,
+  sessions,
+} from "../mocks/fixtures";
+import styles from "./media-detail-page.module.css";
 
 const baseUrl = "http://localhost/api/control";
 const server = setupServer();
+type UiLocale = "en" | "ru";
+type AcquisitionStatus = keyof typeof acquisitions;
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-function renderDetail(itemId = mediaDetail.id) {
+function renderDetail(itemId = mediaDetail.id, locale: UiLocale = "en") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -28,7 +36,7 @@ function renderDetail(itemId = mediaDetail.id) {
     initialEntries: [`/items/${itemId}`],
   });
   render(
-    <I18nextProvider i18n={createUiI18n("en")}>
+    <I18nextProvider i18n={createUiI18n(locale)}>
       <QueryClientProvider client={queryClient}>
         <MantineProvider>
           <ControlProvider client={createControlClient({ baseUrl })}>
@@ -41,13 +49,160 @@ function renderDetail(itemId = mediaDetail.id) {
   return router;
 }
 
-function useSession() {
+function useSession(locale: UiLocale = "en") {
   server.use(
-    http.get(`${baseUrl}/v1/session`, () => HttpResponse.json(sessions.en)),
+    http.get(`${baseUrl}/v1/session`, () =>
+      HttpResponse.json(sessions[locale]),
+    ),
   );
 }
 
+function detailWithAcquisitions(status: AcquisitionStatus) {
+  const olderStatus: AcquisitionStatus =
+    status === "pending" ? "submitted" : "pending";
+  return {
+    ...mediaDetail,
+    acquisitions: [
+      {
+        ...acquisitions[status],
+        destination: `latest-${status}-destination`,
+        id: `latest-${status}`,
+        release_title: `latest-${status}-release`,
+      },
+      {
+        ...acquisitions[olderStatus],
+        destination: `older-${status}-destination`,
+        id: `older-${status}`,
+        release_title: `older-${status}-release`,
+      },
+    ],
+  };
+}
+
 describe("MediaDetailPage", () => {
+  it.each([
+    ["pending", "en"],
+    ["submitted", "en"],
+    ["failed", "en"],
+    ["pending", "ru"],
+    ["submitted", "ru"],
+    ["failed", "ru"],
+  ] as const)(
+    "shows only the newest %s acquisition outcome in %s",
+    async (status, locale) => {
+      const detail = detailWithAcquisitions(status);
+      const i18n = createUiI18n(locale);
+      const olderStatus: AcquisitionStatus =
+        status === "pending" ? "submitted" : "pending";
+      useSession(locale);
+      server.use(
+        http.get(`${baseUrl}/v1/media-items/:itemId`, () =>
+          HttpResponse.json(detail),
+        ),
+      );
+      renderDetail(detail.id, locale);
+
+      const statusRegion = await screen.findByRole("status");
+      const statusLabel = i18n.t(`acquisition.${status}`);
+      const explanation = i18n.t(`detail.acquisitionExplanation.${status}`);
+      const latestRelease = i18n.t("detail.acquisitionRelease", {
+        release: `latest-${status}-release`,
+      });
+      const latestDestination = i18n.t("detail.acquisitionDestination", {
+        destination: `latest-${status}-destination`,
+      });
+      const olderRelease = i18n.t("detail.acquisitionRelease", {
+        release: `older-${status}-release`,
+      });
+      const olderDestination = i18n.t("detail.acquisitionDestination", {
+        destination: `older-${status}-destination`,
+      });
+
+      expect(within(statusRegion).getByText(statusLabel)).toBeVisible();
+      expect(within(statusRegion).getByText(explanation)).toBeVisible();
+      expect(within(statusRegion).getByText(latestRelease)).toBeVisible();
+      expect(within(statusRegion).getByText(latestDestination)).toBeVisible();
+      expect(screen.queryByText(olderRelease)).not.toBeInTheDocument();
+      expect(screen.queryByText(olderDestination)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(i18n.t(`acquisition.${olderStatus}`)),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /history|progress|reconcil/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: /history|progress|reconcil/i }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(["en", "ru"] as const)(
+    "does not render an empty latest-acquisition section in %s",
+    async (locale) => {
+      const i18n = createUiI18n(locale);
+      useSession(locale);
+      server.use(
+        http.get(`${baseUrl}/v1/media-items/:itemId`, () =>
+          HttpResponse.json(mediaDetail),
+        ),
+      );
+      renderDetail(mediaDetail.id, locale);
+
+      await screen.findByRole("heading", { level: 1 });
+      expect(
+        screen.queryByText(i18n.t("detail.latestAcquisition")),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(["en", "ru"] as const)(
+    "wraps long latest release, destination and explanation text in %s",
+    async (locale) => {
+      const detail = detailWithAcquisitions("submitted");
+      const longRelease = `latest-${"release-".repeat(45)}`;
+      const longDestination = `latest-${"destination-".repeat(45)}`;
+      const longDetail = {
+        ...detail,
+        acquisitions: [
+          {
+            ...detail.acquisitions[0],
+            destination: longDestination,
+            release_title: longRelease,
+          },
+          ...detail.acquisitions.slice(1),
+        ],
+      };
+      const i18n = createUiI18n(locale);
+      useSession(locale);
+      server.use(
+        http.get(`${baseUrl}/v1/media-items/:itemId`, () =>
+          HttpResponse.json(longDetail),
+        ),
+      );
+      renderDetail(longDetail.id, locale);
+
+      const statusRegion = await screen.findByRole("status");
+      expect(
+        within(statusRegion).getByText(
+          i18n.t("detail.acquisitionRelease", { release: longRelease }),
+        ),
+      ).toHaveClass(styles.wrappingText!);
+      expect(
+        within(statusRegion).getByText(
+          i18n.t("detail.acquisitionDestination", {
+            destination: longDestination,
+          }),
+        ),
+      ).toHaveClass(styles.wrappingText!);
+      expect(
+        within(statusRegion).getByText(
+          i18n.t("detail.acquisitionExplanation.submitted"),
+        ),
+      ).toHaveClass(styles.wrappingText!);
+    },
+  );
+
   it("shows rich normalized metadata and the first poster without rewriting it", async () => {
     useSession();
     server.use(

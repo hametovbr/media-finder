@@ -66,6 +66,8 @@ class _FirstPartyTransport:
                         "protocol": "torrent",
                         "guid": "fixture-guid",
                         "infoHash": INFOHASH,
+                        "size": 123456789,
+                        "seeders": 0,
                         "magnetUrl": f"magnet:?xt=urn:btih:{INFOHASH}",
                         "infoUrl": "https://indexer.example.test/release?secret=removed",
                     },
@@ -161,8 +163,8 @@ def test_first_party_round_trip_uses_only_typed_module_runtime_and_exact_version
             item_id=item.id,
             request=ReleaseSearchRequest(query="Fixture", indexer_ids=()),
         )
-        assert [(value.title, value.indexer) for value in releases] == [
-            ("Fixture.Release.2026.1080p", "Fixture Torrent Indexer")
+        assert [(value.title, value.indexer, value.size, value.seeders) for value in releases] == [
+            ("Fixture.Release.2026.1080p", "Fixture Torrent Indexer", 123456789, 0)
         ]
         destinations = await gateway.list_destinations()
         assert [(value.key, value.label) for value in destinations] == [("anime", "anime")]
@@ -201,6 +203,13 @@ def test_first_party_round_trip_uses_only_typed_module_runtime_and_exact_version
         assert saved.download_client == ModuleVersionSnapshot(
             module_id="qbittorrent", module_version="0.4.0"
         )
+        assert saved.release_snapshot.model_dump(mode="json") == {
+            "title": "Fixture.Release.2026.1080p",
+            "indexer": "Fixture Torrent Indexer",
+            "guid": "fixture-guid",
+            "infohash": INFOHASH,
+            "source_page_url": "https://indexer.example.test/",
+        }
         assert saved.release_snapshot.infohash == INFOHASH
         assert str(saved.release_snapshot.source_page_url) == "https://indexer.example.test/"
         add_requests = [

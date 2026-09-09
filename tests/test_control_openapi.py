@@ -59,6 +59,15 @@ def test_control_openapi_is_deterministic_safe_and_current() -> None:
     assert next(value for value in poster_variants if value["type"] == "string")["format"] == (
         "uri"
     )
+    release_schema = schema["components"]["schemas"]["ReleaseSearchResult"]
+    for field, minimum in (("size", 1), ("seeders", 0)):
+        integer_variant = next(
+            value
+            for value in release_schema["properties"][field]["anyOf"]
+            if value["type"] == "integer"
+        )
+        assert integer_variant["minimum"] == minimum
+        assert integer_variant["maximum"] == 9_007_199_254_740_991
 
 
 def test_builtin_ui_control_types_follow_the_checked_openapi() -> None:

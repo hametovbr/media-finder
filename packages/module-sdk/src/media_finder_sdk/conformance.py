@@ -31,6 +31,7 @@ from .types import (
     PrivateReleaseSelection,
     ProviderPayload,
     ReleaseCandidate,
+    ReleaseSearchMetrics,
     ReleaseSearchQuery,
     RetentionAction,
     RetentionPolicy,
@@ -184,7 +185,10 @@ def assert_release_registration_conforms(
     provider = registration.build(environment)
     try:
         provider.validate()
-        candidates = provider.search(fixture.query)
+        candidates = tuple(
+            _revalidated_release_candidate(candidate)
+            for candidate in provider.search(fixture.query)
+        )
         if candidates != fixture.expected_candidates or len(candidates) > fixture.query.limit:
             raise AssertionError("release_search_result_mismatch")
         artifact = provider.resolve(candidates[0].selection)
@@ -239,6 +243,26 @@ def _artifact_kind(artifact: DownloadArtifact) -> str:
     if isinstance(artifact, TorrentArtifact):
         return "torrent"
     raise AssertionError("download_artifact_unknown")
+
+
+def _revalidated_release_candidate(candidate: ReleaseCandidate) -> ReleaseCandidate:
+    """Reconstruct metrics so model_construct cannot bypass public validation."""
+
+    try:
+        raw_metrics = candidate.metrics
+        metrics = ReleaseSearchMetrics.model_validate(
+            {
+                "size": raw_metrics.size,
+                "seeders": raw_metrics.seeders,
+            }
+        )
+    except (AttributeError, TypeError, ValueError):
+        raise AssertionError("release_search_metrics_invalid") from None
+    return ReleaseCandidate(
+        snapshot=candidate.snapshot,
+        selection=candidate.selection,
+        metrics=metrics,
+    )
 
 
 def _assert_artifact_declared(capabilities: frozenset[str], artifact: DownloadArtifact) -> None:

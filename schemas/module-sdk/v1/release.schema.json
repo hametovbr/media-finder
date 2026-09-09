@@ -55,6 +55,42 @@
       "title": "ReleaseSearchFilter",
       "type": "object"
     },
+    "ReleaseSearchMetrics": {
+      "additionalProperties": false,
+      "description": "Optional, search-only release comparison facts.",
+      "properties": {
+        "seeders": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seeders"
+        },
+        "size": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size"
+        }
+      },
+      "title": "ReleaseSearchMetrics",
+      "type": "object"
+    },
     "ReleaseSearchQuery": {
       "additionalProperties": false,
       "properties": {
@@ -166,6 +202,13 @@
   "properties": {
     "magnet_artifact": {
       "$ref": "#/$defs/MagnetArtifact"
+    },
+    "metrics": {
+      "$ref": "#/$defs/ReleaseSearchMetrics",
+      "default": {
+        "seeders": null,
+        "size": null
+      }
     },
     "safe_snapshot": {
       "$ref": "#/$defs/SafeReleaseSnapshot"

@@ -127,34 +127,36 @@ async function configureFixtures(
   await page.route(/\/api\/control\/v1\/media-items(?:\?.*)?$/, (route) =>
     fulfillJson(route, { items: [], next_cursor: null }),
   );
-  await page.route("**/api/control/v1/media-items/item-evidence", (route) =>
-    fulfillJson(route, {
-      acquisitions: [],
-      archived: false,
-      collection_id: null,
-      external_id: "evidence-item",
-      id: "item-evidence",
-      kind: "movie",
-      metadata: {
-        artwork: [],
-        countries: [],
-        genres: [],
+  await page.route(
+    /\/api\/control\/v1\/media-items\/item-evidence(?:\?.*)?$/,
+    (route) =>
+      fulfillJson(route, {
+        acquisitions: [],
+        archived: false,
+        collection_id: null,
+        external_id: "evidence-item",
+        id: "item-evidence",
         kind: "movie",
-        original_title: null,
-        people: [],
-        plot: null,
-        ratings: [],
-        seasons: [],
-        studios: [],
-        tags: [],
-        titles: {
-          en: "Evidence item",
-          ru: "\u041f\u0440\u043e\u0438\u0437\u0432\u0435\u0434\u0435\u043d\u0438\u0435",
+        metadata: {
+          artwork: [],
+          countries: [],
+          genres: [],
+          kind: "movie",
+          original_title: null,
+          people: [],
+          plot: null,
+          ratings: [],
+          seasons: [],
+          studios: [],
+          tags: [],
+          titles: {
+            en: "Evidence item",
+            ru: "\u041f\u0440\u043e\u0438\u0437\u0432\u0435\u0434\u0435\u043d\u0438\u0435",
+          },
+          year: 2026,
         },
-        year: 2026,
-      },
-      provider_key: "fixture",
-    }),
+        provider_key: "fixture",
+      }),
   );
   await page.route("**/api/control/v1/metadata-providers", async (route) => {
     if (scenario === "provider-discovery-failure") {
@@ -383,6 +385,10 @@ async function exercise(page: Page, locale: Locale, scenario: Scenario) {
   if (scenario.startsWith("release-")) {
     await page.goto("/items/item-evidence/releases");
     const input = page.getByRole("searchbox", { name: t.release.query });
+    await expect(
+      page.getByText(t.release.contextLabel, { exact: true }),
+    ).toBeVisible();
+    await expect(input).toHaveValue(/\S+/);
     await input.fill(longQuery);
     await page.getByRole("button", { name: t.release.search }).click();
     await expect(

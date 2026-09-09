@@ -1324,6 +1324,8 @@
           "seeders": {
             "anyOf": [
               {
+                "maximum": 9007199254740991.0,
+                "minimum": 0.0,
                 "type": "integer"
               },
               {
@@ -1335,6 +1337,8 @@
           "size": {
             "anyOf": [
               {
+                "maximum": 9007199254740991.0,
+                "minimum": 1.0,
                 "type": "integer"
               },
               {

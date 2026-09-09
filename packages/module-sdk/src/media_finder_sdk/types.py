@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import StrEnum
 from math import isfinite
@@ -23,6 +23,7 @@ MAX_EPISODE_TABLE_BYTES = 1024 * 1024
 MAX_PROVIDER_PAYLOAD_BYTES = 2 * 1024 * 1024
 MAX_PROVIDER_PAYLOAD_DEPTH = 32
 MAX_PROVIDER_PAYLOAD_NODES = 100_000
+MAX_RELEASE_SEARCH_METRIC = 9_007_199_254_740_991
 
 
 def _freeze_json(
@@ -370,6 +371,28 @@ class ReleaseSearchQuery(PublicModel):
     limit: int = Field(default=50, ge=1, le=100)
 
 
+def _validate_release_search_metric(value: object) -> object:
+    if value is None:
+        return None
+    if type(value) is int:
+        return value
+    if type(value) is float and isfinite(value) and value.is_integer():
+        return int(value)
+    raise ValueError("release_search_metric_integer_required")
+
+
+class ReleaseSearchMetrics(PublicModel):
+    """Optional, search-only release comparison facts."""
+
+    size: int | None = Field(default=None, ge=1, le=MAX_RELEASE_SEARCH_METRIC)
+    seeders: int | None = Field(default=None, ge=0, le=MAX_RELEASE_SEARCH_METRIC)
+
+    @field_validator("size", "seeders", mode="before")
+    @classmethod
+    def validate_portable_integer(cls, value: object) -> object:
+        return _validate_release_search_metric(value)
+
+
 class SafeReleaseSnapshot(PublicModel):
     title: Annotated[str, Field(min_length=1, max_length=1000)]
     indexer: Annotated[str, Field(min_length=1, max_length=300)]
@@ -400,6 +423,7 @@ class PrivateReleaseSelection:
 class ReleaseCandidate:
     snapshot: SafeReleaseSnapshot
     selection: PrivateReleaseSelection
+    metrics: ReleaseSearchMetrics = field(default_factory=ReleaseSearchMetrics)
 
 
 class MagnetArtifact(PublicModel):
@@ -454,6 +478,7 @@ __all__ = [
     "MAX_PROVIDER_PAYLOAD_BYTES",
     "MAX_PROVIDER_PAYLOAD_DEPTH",
     "MAX_PROVIDER_PAYLOAD_NODES",
+    "MAX_RELEASE_SEARCH_METRIC",
     "MAX_TORRENT_ARTIFACT_BYTES",
     "Artwork",
     "CorrelationResult",
@@ -478,6 +503,7 @@ __all__ = [
     "Rating",
     "ReleaseCandidate",
     "ReleaseSearchFilter",
+    "ReleaseSearchMetrics",
     "ReleaseSearchQuery",
     "RetentionAction",
     "RetentionActionKind",

@@ -1151,6 +1151,7 @@ test("release retry keeps the submitted snapshot and ignores a late response aft
   );
   await page.goto("/items/item-42/releases");
   const input = page.getByRole("searchbox", { name: "Release query" });
+  await expect(input).toHaveValue("Media overview");
   await input.fill("Arrival");
   await page.getByRole("button", { name: "Search releases" }).click();
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
@@ -1410,6 +1411,809 @@ for (const scenario of manualEvidenceScenarios) {
           page,
           testInfo,
           `manual-${scenario}`,
+          locale,
+          width,
+        );
+      });
+    }
+  }
+}
+
+type ReleaseEvidenceScenario =
+  "context-prefill" | "context-recovery" | "advanced-filters" | "comparison";
+
+const releaseEvidenceScenarios: readonly ReleaseEvidenceScenario[] = [
+  "context-prefill",
+  "context-recovery",
+  "advanced-filters",
+  "comparison",
+];
+
+const releaseEvidenceWidths = [360, 1280] as const;
+const portableMaximumBytes = 9007199254740991;
+
+function releaseContextFixture(title: string) {
+  const item = manualItem("movie", title);
+  return {
+    ...item,
+    external_id: "browser-context-external",
+    id: "item-42",
+    metadata: { ...item.metadata, artwork: [] },
+    provider_key: "fixture",
+  };
+}
+
+async function switchReleaseEvidenceLocale(page: Page, locale: UiLocale) {
+  if (locale === "ru") {
+    await page
+      .getByRole("button", { name: en.locale.switchToRussian, exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", {
+        name: ru.locale.switchToEnglish,
+        exact: true,
+      }),
+    ).toBeVisible();
+  }
+}
+
+async function exerciseReleaseEvidenceScenario(
+  page: Page,
+  locale: UiLocale,
+  scenario: ReleaseEvidenceScenario,
+) {
+  const labels = localeCatalogs[locale];
+  const context = releaseContextFixture("Browser context title");
+  const contextRoute = /\/api\/control\/v1\/media-items\/item-42(?:\?.*)?$/;
+  const searchRoute =
+    /\/api\/control\/v1\/media-items\/item-42\/release-searches$/;
+  await page.route(contextRoute, async (route) => {
+    await route.fulfill({ json: context });
+  });
+
+  let searchRequests = 0;
+  let submittedSearch: Record<string, unknown> | undefined;
+  let acquisitionPosts = 0;
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === "/api/control/v1/acquisitions"
+    ) {
+      acquisitionPosts += 1;
+    }
+  });
+  const comparisonResults = [
+    {
+      indexer: null,
+      seeders: null,
+      size: null,
+      title: `Long release title ${"with wrapping content ".repeat(16)}`,
+      token: "release-long-unknown",
+    },
+    {
+      indexer: "Example Indexer",
+      seeders: 0,
+      size: 2048,
+      title: "Zero seeders release",
+      token: "release-zero-seeders",
+    },
+    {
+      indexer: `Synthetic maximum indexer ${"with a deliberately long name ".repeat(8)}`,
+      seeders: portableMaximumBytes,
+      size: portableMaximumBytes,
+      title: "Portable maximum release",
+      token: "release-portable-maximum",
+    },
+  ];
+
+  let contextAvailable = true;
+  if (scenario === "context-recovery") {
+    contextAvailable = false;
+    await page.unroute(contextRoute);
+    await page.route(contextRoute, async (route) => {
+      if (!contextAvailable) {
+        await route.fulfill({
+          status: 503,
+          json: { error: { code: "media_item_not_found" } },
+        });
+        return;
+      }
+      await route.fulfill({ json: context });
+    });
+    await page.route(searchRoute, async (route, request) => {
+      searchRequests += 1;
+      submittedSearch = request.postDataJSON() as Record<string, unknown>;
+      await route.fulfill({ json: [] });
+    });
+  } else if (scenario === "comparison") {
+    await page.route(
+      "**/api/control/v1/download-destinations",
+      async (route) => {
+        await route.fulfill({
+          json: [{ key: "movies", label: "Movies" }],
+        });
+      },
+    );
+    await page.route(searchRoute, async (route, request) => {
+      searchRequests += 1;
+      submittedSearch = request.postDataJSON() as Record<string, unknown>;
+      await route.fulfill({ json: comparisonResults });
+    });
+  } else {
+    await page.route(searchRoute, async (route) => {
+      searchRequests += 1;
+      await route.fulfill({ json: [] });
+    });
+  }
+
+  await page.goto("/items/item-42/releases");
+  await switchReleaseEvidenceLocale(page, locale);
+
+  const queryInput = page.getByRole("searchbox", {
+    name: labels.release.query,
+  });
+  const searchButton = page.getByRole("button", {
+    name: labels.release.search,
+    exact: true,
+  });
+  const advancedButton = page.getByRole("button", {
+    name: labels.release.advancedFilters,
+    exact: true,
+  });
+
+  if (scenario === "context-prefill") {
+    await expect(queryInput).toHaveValue("Browser context title");
+    await expect(
+      page.getByText(labels.release.contextLabel, { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", {
+        name: labels.release.backToItem,
+        exact: true,
+      }),
+    ).toHaveAttribute("href", "/items/item-42");
+    await expect(searchButton).toBeEnabled();
+    expect(searchRequests).toBe(0);
+    return;
+  }
+
+  if (scenario === "context-recovery") {
+    const manualQuery = "Manual browser query";
+    await queryInput.fill(manualQuery);
+    await expect(queryInput).toHaveValue(manualQuery);
+    await expect(
+      page.getByText(labels.release.contextFailed, { exact: true }),
+    ).toBeVisible();
+    await expect(searchButton).toBeDisabled();
+    const retryContext = page.getByRole("button", {
+      name: labels.release.retryContext,
+      exact: true,
+    });
+    contextAvailable = true;
+    await retryContext.focus();
+    await retryContext.press("Enter");
+    await expect(
+      page.getByText(labels.release.contextLabel, { exact: true }),
+    ).toBeVisible();
+    await expect(queryInput).toHaveValue(manualQuery);
+    await expect(searchButton).toBeEnabled();
+    await searchButton.click();
+    await expect(page.getByRole("status")).toContainText(
+      labels.search.empty.replace("{{query}}", manualQuery),
+    );
+    expect(searchRequests).toBe(1);
+    expect(submittedSearch).toEqual({
+      indexer_ids: [],
+      query: manualQuery,
+    });
+    return;
+  }
+
+  if (scenario === "advanced-filters") {
+    await expect(queryInput).toHaveValue("Browser context title");
+    await advancedButton.focus();
+    await expect(advancedButton).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(advancedButton).toHaveAttribute("aria-expanded", "true");
+    const indexerInput = page.getByRole("textbox", {
+      name: labels.release.indexerIds,
+      exact: true,
+      includeHidden: true,
+    });
+    await expect(indexerInput).toBeVisible();
+    await indexerInput.fill("7");
+    await advancedButton.focus();
+    await page.keyboard.press("Enter");
+    await expect(advancedButton).toHaveAttribute("aria-expanded", "false");
+    await expect(indexerInput).toHaveValue("7");
+    await expect(advancedButton).toBeFocused();
+
+    await advancedButton.press("Enter");
+    await indexerInput.fill("not-a-number");
+    await advancedButton.focus();
+    await page.keyboard.press("Enter");
+    await searchButton.click();
+    await expect(advancedButton).toHaveAttribute("aria-expanded", "true");
+    await expect(indexerInput).toHaveAttribute("aria-invalid", "true");
+    await expect(indexerInput).toBeFocused();
+    await expect(
+      page.getByText(labels.errors.release_filter_invalid, { exact: true }),
+    ).toBeVisible();
+    expect(searchRequests).toBe(0);
+    return;
+  }
+
+  await expect(queryInput).toHaveValue("Browser context title");
+  await queryInput.fill("Comparison browser query");
+  await advancedButton.focus();
+  await page.keyboard.press("Enter");
+  const indexerInput = page.getByRole("textbox", {
+    name: labels.release.indexerIds,
+    exact: true,
+    includeHidden: true,
+  });
+  await indexerInput.fill("7");
+  await advancedButton.focus();
+  await page.keyboard.press("Enter");
+  await expect(indexerInput).toHaveValue("7");
+  await searchButton.click();
+  await expect(page.getByRole("radio")).toHaveCount(3);
+  expect(submittedSearch).toEqual({
+    indexer_ids: [7],
+    query: "Comparison browser query",
+  });
+
+  const unknownRadio = page.getByRole("radio").nth(0);
+  const zeroRadio = page.getByRole("radio").nth(1);
+  const maximumRadio = page.getByRole("radio").nth(2);
+  await expect(unknownRadio).toHaveAccessibleName(comparisonResults[0].title);
+  const unknownFactsId = await unknownRadio.getAttribute("aria-describedby");
+  const zeroFactsId = await zeroRadio.getAttribute("aria-describedby");
+  const maximumFactsId = await maximumRadio.getAttribute("aria-describedby");
+  expect(unknownFactsId).not.toBeNull();
+  expect(zeroFactsId).not.toBeNull();
+  expect(maximumFactsId).not.toBeNull();
+  const unknownFacts = page.locator(`#${unknownFactsId!}`);
+  const zeroFacts = page.locator(`#${zeroFactsId!}`);
+  const maximumFacts = page.locator(`#${maximumFactsId!}`);
+  await expect(unknownFacts).toContainText(
+    `${labels.release.indexer}: ${labels.release.unknown}`,
+  );
+  await expect(unknownFacts).toContainText(
+    `${labels.release.size}: ${labels.release.unknown}`,
+  );
+  await expect(unknownFacts).toContainText(
+    `${labels.release.seeders}: ${labels.release.unknown}`,
+  );
+  await expect(zeroFacts).toContainText(
+    `${labels.release.indexer}: Example Indexer`,
+  );
+  await expect(zeroFacts).toContainText(`${labels.release.seeders}: 0`);
+  await expect(zeroFacts).not.toContainText(
+    `${labels.release.seeders}: ${labels.release.unknown}`,
+  );
+  await expect(maximumFacts).toContainText(
+    `${labels.release.indexer}: ${comparisonResults[2].indexer}`,
+  );
+  await expect(maximumFacts).toContainText(
+    labels.release.exactBytes.replace(
+      "{{bytes}}",
+      String(portableMaximumBytes),
+    ),
+  );
+  await expect(maximumFacts).toContainText(
+    `${labels.release.seeders}: ${portableMaximumBytes}`,
+  );
+
+  const exactZeroBytes = labels.release.exactBytes.replace("{{bytes}}", "2048");
+  await expect(unknownRadio).toHaveAccessibleDescription(
+    new RegExp(
+      `${labels.release.indexer}.*${labels.release.unknown}.*${labels.release.size}.*${labels.release.unknown}.*${labels.release.seeders}.*${labels.release.unknown}`,
+    ),
+  );
+  await expect(zeroRadio).toHaveAccessibleDescription(
+    new RegExp(
+      `${labels.release.indexer}.*Example Indexer.*${labels.release.size}.*${exactZeroBytes}.*${labels.release.seeders}.*0`,
+    ),
+  );
+  await expect(maximumRadio).toHaveAccessibleDescription(
+    new RegExp(
+      `${labels.release.indexer}.*${comparisonResults[2].indexer}.*${labels.release.exactBytes.replace("{{bytes}}", String(portableMaximumBytes))}.*${labels.release.seeders}.*${portableMaximumBytes}`,
+    ),
+  );
+  await maximumRadio.focus();
+  await page.keyboard.press("Space");
+  await expect(maximumRadio).toBeChecked();
+  await expect(
+    page.getByRole("combobox", {
+      name: labels.release.destination,
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(maximumRadio).toBeFocused();
+  expect(acquisitionPosts).toBe(0);
+}
+
+for (const scenario of releaseEvidenceScenarios) {
+  for (const locale of ["en", "ru"] as const) {
+    for (const width of releaseEvidenceWidths) {
+      test(`Release ${scenario} evidence ${locale} ${width}`, async ({
+        page,
+      }, testInfo) => {
+        await page.setViewportSize({ width, height: 800 });
+        await exerciseReleaseEvidenceScenario(page, locale, scenario);
+        await expectNoHorizontalOverflow(page);
+        await attachManualScreenshot(
+          page,
+          testInfo,
+          `release-${scenario}`,
+          locale,
+          width,
+        );
+      });
+    }
+  }
+}
+
+type LatestAcquisitionStatus = "pending" | "submitted" | "failed";
+
+const latestAcquisitionStatuses: readonly LatestAcquisitionStatus[] = [
+  "pending",
+  "submitted",
+  "failed",
+];
+
+function latestAcquisitionDetail(status: LatestAcquisitionStatus) {
+  const olderStatus: LatestAcquisitionStatus =
+    status === "pending" ? "submitted" : "pending";
+  const item = manualItem("movie", "Latest acquisition evidence");
+  const latestRelease = `latest-${"release-".repeat(45)}`;
+  const latestDestination = `latest-${"destination-".repeat(45)}`;
+  return {
+    ...item,
+    acquisitions: [
+      {
+        created_at: "2026-09-09T10:00:00Z",
+        destination: latestDestination,
+        error_code:
+          status === "failed" ? "download_client_submission_failed" : null,
+        id: `latest-${status}`,
+        media_item_id: "item-42",
+        release_title: latestRelease,
+        status,
+      },
+      {
+        created_at: "2026-09-09T09:00:00Z",
+        destination: `older-${olderStatus}-destination`,
+        error_code: null,
+        id: `older-${status}`,
+        media_item_id: "item-42",
+        release_title: `older-${olderStatus}-release`,
+        status: olderStatus,
+      },
+    ],
+    external_id: "latest-acquisition-evidence",
+    id: "item-42",
+    metadata: { ...item.metadata, artwork: [] },
+    provider_key: "fixture",
+  };
+}
+
+for (const status of latestAcquisitionStatuses) {
+  for (const locale of ["en", "ru"] as const) {
+    for (const width of [360, 1280] as const) {
+      test(`Detail latest ${status} evidence ${locale} ${width}`, async ({
+        page,
+      }, testInfo) => {
+        const labels = localeCatalogs[locale];
+        await page.setViewportSize({ width, height: 800 });
+        await page.route(
+          /\/api\/control\/v1\/media-items\/item-42(?:\?.*)?$/,
+          async (route) => {
+            await route.fulfill({
+              json: latestAcquisitionDetail(status),
+            });
+          },
+        );
+        await page.goto("/items/item-42");
+        await switchReleaseEvidenceLocale(page, locale);
+
+        const olderStatus: LatestAcquisitionStatus =
+          status === "pending" ? "submitted" : "pending";
+        const latestRelease = `latest-${"release-".repeat(45)}`;
+        const latestDestination = `latest-${"destination-".repeat(45)}`;
+        const statusRegion = page.getByRole("status");
+        await expect(statusRegion).toHaveCount(1);
+        await expect(
+          page.getByText(labels.detail.latestAcquisition, { exact: true }),
+        ).toBeVisible();
+        await expect(
+          statusRegion.getByText(labels.acquisition[status], { exact: true }),
+        ).toBeVisible();
+        await expect(
+          statusRegion.getByText(
+            labels.detail.acquisitionRelease.replace(
+              "{{release}}",
+              latestRelease,
+            ),
+            { exact: true },
+          ),
+        ).toBeVisible();
+        await expect(
+          statusRegion.getByText(
+            labels.detail.acquisitionDestination.replace(
+              "{{destination}}",
+              latestDestination,
+            ),
+            { exact: true },
+          ),
+        ).toBeVisible();
+        await expect(
+          statusRegion.getByText(labels.detail.acquisitionExplanation[status], {
+            exact: true,
+          }),
+        ).toBeVisible();
+        await expect(
+          page.getByText(
+            labels.detail.acquisitionRelease.replace(
+              "{{release}}",
+              `older-${olderStatus}-release`,
+            ),
+            { exact: true },
+          ),
+        ).toHaveCount(0);
+        await expect(
+          page.getByText(
+            labels.detail.acquisitionDestination.replace(
+              "{{destination}}",
+              `older-${olderStatus}-destination`,
+            ),
+            { exact: true },
+          ),
+        ).toHaveCount(0);
+        await expect(
+          page.getByText(labels.acquisition[olderStatus], { exact: true }),
+        ).toHaveCount(0);
+        await expect(page.locator('[role="progressbar"]')).toHaveCount(0);
+        await expect(
+          page.getByRole("button", { name: /history|progress|reconcil/i }),
+        ).toHaveCount(0);
+        await expect(
+          page.getByRole("link", { name: /history|progress|reconcil/i }),
+        ).toHaveCount(0);
+        await expectNoHorizontalOverflow(page);
+        await attachManualScreenshot(
+          page,
+          testInfo,
+          `detail-latest-${status}`,
+          locale,
+          width,
+        );
+      });
+    }
+  }
+}
+
+type ReleaseSubmissionEvidenceMode =
+  "review" | "uncertain" | LatestAcquisitionStatus;
+
+type ReleaseSubmissionEvidenceCounters = {
+  destinationReads: number;
+  requests: Record<string, unknown>[];
+  searchRequests: number;
+  submissions: number;
+};
+
+const releaseSubmissionEvidenceModes: readonly ReleaseSubmissionEvidenceMode[] =
+  ["review", "uncertain", "pending", "submitted", "failed"];
+const releaseSubmissionEvidenceWidths = [360, 1280] as const;
+const releaseSubmissionWorkTitle = `Evidence ${"work-".repeat(36)}`;
+const releaseSubmissionReleaseTitle = `Evidence ${"release-".repeat(36)}`;
+const releaseSubmissionDestinationLabel = `Evidence ${"destination-".repeat(36)}`;
+
+function releaseSubmissionAcquisition(status: LatestAcquisitionStatus) {
+  return {
+    created_at: "2026-09-09T10:00:00Z",
+    destination: "server-response-destination",
+    error_code:
+      status === "failed" ? "download_client_submission_failed" : null,
+    id: `evidence-${status}`,
+    media_item_id: "item-42",
+    release_title: "server-response-release",
+    status,
+  };
+}
+
+async function configureReleaseSubmissionEvidence(
+  page: Page,
+  mode: ReleaseSubmissionEvidenceMode,
+): Promise<ReleaseSubmissionEvidenceCounters> {
+  const counters: ReleaseSubmissionEvidenceCounters = {
+    destinationReads: 0,
+    requests: [],
+    searchRequests: 0,
+    submissions: 0,
+  };
+  const contextRoute = /\/api\/control\/v1\/media-items\/item-42(?:\?.*)?$/;
+  const searchRoute =
+    /\/api\/control\/v1\/media-items\/item-42\/release-searches$/;
+  const destinationsRoute = /\/api\/control\/v1\/download-destinations$/;
+  const acquisitionsRoute = /\/api\/control\/v1\/acquisitions$/;
+  await page.route(contextRoute, async (route) => {
+    await route.fulfill({
+      json: releaseContextFixture(releaseSubmissionWorkTitle),
+    });
+  });
+  await page.route(searchRoute, async (route) => {
+    counters.searchRequests += 1;
+    await route.fulfill({
+      json: [
+        {
+          indexer: "Evidence indexer",
+          seeders: 1,
+          size: 2048,
+          title: releaseSubmissionReleaseTitle,
+          token: "release-submission-evidence",
+        },
+      ],
+    });
+  });
+  await page.route(destinationsRoute, async (route) => {
+    counters.destinationReads += 1;
+    await route.fulfill({
+      json: [
+        {
+          key: "evidence-destination",
+          label: releaseSubmissionDestinationLabel,
+        },
+      ],
+    });
+  });
+  await page.route(acquisitionsRoute, async (route, request) => {
+    counters.submissions += 1;
+    counters.requests.push(request.postDataJSON() as Record<string, unknown>);
+    if (mode === "uncertain" && counters.submissions === 1) {
+      await route.fulfill({
+        status: 500,
+        json: { error: { code: "internal_error" } },
+      });
+      return;
+    }
+    const returnedStatus: LatestAcquisitionStatus =
+      mode === "review" || mode === "uncertain" ? "submitted" : mode;
+    await route.fulfill({
+      status: 201,
+      json: releaseSubmissionAcquisition(returnedStatus),
+    });
+  });
+  return counters;
+}
+
+async function prepareReleaseSubmissionEvidence(page: Page, locale: UiLocale) {
+  const labels = localeCatalogs[locale];
+  await page.goto("/items/item-42/releases");
+  await switchReleaseEvidenceLocale(page, locale);
+  const queryInput = page.getByRole("searchbox", {
+    name: labels.release.query,
+  });
+  await expect(queryInput).toHaveValue(releaseSubmissionWorkTitle);
+  await page
+    .getByRole("button", {
+      name: labels.release.search,
+      exact: true,
+    })
+    .click();
+  const releaseRadio = page.getByRole("radio").first();
+  await expect(releaseRadio).toBeVisible();
+  await releaseRadio.click();
+  const destination = page.getByRole("combobox", {
+    name: labels.release.destination,
+    exact: true,
+  });
+  await expect(destination).toBeVisible();
+  await destination.selectOption("evidence-destination");
+  const reviewTrigger = page.getByRole("button", {
+    name: labels.release.confirm,
+    exact: true,
+  });
+  await expect(reviewTrigger).toBeEnabled();
+  return { destination, releaseRadio, reviewTrigger };
+}
+
+for (const mode of releaseSubmissionEvidenceModes) {
+  for (const locale of ["en", "ru"] as const) {
+    for (const width of releaseSubmissionEvidenceWidths) {
+      test(`Release ${mode} evidence ${locale} ${width}`, async ({
+        page,
+      }, testInfo) => {
+        const labels = localeCatalogs[locale];
+        await page.setViewportSize({ width, height: 800 });
+        const counters = await configureReleaseSubmissionEvidence(page, mode);
+        const prepared = await prepareReleaseSubmissionEvidence(page, locale);
+
+        if (mode === "review") {
+          await prepared.reviewTrigger.click();
+          const dialog = page.getByRole("dialog", {
+            name: labels.release.reviewTitle,
+          });
+          await expect(dialog).toBeVisible();
+          await expect(dialog).toContainText(
+            `${labels.release.reviewWork}: ${releaseSubmissionWorkTitle}`,
+          );
+          await expect(dialog).toContainText(
+            `${labels.release.reviewRelease}: ${releaseSubmissionReleaseTitle}`,
+          );
+          await expect(dialog).toContainText(
+            `${labels.release.reviewDestination}: ${releaseSubmissionDestinationLabel}`,
+          );
+          const cancel = dialog.getByRole("button", {
+            name: labels.release.cancelReview,
+            exact: true,
+          });
+          const confirm = dialog.getByRole("button", {
+            name: labels.release.confirmReview,
+            exact: true,
+          });
+          await expect(cancel).toBeFocused();
+          await page.keyboard.press("Tab");
+          await expect(confirm).toBeFocused();
+          await page.keyboard.press("Tab");
+          await expect(cancel).toBeFocused();
+          await expectNoHorizontalOverflow(page);
+          await attachManualScreenshot(
+            page,
+            testInfo,
+            "release-review",
+            locale,
+            width,
+          );
+
+          await cancel.click();
+          await expect(dialog).toBeHidden();
+          await expect(prepared.reviewTrigger).toBeFocused();
+          await prepared.reviewTrigger.click();
+          await page.keyboard.press("Escape");
+          await expect(dialog).toBeHidden();
+          await expect(prepared.reviewTrigger).toBeFocused();
+          expect(counters.submissions).toBe(0);
+          return;
+        }
+
+        await prepared.reviewTrigger.click();
+        await page
+          .getByRole("button", {
+            name: labels.release.confirmReview,
+            exact: true,
+          })
+          .click();
+
+        if (mode === "uncertain") {
+          const retry = page.getByRole("button", {
+            name: labels.release.retryRequest,
+            exact: true,
+          });
+          await expect(retry).toBeVisible();
+          await expect(
+            page.getByText(labels.release.requestUncertain, { exact: true }),
+          ).toBeVisible();
+          await expect(
+            page.getByText(labels.release.localRetryWarning, { exact: true }),
+          ).toBeVisible();
+          await expect(
+            page.getByRole("button", {
+              name: labels.release.search,
+              exact: true,
+            }),
+          ).toBeDisabled();
+          await expect(prepared.releaseRadio).toBeDisabled();
+          await expect(prepared.destination).toBeDisabled();
+          expect(counters.destinationReads).toBe(2);
+          expect(counters.searchRequests).toBe(1);
+          expect(counters.submissions).toBe(1);
+          await expectNoHorizontalOverflow(page);
+          await attachManualScreenshot(
+            page,
+            testInfo,
+            "release-uncertain",
+            locale,
+            width,
+          );
+
+          await retry.click();
+          const outcome = page.locator('[role="status"]').filter({
+            hasText: labels.release.outcomeRelease.replace(
+              "{{release}}",
+              releaseSubmissionReleaseTitle,
+            ),
+          });
+          await expect(outcome).toBeVisible();
+          await expect(
+            outcome.getByText(labels.acquisition.submitted, { exact: true }),
+          ).toBeVisible();
+          await expect(
+            outcome.getByText(
+              labels.release.outcomeRelease.replace(
+                "{{release}}",
+                releaseSubmissionReleaseTitle,
+              ),
+              { exact: true },
+            ),
+          ).toBeVisible();
+          await expect(
+            outcome.getByText(
+              labels.release.outcomeDestination.replace(
+                "{{destination}}",
+                releaseSubmissionDestinationLabel,
+              ),
+              { exact: true },
+            ),
+          ).toBeVisible();
+          await expect(
+            outcome.getByText(labels.release.outcome.submitted, {
+              exact: true,
+            }),
+          ).toBeVisible();
+          await expect(retry).toHaveCount(0);
+          expect(counters.destinationReads).toBe(2);
+          expect(counters.searchRequests).toBe(1);
+          expect(counters.submissions).toBe(2);
+          expect(counters.requests[0]).toEqual(counters.requests[1]);
+          return;
+        }
+
+        const outcome = page.locator('[role="status"]').filter({
+          hasText: labels.release.outcomeRelease.replace(
+            "{{release}}",
+            releaseSubmissionReleaseTitle,
+          ),
+        });
+        await expect(outcome).toBeVisible();
+        await expect(
+          outcome.getByText(labels.acquisition[mode], { exact: true }),
+        ).toBeVisible();
+        await expect(
+          outcome.getByText(
+            labels.release.outcomeRelease.replace(
+              "{{release}}",
+              releaseSubmissionReleaseTitle,
+            ),
+            { exact: true },
+          ),
+        ).toBeVisible();
+        await expect(
+          outcome.getByText(
+            labels.release.outcomeDestination.replace(
+              "{{destination}}",
+              releaseSubmissionDestinationLabel,
+            ),
+            { exact: true },
+          ),
+        ).toBeVisible();
+        await expect(
+          outcome.getByText(labels.release.outcome[mode], { exact: true }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole("button", {
+            name: labels.release.retryRequest,
+            exact: true,
+          }),
+        ).toHaveCount(0);
+        expect(counters.destinationReads).toBe(2);
+        expect(counters.searchRequests).toBe(1);
+        expect(counters.submissions).toBe(1);
+        if (mode === "failed") {
+          await expect(
+            page.getByRole("button", {
+              name: labels.release.search,
+              exact: true,
+            }),
+          ).toBeEnabled();
+        }
+        await expectNoHorizontalOverflow(page);
+        await attachManualScreenshot(
+          page,
+          testInfo,
+          `release-outcome-${mode}`,
           locale,
           width,
         );
