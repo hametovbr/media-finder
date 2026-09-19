@@ -86,19 +86,26 @@ These portions do not establish an operational end-to-end release process.
 
 ## Checkpoint verification
 
-Independent verification and three independent review rounds ran on this change.
-Rounds 2 and 3 returned `pass` with Critical 0 and Important 0 on the frozen
-implementation, and round 4 reviewed the final delivery head and returned
-`needs_revision` with Critical 0 and Important 2; both findings are resolved by the
-follow-up commit recorded here.
+Independent verification and repeated independent review rounds ran on this
+change. Two rounds returned `pass` with Critical 0 and Important 0 on the frozen
+implementation; a later round reviewed the delivery head and returned
+`needs_revision` with Critical 0 and Important 2, whose findings are resolved by the
+follow-up commit recorded here; and the most recent round reviewed the branch head
+and returned `pass` with Critical 0 and Important 0.
 
 - Frozen implementation candidate: `git diff | sha256sum` =
   `25ae122e242e9b26adef205bb08d80f34bee33baf913a570dd6f8e4f13c30495`.
-- Final delivery head: `feat/automated-stable-release`, one cohesive commit over
-  the checkpoint `1e16ae3eb630cd0b848269b57045d6af30268bf6`, clean worktree with no
-  untracked files.
+- Delivery branch: `feat/automated-stable-release`, a small set of logically
+  separated commits over the checkpoint
+  `1e16ae3eb630cd0b848269b57045d6af30268bf6`, clean worktree with no untracked
+  files.
+- Hosted runs observed on this branch at the time of writing, each with all seven
+  required contexts successful: `35444098680` (hosted-verification head
+  `001f1d9`), `35448425645` (head `706cacc`) and `35448903141` (head `2c0d6a3`).
+  The contexts are rerun for every head change, so a later head requires its own
+  successful run.
 
-Gate results reproduced on the final head:
+Gate results reproduced on the delivery branch head:
 
 | Gate | Result |
 | --- | --- |
