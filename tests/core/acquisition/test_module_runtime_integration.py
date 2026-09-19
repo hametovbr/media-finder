@@ -198,10 +198,11 @@ def test_first_party_round_trip_uses_only_typed_module_runtime_and_exact_version
         saved = SqlAlchemyAcquisitionQueries(sessions).get(acquisition_id)
         assert saved is not None
         assert saved.release_provider == ModuleVersionSnapshot(
-            module_id="prowlarr", module_version="0.4.0"
+            module_id="prowlarr", module_version=composition.release_manifest.module_version
         )
         assert saved.download_client == ModuleVersionSnapshot(
-            module_id="qbittorrent", module_version="0.4.0"
+            module_id="qbittorrent",
+            module_version=composition.download_manifest.module_version,
         )
         assert saved.release_snapshot.model_dump(mode="json") == {
             "title": "Fixture.Release.2026.1080p",
