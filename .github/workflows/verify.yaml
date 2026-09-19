@@ -27,6 +27,8 @@ jobs:
           cache: pnpm
       - name: Install locked documentation tooling
         run: pnpm install --frozen-lockfile
+      - name: Test release automation scripts
+        run: node --test scripts/release-publication.test.mjs scripts/release-automation.test.mjs
       - name: Enforce English repository documentation
         run: pnpm docs:check
       - name: Validate OpenSpec strictly
@@ -117,6 +119,7 @@ jobs:
           tests/test_naming.py
           tests/test_nfo.py
           tests/test_prowlarr.py
+          tests/test_prepare_release.py
           tests/test_verify_image.py
 
   integration:

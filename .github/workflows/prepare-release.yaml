@@ -1,0 +1,64 @@
+name: Prepare stable release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Canonical stable product version (X.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: release-controller
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11.19.0
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.12.5"
+          enable-cache: true
+      - name: Install locked Python workspace
+        run: uv sync --frozen --all-groups
+      - name: Install locked Node workspace
+        run: pnpm install --frozen-lockfile
+      - name: Request stable release
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_EVIDENCE_PATH: ${{ runner.temp }}/release-evidence.json
+          RELEASE_APP_CLIENT_ID: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        with:
+          script: |
+            await exec.exec("node", [
+              "scripts/release-automation.mjs",
+              "--phase",
+              "request",
+              "--version",
+              process.env.RELEASE_VERSION,
+            ], { env: process.env });

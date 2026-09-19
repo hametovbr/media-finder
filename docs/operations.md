@@ -17,6 +17,8 @@ Use an immutable `vX.Y.Z` tag for production deployments. Moving tags are provid
 
 Images are published for `linux/amd64` and `linux/arm64`.
 
+For the phone-driven, repository-scoped stable release workflow, see the [automated stable release operator guide](release-automation.md).
+
 Both publishing paths run the same documentation, OpenSpec, format, lint, type, unit, integration, contract, browser, and production-image checks for the exact commit before granting the publish job package-write permission. A failed or skipped verification cannot publish `edge` or stable tags.
 
 ## Initial deployment

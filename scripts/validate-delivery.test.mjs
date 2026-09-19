@@ -56,6 +56,13 @@ function mutate(root, relativePath, transform) {
   fs.writeFileSync(target, transform(fs.readFileSync(target, "utf8")), "utf8");
 }
 
+function mutateYaml(root, relativePath, transform) {
+  const target = path.join(root, relativePath);
+  const value = YAML.parse(fs.readFileSync(target, "utf8"));
+  const transformed = transform(value) ?? value;
+  fs.writeFileSync(target, YAML.stringify(transformed), "utf8");
+}
+
 const validationDate = "2026-08-28";
 
 function validSecurityException(overrides = {}) {
@@ -146,6 +153,219 @@ test("current delivery workflows satisfy the structural contract", () => {
   assert.deepEqual(validateDelivery(sourceRoot), []);
 });
 
+test("stable release preparation requires the trusted main-only dispatch workflow", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const workflowPath = path.join(root, ".github/workflows/prepare-release.yaml");
+  fs.mkdirSync(path.dirname(workflowPath), { recursive: true });
+  fs.writeFileSync(workflowPath, "name: placeholder\n", "utf8");
+  fs.rmSync(workflowPath);
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /prepare-release\.yaml: required delivery artifact is missing/,
+  );
+});
+
+test("stable release preparation accepts only a required canonical version dispatch", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/prepare-release.yaml", (value) => {
+    value.on.push = { branches: ["main"] };
+    value.on.workflow_dispatch.inputs.extra = { required: false, type: "string" };
+    value.on.workflow_dispatch.inputs.version.required = false;
+    value.on.workflow_dispatch.inputs.version.type = "choice";
+    return value;
+  });
+
+  const failures = validateDelivery(root).join("\n");
+  assert.match(failures, /prepare-release\.yaml: stable release preparation must use workflow_dispatch only/);
+  assert.match(failures, /prepare-release\.yaml: workflow_dispatch must expose only the version input/);
+  assert.match(failures, /prepare-release\.yaml: version input must be a required string/);
+});
+
+test("stable release preparation guards the trusted main ref", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/prepare-release.yaml", (value) => {
+    value.jobs.release.if = "${{ github.ref == 'refs/heads/main' }}";
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /prepare-release\.yaml: controller job must guard workflow_dispatch on main/,
+  );
+});
+
+test("stable release preparation serializes requests without cancelling runs", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/prepare-release.yaml", (value) => {
+    value.concurrency.group = "release-controller-${{ inputs.version }}";
+    value.concurrency["cancel-in-progress"] = true;
+    return value;
+  });
+
+  const failures = validateDelivery(root).join("\n");
+  assert.match(failures, /prepare-release\.yaml: controller concurrency must use the constant repository-wide group/);
+  assert.match(failures, /prepare-release\.yaml: controller concurrency must not cancel in-progress runs/);
+});
+
+test("stable release preparation keeps its bounded controller timeout", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/prepare-release.yaml", (value) => {
+    value.jobs.release["timeout-minutes"] = 30;
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /prepare-release\.yaml: controller job must have a 330-minute timeout/,
+  );
+});
+
+test("stable release preparation keeps the workflow token least-privileged", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/prepare-release.yaml", (value) => {
+    value.permissions = {
+      actions: "read",
+      contents: "write",
+      "pull-requests": "write",
+      administration: "write",
+      checks: "write",
+    };
+    value.jobs.release.permissions = { contents: "write", actions: "write" };
+    return value;
+  });
+
+  const failures = validateDelivery(root).join("\n");
+  assert.match(failures, /prepare-release\.yaml: workflow token permissions must be limited to actions read and contents read/);
+  assert.match(failures, /prepare-release\.yaml: controller job permissions must remain read-only/);
+});
+
+test("stable release preparation checks out the trusted revision without persisted credentials", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/prepare-release.yaml", (value) => {
+    const checkout = value.jobs.release.steps.find((step) =>
+      String(step.uses ?? "").startsWith("actions/checkout@"),
+    );
+    checkout.with.ref = "${{ inputs.version }}";
+    checkout.with["fetch-depth"] = 1;
+    checkout.with["persist-credentials"] = true;
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /prepare-release\.yaml: trusted checkout must use github\.sha, complete history, and no persisted credentials/,
+  );
+});
+
+test("stable release preparation pins its complete toolchain and freezes installs", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/prepare-release.yaml", (value) => {
+    const steps = value.jobs.release.steps;
+    steps.find((step) => String(step.uses ?? "").startsWith("actions/setup-python@")).with[
+      "python-version"
+    ] = "3.12";
+    steps.find((step) => String(step.uses ?? "").startsWith("actions/setup-node@")).with[
+      "node-version"
+    ] = "20";
+    steps.find((step) => String(step.uses ?? "").startsWith("astral-sh/setup-uv@")).with.version = "0.11.0";
+    steps.find((step) => String(step.uses ?? "").startsWith("pnpm/action-setup@")).with.version = "10.0.0";
+    steps.find((step) => step.name === "Install locked Python workspace").run = "uv sync";
+    steps.find((step) => step.name === "Install locked Node workspace").run = "pnpm install";
+    return value;
+  });
+
+  const failures = validateDelivery(root).join("\n");
+  assert.match(failures, /prepare-release\.yaml: controller must use the pinned Python 3\.13 toolchain/);
+  assert.match(failures, /prepare-release\.yaml: controller must use the pinned Node 24 toolchain/);
+  assert.match(failures, /prepare-release\.yaml: controller must use the pinned uv 0\.12\.5 toolchain/);
+  assert.match(failures, /prepare-release\.yaml: controller must use the pinned pnpm toolchain/);
+  assert.match(failures, /prepare-release\.yaml: frozen Python and Node installs must complete before credentials are exposed/);
+});
+
+test("stable release preparation pins the github-script controller action", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/prepare-release.yaml", (value) => {
+    const controller = value.jobs.release.steps.find((step) => step.name === "Request stable release");
+    controller.uses = "actions/github-script@v8";
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /prepare-release\.yaml: release must pin actions\/github-script@v8 to an immutable 40-character commit SHA/,
+  );
+});
+
+test("stable release preparation confines App credentials to its final controller step", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/prepare-release.yaml", (value) => {
+    value.jobs.release.env = { RELEASE_APP_PRIVATE_KEY: "${{ secrets.RELEASE_APP_PRIVATE_KEY }}" };
+    const setup = value.jobs.release.steps.find((step) => step.name === "Install locked Node workspace");
+    setup.env = { RELEASE_APP_CLIENT_ID: "${{ vars.RELEASE_APP_CLIENT_ID }}" };
+    const controller = value.jobs.release.steps.find((step) => step.name === "Request stable release");
+    controller.env.EXTRA_TOKEN = "${{ secrets.EXTRA_TOKEN }}";
+    return value;
+  });
+
+  const failures = validateDelivery(root).join("\n");
+  assert.match(failures, /prepare-release\.yaml: credentials must not be configured at job scope/);
+  assert.match(failures, /prepare-release\.yaml: candidate and setup steps must not receive release credentials/);
+  assert.match(failures, /prepare-release\.yaml: App credentials must be confined to the final controller environment/);
+});
+
+test("stable release preparation invokes the fixed request command without shell interpolation", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/prepare-release.yaml", (value) => {
+    const controller = value.jobs.release.steps.find((step) => step.name === "Request stable release");
+    controller.with.script = "await exec.exec(`node scripts/release-automation.mjs --phase request --version ${{ inputs.version }}`);";
+    return value;
+  });
+
+  const failures = validateDelivery(root).join("\n");
+  assert.match(failures, /prepare-release\.yaml: controller must invoke the fixed request command with an argument array/);
+  assert.match(failures, /prepare-release\.yaml: controller script must not interpolate inputs or invoke a shell/);
+});
+
+test("stable release preparation executes its injected command with the version argument", async (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const workflow = YAML.parse(
+    fs.readFileSync(path.join(root, ".github/workflows/prepare-release.yaml"), "utf8"),
+  );
+  const controller = workflow.jobs.release.steps.find((step) => step.name === "Request stable release");
+  const calls = [];
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const processFixture = { env: { RELEASE_VERSION: "0.5.0" } };
+  const execFixture = {
+    exec: async (...arguments_) => {
+      calls.push(arguments_);
+      return 0;
+    },
+  };
+
+  await new AsyncFunction("exec", "process", controller.with.script)(execFixture, processFixture);
+
+  assert.deepEqual(calls, [
+    [
+      "node",
+      ["scripts/release-automation.mjs", "--phase", "request", "--version", "0.5.0"],
+      { env: processFixture.env },
+    ],
+  ]);
+});
+
 test("floating third-party action refs are rejected", (context) => {
   const root = copyDeliveryFixture();
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -182,9 +402,10 @@ test("edge publication is restricted to main push events", (context) => {
 test("stable publication requires verification of the release commit", (context) => {
   const root = copyDeliveryFixture();
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  mutate(root, ".github/workflows/release.yaml", (value) =>
-    value.replace("needs: verification", "needs: []"),
-  );
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    value.jobs.publish.needs = [];
+    return value;
+  });
 
   assert.match(validateDelivery(root).join("\n"), /stable publish job must need verification/);
 });
@@ -192,11 +413,117 @@ test("stable publication requires verification of the release commit", (context)
 test("stable publication is restricted to published release events", (context) => {
   const root = copyDeliveryFixture();
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  mutate(root, ".github/workflows/release.yaml", (value) =>
-    value.replace("types: [published]", "types: [created]"),
-  );
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    value.on.release.types = ["published", "created"];
+    return value;
+  });
 
   assert.match(validateDelivery(root).join("\n"), /stable publishing must use published releases only/);
+});
+
+test("stable publication serializes every release and keeps waiting runs", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    value.concurrency = {
+      group: "stable-container-${{ github.event.release.tag_name }}",
+      "cancel-in-progress": true,
+    };
+    return value;
+  });
+
+  const failures = validateDelivery(root).join("\n");
+  assert.match(failures, /stable publication concurrency group must serialize every release/);
+  assert.match(failures, /stable publication concurrency must not cancel in-progress releases/);
+});
+
+test("stable publication keeps package write access on the gated publisher only", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    value.jobs.verification.permissions = { contents: "read", packages: "write" };
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /stable verification job must not receive package write permission/,
+  );
+});
+
+test("stable publication does not pass private credentials into the publisher script", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const publish = value.jobs.publish.steps.find((step) => step.name === "Publish and verify stable image");
+    publish.env.RELEASE_APP_PRIVATE_KEY = "${{ secrets.RELEASE_APP_PRIVATE_KEY }}";
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /stable publisher must not expose credentials to the publication script/,
+  );
+});
+
+test("stable publication checks out the release event revision with complete history", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const checkout = value.jobs.publish.steps.find((step) =>
+      String(step.uses ?? "").startsWith("actions/checkout@"),
+    );
+    checkout.with.ref = "${{ github.event.release.tag_name }}";
+    return value;
+  });
+
+  assert.match(validateDelivery(root).join("\n"), /stable publisher checkout must use the release event revision/);
+});
+
+test("stable publication executes the gated verifier script", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const publish = value.jobs.publish.steps.find((step) => step.name === "Publish and verify stable image");
+    publish.run = "docker buildx build --push .";
+    return value;
+  });
+
+  const failures = validateDelivery(root).join("\n");
+  assert.match(failures, /stable publisher must execute scripts\/release-publication\.mjs/);
+});
+
+test("documentation verification executes release automation script tests explicitly", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/verify.yaml", (value) => {
+    value.jobs.documentation.steps = value.jobs.documentation.steps.filter(
+      (step) => step.name !== "Test release automation scripts",
+    );
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /documentation job must run release-publication\.test\.mjs and release-automation\.test\.mjs/,
+  );
+});
+
+test("stable publication rejects the obsolete direct Docker publisher contract", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    value.jobs.publish.steps.push({
+      uses: "docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8",
+      with: { push: true },
+    });
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /stable publisher must not use a direct Docker build or metadata action/,
+  );
 });
 
 test("image smoke test must exercise every public and protected surface", (context) => {
