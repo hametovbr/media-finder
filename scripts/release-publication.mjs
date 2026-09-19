@@ -318,6 +318,16 @@ function requiredPlatforms(inspection) {
   return byName;
 }
 
+// Images this project published before the current publisher carry the version
+// label with a leading `v`, which the canonical form does not. Reading an existing
+// moving tag therefore interprets that published convention, and only that one: the
+// parsed value still feeds every ordering and conflict decision, and anything the
+// publisher writes stays canonical.
+function parsePublishedVersionLabel(value) {
+  const text = typeof value === "string" && value.startsWith("v") ? value.slice(1) : value;
+  return parseStableVersion(text);
+}
+
 function inspectionVersion(inspection) {
   const byName = requiredPlatforms(inspection);
   if (byName.size !== REQUIRED_PLATFORM_NAMES.length) return undefined;
@@ -326,7 +336,7 @@ function inspectionVersion(inspection) {
     const entries = byName.get(name);
     if (entries.length !== 1 || typeof entries[0].version !== "string") return undefined;
     try {
-      values.push(parseStableVersion(entries[0].version).text);
+      values.push(parsePublishedVersionLabel(entries[0].version).text);
     } catch {
       return undefined;
     }
