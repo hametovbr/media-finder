@@ -238,6 +238,45 @@ test("an inspection failure records the command diagnostic that identifies its c
   });
 });
 
+test("a pre-signed URL in the diagnostic never reaches the failure record", async () => {
+  const tags = expectedRefs();
+  const failure = Object.assign(new Error("command failed"), {
+    status: 1,
+    stderr: Buffer.from(
+      "failed to fetch https://blob.example.test/x?sv=1&sig=aB9cSecretValue: context deadline\n",
+    ),
+  });
+  const client = createDockerRegistryClient({
+    command: async () => {
+      throw failure;
+    },
+  });
+
+  await assert.rejects(client.inspect(tags.immutable), (error) => {
+    const diagnostic = String(error.details?.diagnostic ?? "");
+    assert.match(diagnostic, /blob\.example\.test/);
+    assert.equal(diagnostic.includes("sig="), false);
+    assert.equal(diagnostic.includes("aB9cSecretValue"), false);
+    return true;
+  });
+});
+
+test("a command that failed without captured output still records its cause", async () => {
+  const tags = expectedRefs();
+  const failure = Object.assign(new Error("command timeout"), { code: "ETIMEDOUT" });
+  const client = createDockerRegistryClient({
+    command: async () => {
+      throw failure;
+    },
+  });
+
+  await assert.rejects(client.inspect(tags.immutable), (error) => {
+    assert.equal(error.code, "registry_inspection_failed");
+    assert.match(String(error.details?.diagnostic ?? ""), /ETIMEDOUT/);
+    return true;
+  });
+});
+
 test("generic 404, not-found, auth, and transport errors fail closed", async () => {
   const errors = [
     Object.assign(new Error("command failed"), {

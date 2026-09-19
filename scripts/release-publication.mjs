@@ -411,11 +411,22 @@ function sanitizeCommandDiagnostic(error) {
     const text = Buffer.isBuffer(value) ? value.toString("utf8") : value;
     if (typeof text === "string" && text.trim() !== "") parts.push(text);
   }
-  if (parts.length === 0) return undefined;
+  // A timeout, an output-limit guard or a spawn failure rejects without captured
+  // output, and the error's own identity is then the only cause available.
+  if (parts.length === 0) {
+    const fallback = [error?.code, error?.message]
+      .filter((value) => typeof value === "string" && value.trim() !== "")
+      .join(": ");
+    if (fallback === "" || CREDENTIAL_DIAGNOSTIC_PATTERN.test(fallback)) return undefined;
+    return fallback.slice(0, COMMAND_DIAGNOSTIC_LIMIT);
+  }
   const lines = parts
     .join("\n")
     .split(/\r?\n/)
     .map((line) => line.replace(/\/\/[^/@\s]*@/g, "//"))
+    // Pre-signed registry and blob URLs carry their credential in the query
+    // string or fragment, so neither may survive into a published artifact.
+    .map((line) => line.replace(/https?:\/\/[^\s?#]*[?#][^\s]*/gi, (match) => `${match.split(/[?#]/)[0]}?<redacted>`))
     .map((line) => line.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ""))
     .filter((line) => line.trim() !== "")
     .filter((line) => !CREDENTIAL_DIAGNOSTIC_PATTERN.test(line));
