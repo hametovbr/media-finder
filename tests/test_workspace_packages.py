@@ -1,5 +1,6 @@
 import ast
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -42,6 +43,17 @@ def test_product_version_is_lockstep_across_workspace_metadata_and_lock() -> Non
     assert json.loads((UI_ROOT / "package.json").read_text(encoding="utf-8"))["version"] == (
         product_version
     )
+
+    # The composition root never supplies this value, so the default in the
+    # adapter is the version the running server reports.
+    server_adapter = (
+        ROOT / "apps" / "server" / "src" / "media_finder_server" / "control_gateway.py"
+    ).read_text(encoding="utf-8")
+    assert re.findall(
+        r'^\s*build_version\s*:\s*str\s*=\s*"([^"]+)"\s*,?\s*$',
+        server_adapter,
+        re.MULTILINE,
+    ) == [product_version]
 
     locked = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
     workspace_names = {_project(path)["name"] for path in WORKSPACE_PROJECTS}

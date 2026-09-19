@@ -61,6 +61,11 @@ CONFORMANCE_FIXTURES: Final[tuple[str, ...]] = (
     "packages/modules/metadata-tmdb/src/media_finder_metadata_tmdb/fixtures/conformance.json",
     "packages/modules/release-prowlarr/src/media_finder_release_prowlarr/fixtures/conformance.json",
 )
+# The version the running server reports is a production default inside the
+# composition adapter and nothing else derives it, so a release must rewrite it
+# like every other version-bearing surface.
+SERVER_VERSION_MODULE: Final[str] = "apps/server/src/media_finder_server/control_gateway.py"
+SERVER_VERSION_FIELD: Final[str] = "build_version"
 WORKSPACE_NAMES: Final[frozenset[str]] = frozenset(name for _, name in WORKSPACE_PROJECTS)
 _VERSION_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
@@ -466,6 +471,26 @@ def _assignment_bytes(content: bytes, field: str, old_value: str, new_value: str
     matches = list(pattern.finditer(text))
     if len(matches) != 1:
         raise PreparationError(f"{field} must have exactly one canonical assignment")
+    match = matches[0]
+    return (text[: match.start("value")] + new_value + text[match.end("value") :]).encode("utf-8")
+
+
+def _annotated_default_bytes(content: bytes, field: str, old_value: str, new_value: str) -> bytes:
+    """Rewrite one annotated-and-assigned string default in a Python module."""
+
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise PreparationError(f"{field} owner file is not UTF-8") from error
+    pattern = re.compile(
+        rf"^(?P<prefix>[ \t]*{re.escape(field)}[ \t]*:[ \t]*str[ \t]*=[ \t]*\")"
+        rf"(?P<value>{re.escape(old_value)})"
+        rf"(?P<suffix>\"[ \t]*,?[ \t]*)$",
+        re.MULTILINE,
+    )
+    matches = list(pattern.finditer(text))
+    if len(matches) != 1:
+        raise PreparationError(f"{field} must have exactly one canonical annotated default")
     match = matches[0]
     return (text[: match.start("value")] + new_value + text[match.end("value") :]).encode("utf-8")
 
@@ -893,6 +918,14 @@ def prepare_release(
             version,
             fixture_relative,
         )
+
+    server_version_original = _read_required_file(root, SERVER_VERSION_MODULE)
+    expected_contents[SERVER_VERSION_MODULE] = _annotated_default_bytes(
+        server_version_original,
+        SERVER_VERSION_FIELD,
+        current,
+        version,
+    )
 
     lock_relative = "uv.lock"
     lock_original = _read_required_file(root, lock_relative)

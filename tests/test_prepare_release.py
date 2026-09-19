@@ -16,6 +16,27 @@ from types import ModuleType
 import pytest
 
 ROOT = Path(__file__).parents[1]
+# Every fixture is a `git archive HEAD` of this checkout, so the baseline version
+# is read from the committed tree rather than the working copy, and the requested
+# version follows from it. The suite therefore passes whatever version the tree
+# carries and never pins the one it carried when it was written.
+BASE_VERSION = subprocess.run(
+    ["git", "show", "HEAD:VERSION"],
+    cwd=ROOT,
+    check=True,
+    capture_output=True,
+    text=True,
+).stdout.strip()
+PREVIOUS_STABLE_TAG = f"v{BASE_VERSION}"
+
+
+def _next_version(value: str) -> str:
+    major, minor, _patch = (int(part) for part in value.split("."))
+    return f"{major}.{minor + 1}.0"
+
+
+NEXT_VERSION = _next_version(BASE_VERSION)
+BASE_VERSION_PATTERN = BASE_VERSION.replace(".", r"\.")
 EXPECTED_PYPROJECTS = (
     "apps/server/pyproject.toml",
     "packages/builtin-ui/pyproject.toml",
@@ -39,6 +60,10 @@ EXPECTED_FIXTURES = (
     "packages/modules/metadata-tmdb/src/media_finder_metadata_tmdb/fixtures/conformance.json",
     "packages/modules/release-prowlarr/src/media_finder_release_prowlarr/fixtures/conformance.json",
 )
+# The version the running server reports lives in a production default, so a
+# release that leaves it behind publishes a stale build version. It is therefore a
+# version-derived surface like any other.
+EXPECTED_SERVER_VERSION_MODULE = "apps/server/src/media_finder_server/control_gateway.py"
 
 
 def _load_preparer() -> ModuleType:
@@ -116,7 +141,7 @@ def _snapshot(
     root: Path,
     base_commit: str,
     *,
-    version: str = "0.5.0",
+    version: str = NEXT_VERSION,
 ) -> bytes:
     repository_url = "https://github.com/example/media-finder"
     previous_sha = base_commit
@@ -136,9 +161,9 @@ def _snapshot(
         },
         "requested_version": version,
         "previous_stable": {
-            "tag": "v0.4.0",
+            "tag": PREVIOUS_STABLE_TAG,
             "sha": previous_sha,
-            "url": f"{repository_url}/releases/tag/v0.4.0",
+            "url": f"{repository_url}/releases/tag/{PREVIOUS_STABLE_TAG}",
         },
         "history": {
             "commits": [
@@ -182,13 +207,14 @@ def _make_lock_tool(
             "'    { name = \\\"uv\\\" },', 1)\n"
         ),
         "wrong-version": (
-            "text = text.replace('version = \\\"0.5.0\\\"', 'version = \\\"0.4.0\\\"', 1)\n"
+            f"text = text.replace('version = \\\"{NEXT_VERSION}\\\"', "
+            f"'version = \\\"{BASE_VERSION}\\\"', 1)\n"
         ),
         "mode": (
             "readme = pathlib.Path('README.md')\nreadme.chmod(readme.stat().st_mode ^ 0o111)\n"
         ),
         "allowed-mode": (
-            "for relative in ('VERSION', 'uv.lock', 'docs/releases/0.5.0.md'):\n"
+            f"for relative in ('VERSION', 'uv.lock', 'docs/releases/{NEXT_VERSION}.md'):\n"
             "    target = pathlib.Path(relative)\n"
             "    target.chmod(target.stat().st_mode | 0o111)\n"
         ),
@@ -218,8 +244,8 @@ def _make_lock_tool(
         "    pathlib.Path(sys.argv[1]).write_text('called')\n"
         "path = pathlib.Path('uv.lock')\n"
         "text = path.read_text()\n"
-        "text, count = re.subn(r'(?m)^version = \\\"0\\.4\\.0\\\"$', "
-        "'version = \\\"0.5.0\\\"', text)\n"
+        f"text, count = re.subn(r'(?m)^version = \\\"{BASE_VERSION_PATTERN}\\\"$', "
+        f"'version = \\\"{NEXT_VERSION}\\\"', text)\n"
         "if count != 9:\n"
         "    raise SystemExit(f'expected nine workspace records, got {count}')\n"
         + mutation_scripts[mutation]
@@ -268,7 +294,7 @@ def test_captured_history_links_are_identity_bound_and_markdown_safe(tmp_path: P
             payload[section][entries][0].update(replacement)
         raw = json.dumps(payload).encode("utf-8")
         with pytest.raises(preparer.PreparationError, match=r"identity|unsafe URL"):
-            preparer._parse_snapshot(raw, "0.5.0")
+            preparer._parse_snapshot(raw, NEXT_VERSION)
 
 
 def test_prepare_updates_all_lockstep_surfaces_and_only_allowlisted_files(tmp_path: Path) -> None:
@@ -284,7 +310,7 @@ def test_prepare_updates_all_lockstep_surfaces_and_only_allowlisted_files(tmp_pa
 
     result = preparer.prepare_release(
         fixture_root,
-        version="0.5.0",
+        version=NEXT_VERSION,
         snapshot_path=snapshot,
         lock_tool=lock_tool,
     )
@@ -296,11 +322,12 @@ def test_prepare_updates_all_lockstep_surfaces_and_only_allowlisted_files(tmp_pa
         "packages/builtin-ui/package.json",
         *EXPECTED_MANIFESTS,
         *EXPECTED_FIXTURES,
+        EXPECTED_SERVER_VERSION_MODULE,
         "uv.lock",
-        "docs/releases/0.5.0.md",
+        f"docs/releases/{NEXT_VERSION}.md",
     }
     assert set(result["changed_files"]) == expected_changed
-    assert result["version"] == "0.5.0"
+    assert result["version"] == NEXT_VERSION
     assert result["base_commit"] == base_commit
     assert result["candidate_tree_sha256"] != result["base_tree_sha256"]
     assert result["expected_tree"]
@@ -313,35 +340,38 @@ def test_prepare_updates_all_lockstep_surfaces_and_only_allowlisted_files(tmp_pa
         .split("\0")
         if path
     )
-    assert current_paths - set(before) == {"docs/releases/0.5.0.md"}
-    assert set(current_paths - set(before)) <= {"docs/releases/0.5.0.md"}
+    assert current_paths - set(before) == {f"docs/releases/{NEXT_VERSION}.md"}
+    assert set(current_paths - set(before)) <= {f"docs/releases/{NEXT_VERSION}.md"}
 
     import tomllib
 
-    assert (fixture_root / "VERSION").read_text() == "0.5.0\n"
+    assert (fixture_root / "VERSION").read_text() == f"{NEXT_VERSION}\n"
     assert {
         tomllib.loads((fixture_root / path).read_text())["project"]["version"]
         for path in EXPECTED_PYPROJECTS
-    } == {"0.5.0"}
+    } == {NEXT_VERSION}
     assert (
         json.loads((fixture_root / "packages/builtin-ui/package.json").read_text())["version"]
-        == "0.5.0"
+        == NEXT_VERSION
     )
+    assert f'build_version: str = "{NEXT_VERSION}"' in (
+        fixture_root / EXPECTED_SERVER_VERSION_MODULE
+    ).read_text(encoding="utf-8")
     assert {
         tomllib.loads((fixture_root / path).read_text())["module_version"]
         for path in EXPECTED_MANIFESTS
-    } == {"0.5.0"}
+    } == {NEXT_VERSION}
 
     locked = tomllib.loads((fixture_root / "uv.lock").read_text())
     assert {
         package["version"]
         for package in locked["package"]
         if package["name"].startswith("media-finder") and package["name"] != "media-finder-tooling"
-    } == {"0.5.0"}
+    } == {NEXT_VERSION}
     for path in EXPECTED_FIXTURES:
         fixture = json.loads((fixture_root / path).read_text())
         manifest_path = fixture_root / path.replace("/fixtures/conformance.json", "/module.toml")
-        assert fixture["module_version"] == "0.5.0"
+        assert fixture["module_version"] == NEXT_VERSION
         assert fixture["manifest_sha256"] == hashlib.sha256(manifest_path.read_bytes()).hexdigest()
 
     for path, content in before.items():
@@ -357,7 +387,7 @@ def test_prepare_invokes_owning_lock_tool_without_offline_override(tmp_path: Pat
 
     preparer.prepare_release(
         fixture_root,
-        version="0.5.0",
+        version=NEXT_VERSION,
         snapshot_path=snapshot,
         lock_tool=lock_tool,
     )
@@ -375,11 +405,11 @@ def test_prepare_rejects_a_dirty_or_unexpected_tree_before_mutation(tmp_path: Pa
     with pytest.raises(preparer.PreparationError, match=r"unexpected|dirty"):
         preparer.prepare_release(
             fixture_root,
-            version="0.5.0",
+            version=NEXT_VERSION,
             snapshot_path=snapshot,
             lock_tool=lock_tool,
         )
-    assert (fixture_root / "VERSION").read_text() == "0.4.0\n"
+    assert (fixture_root / "VERSION").read_text() == f"{BASE_VERSION}\n"
 
 
 def test_prepare_rejects_owner_lock_dependency_mutation_and_restores_candidate(
@@ -393,12 +423,12 @@ def test_prepare_rejects_owner_lock_dependency_mutation_and_restores_candidate(
     with pytest.raises(preparer.PreparationError, match="changed dependency records"):
         preparer.prepare_release(
             fixture_root,
-            version="0.5.0",
+            version=NEXT_VERSION,
             snapshot_path=snapshot,
             lock_tool=lock_tool,
         )
     assert _git(fixture_root, "status", "--porcelain").stdout == ""
-    assert (fixture_root / "VERSION").read_text() == "0.4.0\n"
+    assert (fixture_root / "VERSION").read_text() == f"{BASE_VERSION}\n"
 
 
 def test_prepare_rejects_owner_lock_workspace_version_mutation_and_restores_candidate(
@@ -415,12 +445,12 @@ def test_prepare_rejects_owner_lock_workspace_version_mutation_and_restores_cand
     ):
         preparer.prepare_release(
             fixture_root,
-            version="0.5.0",
+            version=NEXT_VERSION,
             snapshot_path=snapshot,
             lock_tool=lock_tool,
         )
     assert _git(fixture_root, "status", "--porcelain").stdout == ""
-    assert (fixture_root / "VERSION").read_text() == "0.4.0\n"
+    assert (fixture_root / "VERSION").read_text() == f"{BASE_VERSION}\n"
 
 
 def test_prepare_rejects_directory_replacement_and_restores_tree(tmp_path: Path) -> None:
@@ -435,7 +465,7 @@ def test_prepare_rejects_directory_replacement_and_restores_tree(tmp_path: Path)
     with pytest.raises(preparer.PreparationError, match="unexpected"):
         preparer.prepare_release(
             fixture_root,
-            version="0.5.0",
+            version=NEXT_VERSION,
             snapshot_path=snapshot,
             lock_tool=lock_tool,
         )
@@ -463,7 +493,7 @@ def test_prepare_rejects_outside_hardlink_without_corrupting_sentinel(tmp_path: 
     with pytest.raises(preparer.PreparationError, match="unexpected"):
         preparer.prepare_release(
             fixture_root,
-            version="0.5.0",
+            version=NEXT_VERSION,
             snapshot_path=snapshot,
             lock_tool=lock_tool,
         )
@@ -488,7 +518,7 @@ def test_prepare_rejects_owner_mode_only_tamper_and_restores_mode(tmp_path: Path
     with pytest.raises(preparer.PreparationError, match=r"unexpected diff"):
         preparer.prepare_release(
             fixture_root,
-            version="0.5.0",
+            version=NEXT_VERSION,
             snapshot_path=snapshot,
             lock_tool=lock_tool,
         )
@@ -507,12 +537,12 @@ def test_prepare_rejects_allowlisted_mode_tamper_and_restores_all_modes(
         relative: (fixture_root / relative).stat().st_mode & 0o777
         for relative in ("VERSION", "uv.lock")
     }
-    notes = fixture_root / "docs/releases/0.5.0.md"
+    notes = fixture_root / f"docs/releases/{NEXT_VERSION}.md"
 
     with pytest.raises(preparer.PreparationError, match="mode"):
         preparer.prepare_release(
             fixture_root,
-            version="0.5.0",
+            version=NEXT_VERSION,
             snapshot_path=snapshot,
             lock_tool=lock_tool,
         )
@@ -538,13 +568,13 @@ def test_prepare_is_repeatable_for_the_same_immutable_snapshot(tmp_path: Path) -
 
     first = preparer.prepare_release(
         first_root,
-        version="0.5.0",
+        version=NEXT_VERSION,
         snapshot_path=first_snapshot,
         lock_tool=lock_tool,
     )
     second = preparer.prepare_release(
         second_root,
-        version="0.5.0",
+        version=NEXT_VERSION,
         snapshot_path=second_snapshot,
         lock_tool=lock_tool,
     )
@@ -566,15 +596,15 @@ def test_notes_are_english_traceable_and_explicitly_unreviewed(tmp_path: Path) -
 
     result = preparer.prepare_release(
         fixture_root,
-        version="0.5.0",
+        version=NEXT_VERSION,
         snapshot_path=snapshot,
         lock_tool=lock_tool,
     )
     notes = (fixture_root / result["notes_path"]).read_text()
 
     assert "Automatically generated from repository history. Not editorially reviewed." in notes
-    assert "v0.4.0" in notes
-    assert f"v0.4.0..{base_commit}" in notes
+    assert PREVIOUS_STABLE_TAG in notes
+    assert f"{PREVIOUS_STABLE_TAG}..{base_commit}" in notes
     assert "https://github.com/example/media-finder/pull/41" in notes
     assert f"https://github.com/example/media-finder/commit/{'a' * 40}" in notes
     assert f"https://github.com/example/media-finder/blob/{base_commit}/docs/operations.md" in notes
@@ -602,7 +632,7 @@ def test_cli_emits_machine_readable_candidate_result(tmp_path: Path) -> None:
             "--root",
             str(fixture_root),
             "--version",
-            "0.5.0",
+            NEXT_VERSION,
             "--snapshot",
             str(snapshot),
             "--result",
@@ -617,5 +647,5 @@ def test_cli_emits_machine_readable_candidate_result(tmp_path: Path) -> None:
 
     result = json.loads(completed.stdout)
     assert json.loads(output.read_text()) == result
-    assert result["version"] == "0.5.0"
-    assert result["notes_path"] == "docs/releases/0.5.0.md"
+    assert result["version"] == NEXT_VERSION
+    assert result["notes_path"] == f"docs/releases/{NEXT_VERSION}.md"
