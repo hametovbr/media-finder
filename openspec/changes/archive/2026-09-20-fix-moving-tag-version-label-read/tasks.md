@@ -14,7 +14,7 @@
 - [x] 3.1 Run `node --test scripts/release-publication.test.mjs`, `node --test scripts/validate-delivery.test.mjs`, `node scripts/validate-delivery.mjs`, `node --test scripts/release-automation.test.mjs` and `pnpm delivery:test`.
 - [x] 3.2 Run `pnpm docs:check` and strict `pnpm spec:validate`.
 - [x] 3.3 Confirm against the registry that the delivered revision refuses the live `latest` label and that the fixed revision reconciles the same label, so the fixture is tied to the observed registry state.
-- [ ] 3.4 After delivery, re-run the manual entry point for `v0.5.0` and verify the published tags, digest, both architectures and source revision. Pending: it follows the merge of this change, which has not happened yet.
+- [x] 3.4 After delivery, re-run the manual entry point for `v0.5.0` and verify the published tags, digest, both architectures and source revision.
 
 ## Evidence
 
@@ -53,3 +53,18 @@
   `release-automation.test.mjs` 113/113, `pnpm delivery:test` 195/195,
   `pnpm docs:check` 502 files, strict `pnpm spec:validate` 9/9 (10/10 while this
   change was still active, before archiving).
+
+## Publication evidence (after merge)
+
+- Manual entry point re-run on `main` at `54da66a`: run `35470859534` succeeded — all
+  seven `verification/*` contexts passed, `repair` completed, and the release-event
+  `publish` job was correctly skipped for the dispatch.
+- Registry observation after the run: `v0.5.0`, `0.5` and `latest` all resolve to the
+  same digest `sha256:18cec06e766fbaf3710223b519fa997b1c8c3e29164f905f16807a9947fb46e0`,
+  on `linux/amd64` and `linux/arm64`, each carrying
+  `org.opencontainers.image.version = 0.5.0` and
+  `org.opencontainers.image.revision = c91b44a5557bb727d315331346894f26dd07bdef`.
+- The release object is unchanged: `v0.5.0` still targets
+  `c91b44a5557bb727d315331346894f26dd07bdef`, is neither draft nor prerelease.
+- This evidence was captured after the merge, as task 3.4 required; the change itself
+  verified only that the publisher could reach this point.
