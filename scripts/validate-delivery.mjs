@@ -300,6 +300,16 @@ function normalizedExpression(value) {
   return String(value ?? "").replaceAll(/\s+/g, " ").trim();
 }
 
+function hasExactMapping(value, expected) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const actualKeys = Object.keys(value).sort();
+  const expectedKeys = Object.keys(expected).sort();
+  return (
+    JSON.stringify(actualKeys) === JSON.stringify(expectedKeys) &&
+    expectedKeys.every((key) => value[key] === expected[key])
+  );
+}
+
 const VERIFICATION_JOBS = [
   "documentation",
   "python",
@@ -316,6 +326,17 @@ const BROWSER_EVIDENCE_OUTPUTS = [
   "packages/builtin-ui/web/browser-evidence/results",
   "packages/builtin-ui/web/browser-evidence/provenance.json",
 ];
+const STABLE_PUBLICATION_CONCURRENCY_GROUP = "stable-container-publication";
+const RELEASE_PUBLICATION_STEP_NAME = "Publish and verify stable image";
+const RELEASE_PUBLICATION_COMMAND = "node scripts/release-publication.mjs";
+const RELEASE_PUBLICATION_EVIDENCE_ACTION =
+  "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
+const RELEASE_PREPARATION_WORKFLOW_PATH = ".github/workflows/prepare-release.yaml";
+const RELEASE_CONTROLLER_CONCURRENCY_GROUP = "release-controller";
+const RELEASE_CONTROLLER_STEP_NAME = "Request stable release";
+const RELEASE_CONTROLLER_ACTION =
+  "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd";
+const RELEASE_CONTROLLER_SCRIPT_COMMAND = "scripts/release-automation.mjs";
 
 const WORKSPACE_DISTRIBUTIONS = [
   "media-finder",
@@ -396,6 +417,234 @@ function recursivelyListTests(root) {
   }
   visit(path.join(root, "tests"));
   return files;
+}
+
+function containsCredentialReference(value, key = "") {
+  if (
+    key.startsWith("RELEASE_APP_") ||
+    (key !== "persist-credentials" &&
+      /(?:^|[_-])(token|secret|password|private[_-]?key|credential(?:s)?|authorization)(?:$|[_-])/i.test(key))
+  ) {
+    return true;
+  }
+  if (typeof value === "string") {
+    return /\$\{\{\s*(?:secrets\.|github\.token\b)/.test(value);
+  }
+  if (value === null || typeof value !== "object") return false;
+  return Object.entries(value).some(([childKey, childValue]) =>
+    containsCredentialReference(childValue, childKey),
+  );
+}
+
+function hasExactKeys(value, expectedKeys) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  return JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...expectedKeys].sort());
+}
+
+function validateReleasePreparationWorkflow(root, failures) {
+  const workflowText = readText(root, RELEASE_PREPARATION_WORKFLOW_PATH, failures);
+  if (!workflowText) return;
+
+  let workflow;
+  try {
+    workflow = YAML.parse(workflowText) ?? {};
+  } catch {
+    failures.push(`${RELEASE_PREPARATION_WORKFLOW_PATH}: invalid YAML`);
+    return;
+  }
+
+  const dispatch = workflow.on?.workflow_dispatch;
+  requireValue(
+    failures,
+    hasExactKeys(workflow.on, ["workflow_dispatch"]),
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: stable release preparation must use workflow_dispatch only`,
+  );
+  requireValue(
+    failures,
+    dispatch !== null && typeof dispatch === "object" && !Array.isArray(dispatch),
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: workflow_dispatch configuration is required`,
+  );
+  requireValue(
+    failures,
+    hasExactKeys(dispatch?.inputs, ["version"]),
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: workflow_dispatch must expose only the version input`,
+  );
+  const versionInput = dispatch?.inputs?.version;
+  requireValue(
+    failures,
+    versionInput?.required === true && versionInput?.type === "string",
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: version input must be a required string`,
+  );
+
+  requireValue(
+    failures,
+    hasExactMapping(workflow.permissions, { actions: "read", contents: "read" }),
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: workflow token permissions must be limited to actions read and contents read`,
+  );
+  requireValue(
+    failures,
+    workflow.concurrency?.group === RELEASE_CONTROLLER_CONCURRENCY_GROUP,
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: controller concurrency must use the constant repository-wide group`,
+  );
+  requireValue(
+    failures,
+    workflow.concurrency?.["cancel-in-progress"] === false,
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: controller concurrency must not cancel in-progress runs`,
+  );
+
+  const jobs = workflow.jobs;
+  const jobNames = jobs && typeof jobs === "object" && !Array.isArray(jobs) ? Object.keys(jobs) : [];
+  requireValue(
+    failures,
+    jobNames.length === 1 && jobNames[0] === "release",
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: trusted release controller must be the only job`,
+  );
+  const job = jobs?.release;
+  requireValue(
+    failures,
+    normalizedExpression(job?.if) ===
+      "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}",
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: controller job must guard workflow_dispatch on main`,
+  );
+  requireValue(
+    failures,
+    job?.["timeout-minutes"] === 330,
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: controller job must have a 330-minute timeout`,
+  );
+  requireValue(
+    failures,
+    job?.permissions === undefined ||
+      hasExactMapping(job.permissions, { actions: "read", contents: "read" }),
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: controller job permissions must remain read-only`,
+  );
+  requireValue(
+    failures,
+    job?.["continue-on-error"] !== true &&
+      !(job?.steps ?? []).some((step) => step?.["continue-on-error"] === true),
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: controller failures must not be masked`,
+  );
+  requireValue(
+    failures,
+    !containsCredentialReference(workflow.env),
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: credentials must not be configured at workflow scope`,
+  );
+  requireValue(
+    failures,
+    !containsCredentialReference(job?.env),
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: credentials must not be configured at job scope`,
+  );
+
+  const steps = Array.isArray(job?.steps) ? job.steps : [];
+  const stepIndex = (predicate) => steps.findIndex(predicate);
+  const checkoutIndex = stepIndex((step) => String(step?.uses ?? "").startsWith("actions/checkout@"));
+  const pythonIndex = stepIndex((step) => String(step?.uses ?? "").startsWith("actions/setup-python@"));
+  const pnpmIndex = stepIndex((step) => String(step?.uses ?? "").startsWith("pnpm/action-setup@"));
+  const nodeIndex = stepIndex((step) => String(step?.uses ?? "").startsWith("actions/setup-node@"));
+  const uvIndex = stepIndex((step) => String(step?.uses ?? "").startsWith("astral-sh/setup-uv@"));
+  const controllerIndexes = steps
+    .map((step, index) => (step?.name === RELEASE_CONTROLLER_STEP_NAME ? index : -1))
+    .filter((index) => index >= 0);
+  const controllerIndex = controllerIndexes[0] ?? -1;
+  const controller = controllerIndex >= 0 ? steps[controllerIndex] : undefined;
+  const checkout = checkoutIndex >= 0 ? steps[checkoutIndex] : undefined;
+  const pythonSetup = pythonIndex >= 0 ? steps[pythonIndex] : undefined;
+  const pnpmSetup = pnpmIndex >= 0 ? steps[pnpmIndex] : undefined;
+  const nodeSetup = nodeIndex >= 0 ? steps[nodeIndex] : undefined;
+  const uvSetup = uvIndex >= 0 ? steps[uvIndex] : undefined;
+
+  requireValue(
+    failures,
+    checkoutIndex >= 0 &&
+      checkout?.with?.ref === "${{ github.sha }}" &&
+      checkout?.with?.["fetch-depth"] === 0 &&
+      checkout?.with?.["persist-credentials"] === false,
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: trusted checkout must use github.sha, complete history, and no persisted credentials`,
+  );
+  requireValue(
+    failures,
+    pythonIndex >= 0 && pythonSetup?.with?.["python-version"] === "3.13",
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: controller must use the pinned Python 3.13 toolchain`,
+  );
+  requireValue(
+    failures,
+    pnpmIndex >= 0 &&
+      pnpmSetup?.with?.version === "11.19.0" &&
+      pnpmSetup?.with?.run_install === false,
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: controller must use the pinned pnpm toolchain without implicit install`,
+  );
+  requireValue(
+    failures,
+    nodeIndex >= 0 && nodeSetup?.with?.["node-version"] === "24",
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: controller must use the pinned Node 24 toolchain`,
+  );
+  requireValue(
+    failures,
+    uvIndex >= 0 && uvSetup?.with?.version === "0.12.5",
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: controller must use the pinned uv 0.12.5 toolchain`,
+  );
+
+  const uvInstallIndex = stepIndex((step) => runsShellCommand(step, "uv sync --frozen --all-groups"));
+  const pnpmInstallIndex = stepIndex((step) => runsShellCommand(step, "pnpm install --frozen-lockfile"));
+  requireValue(
+    failures,
+    uvInstallIndex >= 0 && pnpmInstallIndex >= 0 &&
+      controllerIndex > uvInstallIndex && controllerIndex > pnpmInstallIndex,
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: frozen Python and Node installs must complete before credentials are exposed`,
+  );
+
+  requireValue(
+    failures,
+    controllerIndexes.length === 1 && controllerIndex === steps.length - 1,
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: the trusted controller must be the final single step`,
+  );
+  requireValue(
+    failures,
+    controller?.uses === RELEASE_CONTROLLER_ACTION,
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: final controller step must use the pinned github-script action`,
+  );
+  requireValue(
+    failures,
+    hasExactMapping(controller?.env, {
+      RELEASE_APP_CLIENT_ID: "${{ vars.RELEASE_APP_CLIENT_ID }}",
+      RELEASE_APP_PRIVATE_KEY: "${{ secrets.RELEASE_APP_PRIVATE_KEY }}",
+      RELEASE_EVIDENCE_PATH: "${{ runner.temp }}/release-evidence.json",
+      RELEASE_VERSION: "${{ inputs.version }}",
+    }),
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: App credentials must be confined to the final controller environment`,
+  );
+  requireValue(
+    failures,
+    hasExactKeys(controller?.with, ["script"]) && typeof controller?.with?.script === "string",
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: final controller must provide only its trusted script`,
+  );
+  const controllerScript = String(controller?.with?.script ?? "");
+  requireValue(
+    failures,
+    /exec\.exec\(\s*"node"\s*,\s*\[\s*"scripts\/release-automation\.mjs"\s*,\s*"--phase"\s*,\s*"request"\s*,\s*"--version"\s*,\s*process\.env\.RELEASE_VERSION\s*,?\s*\]/s.test(
+        controllerScript,
+      ),
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: controller must invoke the fixed request command with an argument array`,
+  );
+  requireValue(
+    failures,
+    !controllerScript.includes("${{") && !controllerScript.includes("shell") && !controllerScript.includes("sh -c"),
+    `${RELEASE_PREPARATION_WORKFLOW_PATH}: controller script must not interpolate inputs or invoke a shell`,
+  );
+
+  for (const [index, step] of steps.entries()) {
+    if (index === controllerIndex) continue;
+    requireValue(
+      failures,
+      !containsCredentialReference(step),
+      `${RELEASE_PREPARATION_WORKFLOW_PATH}: candidate and setup steps must not receive release credentials`,
+    );
+    requireValue(
+      failures,
+      !String(step?.run ?? "").includes(RELEASE_CONTROLLER_SCRIPT_COMMAND) &&
+        !String(step?.run ?? "").includes("scripts/prepare-release.py"),
+      `${RELEASE_PREPARATION_WORKFLOW_PATH}: candidate scripts must run only inside the trusted controller`,
+    );
+  }
 }
 
 function validateActionPins(workflows, failures) {
@@ -787,6 +1036,16 @@ function validateVerification(root, verify, verifyText, failures) {
       `.github/workflows/verify.yaml: missing ${job} job`,
     );
   }
+  const releaseScriptTests = stepByName(
+    verify.jobs?.documentation,
+    "Test release automation scripts",
+  );
+  requireValue(
+    failures,
+    releaseScriptTests?.run ===
+      "node --test scripts/release-publication.test.mjs scripts/release-automation.test.mjs",
+    ".github/workflows/verify.yaml: documentation job must run release-publication.test.mjs and release-automation.test.mjs",
+  );
   const unitCommands = (verify.jobs?.unit?.steps ?? []).map((step) => step.run ?? "").join("\n");
   const browserCommands = (verify.jobs?.browser?.steps ?? [])
     .map((step) => step.run ?? "")
@@ -952,6 +1211,14 @@ function validateVerification(root, verify, verifyText, failures) {
     );
   }
 
+  requireValue(
+    failures,
+    runsPytest(stepByName(verify.jobs?.unit, "Core and unit suites"), [
+      "tests/test_prepare_release.py",
+    ]),
+    ".github/workflows/verify.yaml: unit job must run tests/test_prepare_release.py",
+  );
+
   const listedTestPaths = testPathsFromCommands(verify);
   for (const requiredSuite of ["tests/core", "tests/server", "tests/characterization"]) {
     requireValue(
@@ -1085,9 +1352,19 @@ function validatePublishWorkflows(ci, release, failures) {
 
   requireValue(
     failures,
-    !Object.hasOwn(release.on ?? {}, "push") &&
-      release.on?.release?.types?.includes("published"),
+    JSON.stringify(Object.keys(release.on ?? {}).sort()) === JSON.stringify(["release"]) &&
+      JSON.stringify(release.on?.release?.types ?? []) === JSON.stringify(["published"]),
     ".github/workflows/release.yaml: stable publishing must use published releases only",
+  );
+  requireValue(
+    failures,
+    release.concurrency?.group === STABLE_PUBLICATION_CONCURRENCY_GROUP,
+    ".github/workflows/release.yaml: stable publication concurrency group must serialize every release",
+  );
+  requireValue(
+    failures,
+    release.concurrency?.["cancel-in-progress"] === false,
+    ".github/workflows/release.yaml: stable publication concurrency must not cancel in-progress releases",
   );
   const stableVerification = release.jobs?.verification;
   const stable = release.jobs?.publish;
@@ -1117,49 +1394,116 @@ function validatePublishWorkflows(ci, release, failures) {
     stable?.permissions?.packages === "write",
     ".github/workflows/release.yaml: only the gated stable publish job needs packages write",
   );
-  const stableBuild = (stable?.steps ?? []).find((step) =>
-    String(step.uses ?? "").startsWith("docker/build-push-action@"),
+  requireValue(
+    failures,
+    stableVerification?.permissions?.packages !== "write",
+    ".github/workflows/release.yaml: stable verification job must not receive package write permission",
   );
   requireValue(
     failures,
-    stableBuild?.with?.push === true &&
-      stableBuild?.with?.platforms === "linux/amd64,linux/arm64",
-    ".github/workflows/release.yaml: stable publish must push a multi-architecture image",
-  );
-  const semver = (stable?.steps ?? []).find(
-    (step) => step.name === "Validate stable SemVer tag",
+    hasExactMapping(stableVerification?.permissions, { contents: "read" }),
+    ".github/workflows/release.yaml: stable verification job must use read-only permissions",
   );
   requireValue(
     failures,
-    semver?.env?.RELEASE_TAG === "${{ github.event.release.tag_name }}" &&
-      String(semver?.run ?? "").includes("Stable release tags must use vX.Y.Z SemVer."),
-    ".github/workflows/release.yaml: stable tag must be validated as vX.Y.Z before publishing",
+    stable?.permissions?.contents === "read",
+    ".github/workflows/release.yaml: stable publisher must retain read-only contents access",
   );
-
-  const metadata = (stable?.steps ?? []).find((step) =>
-    String(step.uses ?? "").startsWith("docker/metadata-action@"),
-  );
-  const stableTags = new Set(
-    String(metadata?.with?.tags ?? "")
-      .split("\n")
-      .map((value) => value.trim())
-      .filter(Boolean),
-  );
-  for (const tag of [
-    "type=semver,pattern=v{{version}},value=${{ github.event.release.tag_name }}",
-    "type=semver,pattern={{major}}.{{minor}},value=${{ github.event.release.tag_name }}",
-    "type=raw,value=latest",
-  ]) {
-    requireValue(
-      failures,
-      stableTags.has(tag),
-      `.github/workflows/release.yaml: stable metadata is missing ${tag}`,
-    );
-  }
   requireValue(
     failures,
-    metadata?.with?.flavor === "latest=false",
-    ".github/workflows/release.yaml: automatic latest tagging must be disabled",
+    hasExactMapping(stable?.permissions, { contents: "read", packages: "write" }),
+    ".github/workflows/release.yaml: stable publisher permissions must be limited to contents read and packages write",
+  );
+  const stableSteps = stable?.steps ?? [];
+  const checkout = stableSteps.find((step) =>
+    String(step.uses ?? "").startsWith("actions/checkout@"),
+  );
+  requireValue(
+    failures,
+    checkout?.with?.ref === "${{ github.sha }}",
+    ".github/workflows/release.yaml: stable publisher checkout must use the release event revision",
+  );
+  requireValue(
+    failures,
+    checkout?.with?.["fetch-depth"] === 0,
+    ".github/workflows/release.yaml: stable publisher checkout must fetch complete history",
+  );
+  requireValue(
+    failures,
+    checkout?.with?.["persist-credentials"] === false,
+    ".github/workflows/release.yaml: stable publisher checkout must disable persisted credentials",
+  );
+  const setupNode = stableSteps.find((step) =>
+    String(step.uses ?? "").startsWith("actions/setup-node@"),
+  );
+  requireValue(
+    failures,
+    setupNode?.with?.["node-version"] === "24",
+    ".github/workflows/release.yaml: stable publisher must use the pinned Node 24 toolchain",
+  );
+  const publisher = stepByName(stable, RELEASE_PUBLICATION_STEP_NAME);
+  requireValue(
+    failures,
+    publisher?.run === RELEASE_PUBLICATION_COMMAND,
+    ".github/workflows/release.yaml: stable publisher must execute scripts/release-publication.mjs",
+  );
+  requireValue(
+    failures,
+    publisher?.env?.RELEASE_TAG === "${{ github.event.release.tag_name }}" &&
+      publisher?.env?.RELEASE_PRERELEASE === "${{ github.event.release.prerelease }}" &&
+      publisher?.env?.RELEASE_DRAFT === "${{ github.event.release.draft }}" &&
+      publisher?.env?.RELEASE_URL === "${{ github.event.release.html_url }}" &&
+      publisher?.env?.IMAGE_NAME === "ghcr.io/${{ github.repository }}" &&
+      publisher?.env?.PUBLICATION_EVIDENCE_PATH === "release-publication-evidence.json",
+    ".github/workflows/release.yaml: stable publisher must pass the release identity and evidence path",
+  );
+  requireValue(
+    failures,
+    !Object.keys(publisher?.env ?? {}).some((key) =>
+      /(token|secret|password|private[_-]?key|credential)/i.test(key),
+    ),
+    ".github/workflows/release.yaml: stable publisher must not expose credentials to the publication script",
+  );
+  const obsoletePublisher = stableSteps.some((step) => {
+    const usage = String(step.uses ?? "");
+    return usage.startsWith("docker/build-push-action@") || usage.startsWith("docker/metadata-action@");
+  });
+  requireValue(
+    failures,
+    !obsoletePublisher,
+    ".github/workflows/release.yaml: stable publisher must not use a direct Docker build or metadata action",
+  );
+  const evidenceUpload = stepByName(stable, "Upload stable publication evidence");
+  requireValue(
+    failures,
+    evidenceUpload?.uses === RELEASE_PUBLICATION_EVIDENCE_ACTION,
+    ".github/workflows/release.yaml: stable publication evidence must use the approved immutable upload-artifact SHA",
+  );
+  requireValue(
+    failures,
+    evidenceUpload?.if === "${{ always() && hashFiles('release-publication-evidence.json') != '' }}",
+    ".github/workflows/release.yaml: stable publication evidence upload must run after publication even on failure",
+  );
+  requireValue(
+    failures,
+    evidenceUpload?.with?.path === "release-publication-evidence.json" &&
+      evidenceUpload?.with?.["if-no-files-found"] === "error" &&
+      evidenceUpload?.with?.["retention-days"] === 90,
+    ".github/workflows/release.yaml: stable publication evidence must retain the bounded artifact",
+  );
+  requireValue(
+    failures,
+    typeof evidenceUpload?.with?.name === "string" &&
+      evidenceUpload.with.name.includes("${{ github.run_id }}") &&
+      evidenceUpload.with.name.includes("${{ github.run_attempt }}"),
+    ".github/workflows/release.yaml: stable publication evidence artifact names must be unique per run attempt",
+  );
+  const publisherIndex = stableSteps.indexOf(publisher);
+  const evidenceIndex = stableSteps.indexOf(evidenceUpload);
+  requireValue(
+    failures,
+    publisherIndex >= 0 && evidenceIndex > publisherIndex,
+    ".github/workflows/release.yaml: stable publication evidence must follow the gated publisher",
   );
 }
 
@@ -1176,11 +1520,13 @@ export function validateDelivery(root = process.cwd(), options = {}) {
   const verifyText = readText(root, verifyPath, failures);
   validateVerification(root, verify, verifyText, failures);
   validatePublishWorkflows(ci, release, failures);
+  validateReleasePreparationWorkflow(root, failures);
   validateActionPins(
     [
       [ciPath, ci],
       [verifyPath, verify],
       [releasePath, release],
+      [RELEASE_PREPARATION_WORKFLOW_PATH, loadYaml(root, RELEASE_PREPARATION_WORKFLOW_PATH, failures)],
     ],
     failures,
   );
