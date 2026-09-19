@@ -4666,7 +4666,8 @@ function releaseNextAction({ status, error } = {}) {
  * Canonical, idempotent structured evidence. Passing an already-projected
  * evidence object returns it unchanged, so a second projection can never drop
  * identities. The projection reports success only with verified publication
- * evidence, and it preserves a caller-supplied next action and error block.
+ * evidence, and it derives the next action and the error block itself, so a
+ * caller-supplied value cannot override them.
  */
 export function buildStructuredEvidence(stateOrEvidence) {
   const value = asObject(stateOrEvidence, "release state");
@@ -4740,9 +4741,9 @@ export function buildStructuredEvidence(stateOrEvidence) {
 
 /**
  * Canonical blocked evidence for a failed or timed-out controller run. It
- * carries the completed boundary when the failure reported one, its own next
- * action and the safe error block, so the workflow summary never replaces them
- * with a generic resume message.
+ * projects the completed boundary, the failure's own next action and the safe
+ * error block through the canonical projection, so the workflow summary reports
+ * the failure's action instead of a generic resume message.
  */
 export function buildBlockedEvidence({ error, environment = process.env } = {}) {
   const failure = error instanceof ReleaseAutomationError

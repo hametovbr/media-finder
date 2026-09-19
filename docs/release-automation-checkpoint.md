@@ -39,8 +39,9 @@ unchanged.
 ## Implemented portions
 
 The [operator guide](release-automation.md) documents the approved target
-behavior. The implementation is an uncommitted working-tree change on the
-checkpoint branch and covers OpenSpec tasks 2.1-2.6 and 3.1-3.5:
+behavior. The implementation is committed on `feat/automated-stable-release`, the
+change is synchronized and archived, and the delivered work covers OpenSpec tasks
+2.1-2.6 and 3.1-3.5:
 
 - **Preparer (1.1-1.3).** Deterministic lockstep version and derived-conformance
   regeneration with full-tree verification, unchanged dependency/API/SDK versions,
@@ -85,21 +86,19 @@ These portions do not establish an operational end-to-end release process.
 
 ## Checkpoint verification
 
-Independent verification and two independent review rounds ran on this frozen
-candidate and both review rounds returned `pass` with Critical 0, Important 0:
+Independent verification and three independent review rounds ran on this change.
+Rounds 2 and 3 returned `pass` with Critical 0 and Important 0 on the frozen
+implementation, and round 4 reviewed the final delivery head and returned
+`needs_revision` with Critical 0 and Important 2; both findings are resolved by the
+follow-up commit recorded here.
 
-- HEAD `1e16ae3eb630cd0b848269b57045d6af30268bf6` on
-  `checkpoint/automated-stable-release-2026-09-16`, 7 modified tracked files, no
-  untracked files, `git diff | sha256sum` =
+- Frozen implementation candidate: `git diff | sha256sum` =
   `25ae122e242e9b26adef205bb08d80f34bee33baf913a570dd6f8e4f13c30495`.
-- This document, `tasks.md` and the operator guide were actualized after that
-  hash. No implementation file was touched, so the reviewed implementation diff is
-  unchanged by this documentation turn. On the actualized worktree revision (the
-  same HEAD with 8 modified tracked files and no untracked files), the
-  documentation check passed for 476 files and strict `pnpm spec:validate`
-  reported 10 passed, 0 failed; both were re-run after these documentation edits.
+- Final delivery head: `feat/automated-stable-release`, one cohesive commit over
+  the checkpoint `1e16ae3eb630cd0b848269b57045d6af30268bf6`, clean worktree with no
+  untracked files.
 
-Gate results reproduced on that candidate:
+Gate results reproduced on the final head:
 
 | Gate | Result |
 | --- | --- |
@@ -108,53 +107,75 @@ Gate results reproduced on that candidate:
 | `pnpm delivery:test` (sandbox-observed) | 155 tests, 155 pass, 0 fail; `scripts/validate-delivery.test.mjs` alone 133/133 |
 | `pnpm delivery:validate` | passed |
 | `pnpm docs:check` | passed for 476 files |
-| `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 pnpm spec:validate` | 10 passed, 0 failed (strict) |
+| `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 pnpm spec:validate` | 9 passed, 0 failed (strict; nine specifications remain after this change was archived) |
 | `uv run ruff format --check .` | 321 files already formatted |
 | `uv run ruff check .` | passed |
 | `uv run mypy` | passed (100 source files) |
 | `uv run pytest` (sandbox-observed) | 628 passed |
 
+Hosted evidence for the final delivery head (run `35448425645`, pull request #36):
+all seven required contexts passed — `documentation`, `python`, `unit`,
+`integration`, `contract`, `browser`, `image` — which covers wheel isolation and
+production-image smoke. The downloadable browser evidence was inspected on this
+head: `provenance.json` records `pullRequest.headSha`
+`706cacc937c683f07c784bda346337377f8b9742`, base
+`66774725cc1b02080dfa819f8fda3c066d3624d3`, the run id and attempt,
+`testOutcome: success` and `missingCaptures: []`; the bundle contains 104 scenario
+directories with 208 capture PNGs plus the Playwright report assets. The producing
+checkout, not the head, is the synthetic pull-request merge commit `190a92a2…`,
+which is expected for a pull-request run.
+
+Authenticated security verification, captured on this candidate:
+
+```console
+$ pnpm security:verify -- --repository hametovbr/media-finder
+$ node scripts/verify-repository-security.mjs -- --repository hametovbr/media-finder
+Repository security verified: hametovbr/media-finder (secret scanning: enabled, push protection: enabled).
+exit=0
+```
+
 Superseded evidence: the earlier "44 controller + 30 publisher" and "20 Python"
 figures hold only for the pre-change revision, and the round-1 candidate
-(`git diff | sha256sum` `9dc14f5bb5e309efa612dd0680696c6234b976561b16ad92de317d23283eb5e0`)
-reported 108 controller tests; the current candidate is 113 + 32. The
-documentation check is 476 files on a quiet worktree whose status was confirmed
-with `git status --short --untracked-files=all`; the 477 reported during
-implementation did not reproduce and is recorded as an evidence mismatch.
+(`git diff | sha256sum`
+`9dc14f5bb5e309efa612dd0680696c6234b976561b16ad92de317d23283eb5e0`) reported 108
+controller tests; the current candidate is 113 + 32. The documentation check is
+476 files on a quiet worktree whose status was confirmed with
+`git status --short --untracked-files=all`; the 477 reported during implementation
+did not reproduce and is recorded as an evidence mismatch. Two earlier rounds
+counted the hosted browser evidence as 313 captures; that figure was wrong because
+it included 105 Playwright report asset PNGs, and it is corrected above.
 
 Sandbox caveat: `pnpm delivery:test` and `uv run pytest` were observed inside the
 restricted sandbox and are not host-confirmed, because no wider execution boundary
 was available in the delegated sessions. They are recorded as sandbox-observed,
 never as host-passed, per [agent execution](agent-execution.md).
 
-Accepted OpenSpec tasks: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 3.1, 3.2,
-3.3, 3.4, 3.5, 4.1 and 4.2 (16 of 22). Task 4.4 is only partially satisfied: both
-review rounds passed and their findings were resolved, but the authenticated
-security verification it also requires is blocked.
+All 22 OpenSpec tasks are closed. Tasks 4.3 and 4.4 are closed on the hosted,
+inspected and authenticated evidence recorded above. Tasks 4.5, 5.2 and 5.3 are
+closed as explicit transfers to separately authorized phases, not as performed
+work: disposable-repository validation of App-created event propagation, final
+delivery through a reviewed pull request, and activation with proven App
+credentials and an authenticated protection read remain outstanding, and the
+archived task list states that in each case.
 
 ## Remaining work and next authorization
 
-- **4.3** needs independent wheel builds, production-image smoke and current
-  hosted browser evidence; none was obtained.
-- **4.4** needs the authenticated `pnpm security:verify` run required by
-  `SECURITY.md`; without live access it is a blocker, not a waived gate.
-- **4.5** needs separate access authorization and a disposable validation
-  repository; App-created PR, `main` and Release event propagation are unvalidated.
-- **5.1** needs the owner's authorization to synchronize the
-  `deployment-and-delivery` delta and archive this change.
-- **5.2** needs delivery through the normal reviewed PR process with seven
-  successful final-candidate checks and confirmed `main`/`edge` provenance.
-- **5.3** needs installation-token issuance, exact permission and
-  repository-scope evidence and an authenticated `main`-branch protection read
-  before the feature can be declared operational.
+Synchronization and archive (5.1) are complete. The remaining gates are:
 
-The next required authorization is canonical-spec synchronization plus archive of
-this change; delivery through a reviewed pull request is separate and follows it.
-Merge remains **NO**: synchronization and archive, the live authenticated checks,
-these six tasks and the seven required checks on a final delivery head are all
-outstanding. A local review pass is not delivery readiness, and this verified
-candidate is an uncommitted worktree state that cannot substitute for those final
-checks.
+- **Delivery (5.2).** Pull request #36 on `feat/automated-stable-release` carries
+  the final head with all seven required checks successful. It still needs a
+  passing exact-head review and a protected squash merge with confirmed
+  `main`/edge provenance, so merge remains **NO** at the time of writing.
+- **4.5.** Disposable-repository validation of App-created PR, `main` and Release
+  event propagation needs separate access authorization and a disposable
+  validation repository. It is a recorded prerequisite of activation.
+- **5.3.** Activation needs installation-token issuance, exact approved permissions
+  and repository scope, and an authenticated `main`-branch protection read before
+  the feature can be declared operational.
+
+The next required action is the exact-head review and merge of pull request #36;
+activation follows only after the App evidence required by 5.3 and the validation
+recorded in 4.5 exist. A passing local review is not delivery readiness.
 
 ### Required design clarification
 
@@ -173,35 +194,38 @@ after the terminal `base_changed` boundary, not in the run that discovers the
 stale base; strict OpenSpec validation and the documentation check passed after
 that edit. The revision made during the repair round was not preceded by a
 recorded `openspec-update-change` invocation, so that earlier provenance remains
-unresolved evidence. Archive is the next required authorization and needs a
-separate owner request; it cannot be chained into the planning turn.
+unresolved evidence. The archive that followed was separately authorized by the
+owner and completed this change.
 
-### Residual clarity debt
+### Review findings
 
-Review finding N1 (Minor) remains open and was deliberately not fixed here
-because the affected files are outside this documentation scope: stale docblocks
-at `scripts/release-automation.mjs` L4669 and L4743-4745, and a legacy comment
-with a non-discriminating assertion at `scripts/release-automation.test.mjs`
-L5368-5379, still describe the removed caller-supplied next-action behavior; the
-assertion passes through the unknown-code fallback and cannot detect a preserved
-caller action. Both reviewers confirmed the behavior itself is satisfied by the
-discriminating neighbouring test. This is clarity debt for a later
-delivery-shaping turn, not a functional gap.
+Review round 4 raised two Important findings, both resolved in the follow-up
+commit recorded here: the authenticated `pnpm security:verify` result is now
+captured in this document instead of being asserted without evidence and
+contradicted elsewhere, and this handoff record now matches the committed and
+archived state instead of describing an uncommitted candidate awaiting archive.
+
+Review finding N1 (Minor) is also resolved. The two stale docblocks in
+`scripts/release-automation.mjs` and the misleading comment on the legacy
+next-action test in `scripts/release-automation.test.mjs` were corrected, and that
+test now supplies a distinctive caller action and asserts it never reaches the
+summary, so the assertion is discriminating instead of passing through an
+unmapped-code fallback. The underlying behavior was never wrong; only the
+documentation and the strength of the assertion were.
 
 ## Verification limits
 
 Focused and local checks for the implemented portions do not replace the
-whole-change, host and live gates. Unavailable evidence includes: the App
-installation token (issuance, exact permissions and repository scope), the
-authenticated `main`-branch protection read, live App-created PR/`main`/Release
-event propagation, GHCR manifest validation, production-image smoke, hosted
-browser evidence, independent wheel builds, and `pnpm security:verify`. Earlier
-independent wheel builds, UI unit/build checks and module conformance passed for
-their recorded implementation states only. A full Python run previously hit a
-wheel-isolation installation timeout against PyPI and Chromium installation failed
-at the browser CDN; neither is reclassified here. Disposable validation-repository
-access is a separate prerequisite.
+whole-change, host and live gates. Independent wheel builds, production-image
+smoke, the hosted browser evidence and `pnpm security:verify` are no longer
+outstanding: they were obtained for the final delivery head and are recorded
+above. Evidence that remains unavailable: the App installation token (issuance,
+exact permissions and repository scope), the authenticated `main`-branch
+protection read, live App-created PR/`main`/Release event propagation, and GHCR
+manifest validation for a published stable release. Disposable
+validation-repository access is a separate prerequisite.
 
-Canonical specification synchronization, archive, final review, protected-branch
-delivery and feature activation remain incomplete. No product release is part of
-this checkpoint.
+Synchronization and archive are complete, and the seven required checks passed for
+the final delivery head. The exact-head review and the protected merge, the
+disposable-repository validation recorded in 4.5, and activation remain
+incomplete. No product release is part of this record.

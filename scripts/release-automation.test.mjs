@@ -5365,18 +5365,22 @@ test("the failure path keeps its own next action, error block and boundary", asy
   assert.equal(summary.includes("attempt 2"), true);
   assert.equal(summary.includes(canonicalJson(blocked)), true);
 
-  // Any evidence object that already carries its own next action and error
-  // keeps both through the summary projection.
+  // A marker-less evidence object is projected through the same authoritative
+  // rules as any other state: the error code reaches the summary, the next
+  // action comes from the projection's own fallback, and a caller-supplied
+  // string is never used.
+  const callerSuppliedAction = "CALLER-SUPPLIED-ACTION-MUST-NOT-APPEAR";
   const legacy = {
     schemaVersion: 1,
     status: "blocked",
     operationId: "release-op-1",
-    nextAction: "Review the safe diagnostic and resume only after the recorded blocker is resolved.",
+    nextAction: callerSuppliedAction,
     error: { code: "tag_conflict", message: "Stable tag already exists.", details: {} },
   };
   const legacySummary = formatWorkflowSummary(legacy);
   assert.equal(legacySummary.includes("Review the safe diagnostic"), true);
   assert.equal(legacySummary.includes("tag_conflict"), true);
+  assert.equal(legacySummary.includes(callerSuppliedAction), false);
 });
 
 test("a completed release reports every required identity in its structured evidence", async () => {
