@@ -13,6 +13,12 @@ const REQUIRED_PLATFORM_NAMES = Object.freeze(["linux/amd64", "linux/arm64"]);
 const PUBLICATION_SCHEMA_VERSION = 1;
 const COMMAND_TIMEOUT_MILLISECONDS = 30 * 60 * 1000;
 const COMMAND_OUTPUT_LIMIT = 4 * 1024 * 1024;
+// A blocked publication records what the registry tool said, bounded and stripped
+// of anything credential-shaped, so the cause is readable from the workflow log
+// and the evidence artifact alone.
+const COMMAND_DIAGNOSTIC_LIMIT = 2000;
+const CREDENTIAL_DIAGNOSTIC_PATTERN =
+  /(authorization|bearer\s|basic\s+[A-Za-z0-9+/=]{8,}|password|passwd|secret|token|private[_-]?key|credential|api[_-]?key)/i;
 const publicationQueues = new Map();
 
 const OCI_ATTESTATION_TYPE = "attestation-manifest";
@@ -399,10 +405,42 @@ function verifyMovingShape(inspection, reference) {
   return inspectionVersion(inspection);
 }
 
+function sanitizeCommandDiagnostic(error) {
+  const parts = [];
+  for (const value of [error?.stderr, error?.stdout]) {
+    const text = Buffer.isBuffer(value) ? value.toString("utf8") : value;
+    if (typeof text === "string" && text.trim() !== "") parts.push(text);
+  }
+  // A timeout, an output-limit guard or a spawn failure rejects without captured
+  // output, and the error's own identity is then the only cause available.
+  if (parts.length === 0) {
+    const fallback = [error?.code, error?.message]
+      .filter((value) => typeof value === "string" && value.trim() !== "")
+      .join(": ");
+    if (fallback === "" || CREDENTIAL_DIAGNOSTIC_PATTERN.test(fallback)) return undefined;
+    return fallback.slice(0, COMMAND_DIAGNOSTIC_LIMIT);
+  }
+  const lines = parts
+    .join("\n")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\/\/[^/@\s]*@/g, "//"))
+    // Pre-signed registry and blob URLs carry their credential in the query
+    // string or fragment, so neither may survive into a published artifact.
+    .map((line) => line.replace(/https?:\/\/[^\s?#]*[?#][^\s]*/gi, (match) => `${match.split(/[?#]/)[0]}?<redacted>`))
+    .map((line) => line.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ""))
+    .filter((line) => line.trim() !== "")
+    .filter((line) => !CREDENTIAL_DIAGNOSTIC_PATTERN.test(line));
+  if (lines.length === 0) return undefined;
+  const bounded = lines.join(" | ").slice(0, COMMAND_DIAGNOSTIC_LIMIT);
+  return bounded === "" ? undefined : bounded;
+}
+
 function commandFailure(code, command, error) {
+  const diagnostic = sanitizeCommandDiagnostic(error);
   const details = {
     command,
     status: Number.isInteger(error?.status) ? error.status : undefined,
+    ...(diagnostic === undefined ? {} : { diagnostic }),
   };
   return publicationError(code, `Docker registry command failed: ${command}.`, details);
 }
@@ -421,7 +459,14 @@ function isAuthoritativeManifestAbsenceError(error) {
   const stderr = Buffer.isBuffer(error?.stderr) ? error.stderr.toString("utf8") : error?.stderr;
   if (typeof stderr !== "string") return false;
   const diagnostic = `${stderr ?? ""} ${error?.message ?? ""}`.toLowerCase();
-  if (!/\b(?:manifest unknown|name unknown|no such manifest)\b/.test(diagnostic)) return false;
+  // The registry CLI reports a missing tag on its own line as
+  // `ERROR: <reference>: not found`; the daemon's `HTTP 404 not found` and a
+  // `network not found` message must not be read the same way, so the observed
+  // form is anchored to that line shape rather than to the words alone.
+  const manifestMissing =
+    /\b(?:manifest unknown|name unknown|no such manifest)\b/.test(diagnostic) ||
+    /^\s*error:\s+.+:\s+not found\s*$/m.test(diagnostic);
+  if (!manifestMissing) return false;
   return !/(?:unauthori[sz]ed|authentication|access denied|permission denied|forbidden|timed? out|timeout|network|connection|dns|tls|proxy|gateway|service unavailable)/.test(
     diagnostic,
   );
@@ -1338,7 +1383,10 @@ export async function runPublicationFromEnvironment(environment = process.env) {
 
 function safeFailure(error) {
   if (error instanceof ReleasePublicationError) {
-    return `${error.code}: ${error.message}`;
+    const diagnostic = error.details?.diagnostic;
+    const suffix =
+      typeof diagnostic === "string" && diagnostic !== "" ? ` (${diagnostic})` : "";
+    return `${error.code}: ${error.message}${suffix}`;
   }
   return "publication_failed: stable image publication stopped unexpectedly.";
 }

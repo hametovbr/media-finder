@@ -204,9 +204,11 @@ test("the Docker adapter hashes raw bytes and inspects labels at the derived dig
 
 test("only authoritative manifest absence is treated as an absent registry tag", async () => {
   const tags = expectedRefs();
+  // Observed output of `docker buildx imagetools inspect` for a tag that does not
+  // exist yet; this is what a first stable publication actually receives.
   const absence = Object.assign(new Error("command failed"), {
     status: 1,
-    stderr: Buffer.from("Error response from daemon: manifest unknown: manifest unknown\n"),
+    stderr: Buffer.from(`ERROR: ${tags.immutable}: not found\n`),
   });
   const client = createDockerRegistryClient({
     command: async () => {
@@ -215,6 +217,64 @@ test("only authoritative manifest absence is treated as an absent registry tag",
   });
 
   assert.equal(await client.inspect(tags.immutable), undefined);
+});
+
+test("an inspection failure records the command diagnostic that identifies its cause", async () => {
+  const tags = expectedRefs();
+  const failure = Object.assign(new Error("command failed"), {
+    status: 1,
+    stderr: Buffer.from("denied: requested access to the resource is denied\n"),
+  });
+  const client = createDockerRegistryClient({
+    command: async () => {
+      throw failure;
+    },
+  });
+
+  await assert.rejects(client.inspect(tags.immutable), (error) => {
+    assert.equal(error.code, "registry_inspection_failed");
+    assert.match(String(error.details?.diagnostic ?? ""), /denied: requested access/);
+    return true;
+  });
+});
+
+test("a pre-signed URL in the diagnostic never reaches the failure record", async () => {
+  const tags = expectedRefs();
+  const failure = Object.assign(new Error("command failed"), {
+    status: 1,
+    stderr: Buffer.from(
+      "failed to fetch https://blob.example.test/x?sv=1&sig=aB9cSecretValue: context deadline\n",
+    ),
+  });
+  const client = createDockerRegistryClient({
+    command: async () => {
+      throw failure;
+    },
+  });
+
+  await assert.rejects(client.inspect(tags.immutable), (error) => {
+    const diagnostic = String(error.details?.diagnostic ?? "");
+    assert.match(diagnostic, /blob\.example\.test/);
+    assert.equal(diagnostic.includes("sig="), false);
+    assert.equal(diagnostic.includes("aB9cSecretValue"), false);
+    return true;
+  });
+});
+
+test("a command that failed without captured output still records its cause", async () => {
+  const tags = expectedRefs();
+  const failure = Object.assign(new Error("command timeout"), { code: "ETIMEDOUT" });
+  const client = createDockerRegistryClient({
+    command: async () => {
+      throw failure;
+    },
+  });
+
+  await assert.rejects(client.inspect(tags.immutable), (error) => {
+    assert.equal(error.code, "registry_inspection_failed");
+    assert.match(String(error.details?.diagnostic ?? ""), /ETIMEDOUT/);
+    return true;
+  });
 });
 
 test("generic 404, not-found, auth, and transport errors fail closed", async () => {
