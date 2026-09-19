@@ -3,18 +3,25 @@ name: Publish stable container
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing stable release tag to publish (vX.Y.Z)
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  # Serialize every stable publication, including releases published by hand.
+  # Serialize every stable publication, including releases published by hand and
+  # repairs requested through the manual entry point.
   group: stable-container-publication
   cancel-in-progress: false
 
 jobs:
   verification:
-    if: ${{ github.event.release.prerelease == false }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false }}
     uses: ./.github/workflows/verify.yaml
     permissions:
       contents: read
@@ -51,6 +58,103 @@ jobs:
           IMAGE_NAME: ghcr.io/${{ github.repository }}
           PUBLICATION_EVIDENCE_PATH: release-publication-evidence.json
         run: node scripts/release-publication.mjs
+      - name: Upload stable publication evidence
+        if: ${{ always() && hashFiles('release-publication-evidence.json') != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: stable-publication-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-publication-evidence.json
+          if-no-files-found: error
+          retention-days: 90
+
+  # Manual entry point: complete the image for an existing stable release whose
+  # publication was blocked. The workspace stays the release commit so the image
+  # carries the released source, while the publisher itself is taken from the
+  # trusted dispatch revision.
+  repair:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    needs: verification
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Resolve the requested stable release
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          repository="${{ github.repository }}"
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release_tag must be a canonical vX.Y.Z tag"
+            exit 1
+          fi
+          if [ "$(gh api "repos/$repository/releases/tags/$RELEASE_TAG" \
+              --jq 'select(.draft == false and .prerelease == false) | "stable"')" != "stable" ]; then
+            echo "release_tag must name an existing published non-prerelease release"
+            exit 1
+          fi
+          revision="$(git ls-remote "https://github.com/$repository" "refs/tags/$RELEASE_TAG^{}" | cut -f1)"
+          if [ -z "$revision" ]; then
+            revision="$(git ls-remote "https://github.com/$repository" "refs/tags/$RELEASE_TAG" | cut -f1)"
+          fi
+          if [ -z "$revision" ]; then
+            echo "release tag could not be resolved to a commit"
+            exit 1
+          fi
+          version="$(gh api "repos/$repository/contents/VERSION?ref=$revision" \
+            -H "Accept: application/vnd.github.raw")"
+          if [ "$version" != "${RELEASE_TAG#v}" ]; then
+            echo "release tag does not equal the version at $revision"
+            exit 1
+          fi
+          for context in documentation python unit integration contract browser image; do
+            conclusion="$(gh api "repos/$repository/commits/$revision/check-runs?per_page=100" \
+              --jq "[.check_runs[] | select(.name == \"verification / $context\")][0].conclusion")"
+            if [ "$conclusion" != "success" ]; then
+              echo "release commit lacks a successful verification / $context check"
+              exit 1
+            fi
+          done
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ steps.resolve.outputs.revision }}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: trusted
+      - name: Stage the trusted publisher
+        run: |
+          set -euo pipefail
+          cp trusted/scripts/release-publication.mjs "$RUNNER_TEMP/release-publication.mjs"
+          rm -rf trusted
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish and verify stable image
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_PRERELEASE: "false"
+          RELEASE_DRAFT: "false"
+          RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/${{ inputs.release_tag }}
+          GITHUB_SHA: ${{ steps.resolve.outputs.revision }}
+          IMAGE_NAME: ghcr.io/${{ github.repository }}
+          PUBLICATION_EVIDENCE_PATH: release-publication-evidence.json
+        run: node "$RUNNER_TEMP/release-publication.mjs"
       - name: Upload stable publication evidence
         if: ${{ always() && hashFiles('release-publication-evidence.json') != '' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
