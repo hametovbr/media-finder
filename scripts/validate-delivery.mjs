@@ -672,7 +672,8 @@ function validateActionPins(workflows, failures) {
       if (job.permissions?.packages === "write") {
         const allowed =
           (workflowPath === ".github/workflows/ci.yaml" && jobName === "publish-edge") ||
-          (workflowPath === ".github/workflows/release.yaml" && jobName === "publish");
+          (workflowPath === ".github/workflows/release.yaml" &&
+            (jobName === "publish" || jobName === "repair"));
         requireValue(
           failures,
           allowed,
@@ -1352,9 +1353,18 @@ function validatePublishWorkflows(ci, release, failures) {
 
   requireValue(
     failures,
-    JSON.stringify(Object.keys(release.on ?? {}).sort()) === JSON.stringify(["release"]) &&
+    JSON.stringify(Object.keys(release.on ?? {}).sort()) ===
+      JSON.stringify(["release", "workflow_dispatch"]) &&
       JSON.stringify(release.on?.release?.types ?? []) === JSON.stringify(["published"]),
-    ".github/workflows/release.yaml: stable publishing must use published releases only",
+    ".github/workflows/release.yaml: stable publishing must use published releases and one manual entry point",
+  );
+  const releaseDispatch = release.on?.workflow_dispatch;
+  requireValue(
+    failures,
+    JSON.stringify(Object.keys(releaseDispatch?.inputs ?? {})) === JSON.stringify(["release_tag"]) &&
+      releaseDispatch?.inputs?.release_tag?.required === true &&
+      releaseDispatch?.inputs?.release_tag?.type === "string",
+    ".github/workflows/release.yaml: the manual publication entry point must accept exactly one required tag input",
   );
   requireValue(
     failures,
@@ -1368,6 +1378,7 @@ function validatePublishWorkflows(ci, release, failures) {
   );
   const stableVerification = release.jobs?.verification;
   const stable = release.jobs?.publish;
+  const repair = release.jobs?.repair;
   requireValue(
     failures,
     stableVerification?.uses === reusable,
@@ -1376,8 +1387,8 @@ function validatePublishWorkflows(ci, release, failures) {
   requireValue(
     failures,
     normalizedExpression(stableVerification?.if) ===
-      "${{ github.event.release.prerelease == false }}",
-    ".github/workflows/release.yaml: stable verification must reject prereleases",
+      "${{ github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false }}",
+    ".github/workflows/release.yaml: stable verification must cover the manual entry point and reject prereleases",
   );
   requireValue(
     failures,
@@ -1391,8 +1402,8 @@ function validatePublishWorkflows(ci, release, failures) {
   );
   requireValue(
     failures,
-    stable?.permissions?.packages === "write",
-    ".github/workflows/release.yaml: only the gated stable publish job needs packages write",
+    stable?.permissions?.packages === "write" && repair?.permissions?.packages === "write",
+    ".github/workflows/release.yaml: only the gated publication jobs need packages write",
   );
   requireValue(
     failures,
@@ -1504,6 +1515,89 @@ function validatePublishWorkflows(ci, release, failures) {
     failures,
     publisherIndex >= 0 && evidenceIndex > publisherIndex,
     ".github/workflows/release.yaml: stable publication evidence must follow the gated publisher",
+  );
+
+  // The manual entry point may only complete an existing stable release, using
+  // the trusted dispatch revision's publisher while the workspace stays the
+  // release commit.
+  const repairSteps = repair?.steps ?? [];
+  requireValue(
+    failures,
+    needs(repair, "verification"),
+    ".github/workflows/release.yaml: manual publication must need verification",
+  );
+  requireValue(
+    failures,
+    normalizedExpression(repair?.if) ===
+      "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}",
+    ".github/workflows/release.yaml: manual publication must be main-only",
+  );
+  requireValue(
+    failures,
+    hasExactMapping(repair?.permissions, { contents: "read", packages: "write" }),
+    ".github/workflows/release.yaml: manual publication permissions must be limited to contents read and packages write",
+  );
+  const resolveStep = stepByName(repair, "Resolve the requested stable release");
+  requireValue(
+    failures,
+    typeof resolveStep?.run === "string" &&
+      resolveStep.run.includes("releases/tags/") &&
+      resolveStep.run.includes("GITHUB_OUTPUT") &&
+      resolveStep.run.includes("revision=") &&
+      resolveStep.run.includes("check-runs") &&
+      resolveStep.run.includes("VERSION?ref="),
+    ".github/workflows/release.yaml: manual publication must resolve and validate the requested stable release, including its own successful verification, before any registry access",
+  );
+  const repairCheckouts = repairSteps.filter((step) =>
+    String(step.uses ?? "").startsWith("actions/checkout@"),
+  );
+  const releaseCheckout = repairCheckouts.find((step) => step.with?.path === undefined);
+  const trustedCheckout = repairCheckouts.find((step) => step.with?.path !== undefined);
+  requireValue(
+    failures,
+    releaseCheckout?.with?.ref === "${{ steps.resolve.outputs.revision }}" &&
+      releaseCheckout?.with?.["persist-credentials"] === false,
+    ".github/workflows/release.yaml: manual publication must check out the resolved release commit without persisted credentials",
+  );
+  requireValue(
+    failures,
+    trustedCheckout?.with?.ref === "${{ github.sha }}" &&
+      typeof trustedCheckout?.with?.path === "string" &&
+      trustedCheckout.with.path.length > 0,
+    ".github/workflows/release.yaml: manual publication must obtain the publisher from the trusted dispatch revision",
+  );
+  const repairPublisher = stepByName(repair, RELEASE_PUBLICATION_STEP_NAME);
+  requireValue(
+    failures,
+    typeof repairPublisher?.run === "string" &&
+      repairPublisher.run.includes("release-publication.mjs") &&
+      repairPublisher.run !== RELEASE_PUBLICATION_COMMAND,
+    ".github/workflows/release.yaml: manual publication must run the trusted publisher copy",
+  );
+  requireValue(
+    failures,
+    repairPublisher?.env?.GITHUB_SHA === "${{ steps.resolve.outputs.revision }}" &&
+      repairPublisher?.env?.RELEASE_TAG === "${{ inputs.release_tag }}" &&
+      repairPublisher?.env?.RELEASE_PRERELEASE === "false" &&
+      repairPublisher?.env?.RELEASE_DRAFT === "false" &&
+      repairPublisher?.env?.IMAGE_NAME === "ghcr.io/${{ github.repository }}" &&
+      repairPublisher?.env?.PUBLICATION_EVIDENCE_PATH === "release-publication-evidence.json",
+    ".github/workflows/release.yaml: manual publication must pin the resolved stable release identity",
+  );
+  requireValue(
+    failures,
+    !Object.keys(repairPublisher?.env ?? {}).some((key) =>
+      /(token|secret|password|private[_-]?key|credential)/i.test(key),
+    ),
+    ".github/workflows/release.yaml: manual publication must not expose credentials to the publication script",
+  );
+  const repairEvidence = stepByName(repair, "Upload stable publication evidence");
+  requireValue(
+    failures,
+    repairEvidence?.uses === RELEASE_PUBLICATION_EVIDENCE_ACTION &&
+      repairEvidence?.if !== undefined &&
+      repairEvidence?.with?.path === "release-publication-evidence.json",
+    ".github/workflows/release.yaml: manual publication must upload its evidence under the approved action",
   );
 }
 

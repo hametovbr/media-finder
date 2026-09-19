@@ -195,11 +195,19 @@ safeguards. This guide makes no claim of retroactive migration for older runs or
 publications.
 
 An Actions read does not rerun the publisher automatically. If the current
-publisher run fails, a maintainer must fix the cause and rerun that same guarded
-publisher run. Then resume the controller with the same canonical version so it
-reconciles the resulting publication evidence. Do not use a historical
-pre-change publisher run or create a duplicate published Release to replace an
-uncertain result.
+publisher run fails, fix the cause and republish. When the failure is in the
+publisher itself, the release commit still carries the older publisher, so a rerun
+of that release event would repeat the same failure: use the workflow's manual
+`Publish stable container` entry point and give it the existing stable release tag.
+That entry point resolves the tag, requires a published non-prerelease release
+whose commit carries the version in its `VERSION` file and its own seven
+successful verification contexts, publishes the source at that release commit
+using the trusted publisher from `main`, and uploads the same publication
+evidence. It never moves the tag, changes its target, or rebuilds an image that
+already exists. Then resume the controller with the same canonical version so it
+reconciles the resulting publication evidence. Do not use a historical pre-change
+publisher run or create a duplicate published Release to replace an uncertain
+result.
 
 A resume is allowed only while the immutable recovery evidence is available
 and within its actual retention period. Preparation and later checkpoints bind

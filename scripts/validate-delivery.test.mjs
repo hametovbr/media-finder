@@ -418,7 +418,85 @@ test("stable publication is restricted to published release events", (context) =
     return value;
   });
 
-  assert.match(validateDelivery(root).join("\n"), /stable publishing must use published releases only/);
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /stable publishing must use published releases and one manual entry point/,
+  );
+});
+
+test("the manual publication entry point accepts exactly one required tag input", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    value.on.workflow_dispatch.inputs.confirm = { required: false, type: "boolean" };
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication entry point must accept exactly one required tag input/,
+  );
+});
+
+test("the manual publication job is main-only", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    value.jobs.repair.if = "${{ github.event_name == 'workflow_dispatch' }}";
+    return value;
+  });
+
+  assert.match(validateDelivery(root).join("\n"), /manual publication must be main-only/);
+});
+
+test("the manual publication job must resolve and validate the release before publishing", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    value.jobs.repair.steps = value.jobs.repair.steps.filter(
+      (step) => step.id !== "resolve",
+    );
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must resolve and validate the requested stable release/,
+  );
+});
+
+test("the manual publication job takes the publisher from the trusted dispatch revision", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const trusted = value.jobs.repair.steps.find(
+      (step) => step.with?.path !== undefined && step.uses?.startsWith("actions/checkout@"),
+    );
+    trusted.with.ref = "${{ steps.resolve.outputs.revision }}";
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must obtain the publisher from the trusted dispatch revision/,
+  );
+});
+
+test("the manual publication job pins the resolved release identity", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const publisher = value.jobs.repair.steps.find(
+      (step) => step.name === "Publish and verify stable image",
+    );
+    publisher.env.GITHUB_SHA = "${{ github.sha }}";
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must pin the resolved stable release identity/,
+  );
 });
 
 test("stable publication serializes every release and keeps waiting runs", (context) => {
