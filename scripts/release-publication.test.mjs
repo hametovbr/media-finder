@@ -14,6 +14,7 @@ import {
   readReleaseContext,
   runPublicationFromEnvironment,
 } from "./release-publication.mjs";
+import { validatePublicationEvidence } from "./release-automation.mjs";
 
 const IMAGE = "ghcr.io/acme/media-finder";
 const VERSION = "1.2.3";
@@ -748,4 +749,65 @@ test("a tag moved after the release event is rejected against the captured SHA",
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("manually published stable Releases emit evidence the release controller validates", async () => {
+  const refs = expectedRefs();
+  const registry = new FixtureRegistry({});
+  const published = await publish(registry, { allowInitialImmutableAbsence: true });
+  assert.equal(published.state, "published");
+  const checked = validatePublicationEvidence(published, {
+    repository: "acme/media-finder",
+    version: VERSION,
+    mergedSha: REVISION,
+    runId: 42,
+    releaseURL: "https://github.com/acme/media-finder/releases/tag/v1.2.3",
+  });
+  assert.deepEqual(checked.actualTags.map(({ name }) => name), ["v1.2.3", "1.2", "latest"]);
+  assert.deepEqual(checked.platforms, ["linux/amd64", "linux/arm64"]);
+  assert.equal(checked.sourceRevision, REVISION);
+
+  // A manually published Release whose pointer set is incomplete is repaired
+  // through the same guarded path and still emits controller-valid evidence.
+  const partial = new FixtureRegistry({ [refs.immutable]: registryInspection() });
+  const repaired = await publish(partial, { allowInitialImmutableAbsence: false });
+  assert.equal(repaired.state, "repaired");
+  assert.equal(partial.buildCount, 0);
+  const checkedRepair = validatePublicationEvidence(repaired, {
+    repository: "acme/media-finder",
+    version: VERSION,
+    mergedSha: REVISION,
+    runId: 42,
+    releaseURL: "https://github.com/acme/media-finder/releases/tag/v1.2.3",
+  });
+  assert.equal(checkedRepair.digest, repaired.digest);
+
+  // An already complete immutable publication is reused, never rebuilt, and the
+  // reused evidence is validated by the same controller contract.
+  const complete = new FixtureRegistry({
+    [refs.immutable]: registryInspection(),
+    [refs.minor]: registryInspection(),
+    [refs.latest]: registryInspection(),
+  });
+  const reused = await publish(complete, { allowInitialImmutableAbsence: false });
+  assert.equal(reused.state, "reused");
+  assert.equal(complete.buildCount, 0);
+  assert.equal(complete.retagCount, 0);
+  assert.equal(validatePublicationEvidence(reused, {
+    repository: "acme/media-finder",
+    version: VERSION,
+    mergedSha: REVISION,
+    runId: 42,
+    releaseURL: "https://github.com/acme/media-finder/releases/tag/v1.2.3",
+  }).state, "reused");
+});
+
+test("a rerun of a manually published Release never rebuilds an absent immutable tag", async () => {
+  const registry = new FixtureRegistry({});
+  await assert.rejects(
+    () => publish(registry, { allowInitialImmutableAbsence: false }),
+    (error) => error.code === "registry_inspection_ambiguous",
+  );
+  assert.equal(registry.buildCount, 0);
+  assert.equal(registry.retagCount, 0);
 });

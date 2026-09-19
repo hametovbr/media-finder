@@ -27,6 +27,18 @@ export const MAX_CANDIDATE_ATTEMPTS = 3;
 // controller deadline below the workflow's 330-minute job limit while still
 // renewing the installation token as each API operation starts.
 export const DEFAULT_OPERATION_DEADLINE_MS = 5 * 60 * 60 * 1000;
+// A single budget for the whole operation may never reach the hosted job limit;
+// an operator-provided deadline above this bound is refused instead of relying
+// on the runner to kill the job without a resumable boundary.
+const MAX_OPERATION_DEADLINE_MS = DEFAULT_OPERATION_DEADLINE_MS;
+// Every immutable checkpoint is one approved kind. The chain is: the
+// preparation artifact, the PR association it produced, a terminal stale-attempt
+// disposition when the base moved, and the merged SHA that completed the
+// operation.
+const RELEASE_CHECKPOINT_KINDS = Object.freeze(["pr-created", "stale-base", "merged"]);
+// The credential-free preparer process has its own bound; the operation budget
+// can only tighten it, never extend it.
+const DEFAULT_PREPARER_TIMEOUT_MS = 120_000;
 export const MAX_POLL_DELAY_MS = 30 * 1000;
 export const CI_WORKFLOW_PATH = ".github/workflows/ci.yaml";
 export const RELEASE_WORKFLOW_PATH = ".github/workflows/release.yaml";
@@ -89,6 +101,11 @@ const MAX_EVIDENCE_BYTES = 5 * 1024 * 1024;
 const MAX_CANDIDATE_FILES = 200;
 const MAX_CANDIDATE_BYTES = 25 * 1024 * 1024;
 const MAX_HISTORY_COMMITS = 500;
+// The compare endpoint is paginated. History capture walks every provider page
+// and fails closed with the reported bound instead of silently truncating the
+// release history to one page.
+const HISTORY_PAGE_SIZE = 100;
+const MAX_HISTORY_PAGES = Math.ceil(MAX_HISTORY_COMMITS / HISTORY_PAGE_SIZE) + 1;
 const MAX_RESPONSE_BYTES = 25 * 1024 * 1024;
 const MAX_TRACKED_FILES = 100_000;
 const MAX_WORKTREE_BYTES = 512 * 1024 * 1024;
@@ -475,6 +492,13 @@ export class GitHubAppAuthenticator {
     const installationResult = await this.rawRequest("GET", installationEndpoint, { token: jwt, scheme: "Bearer" });
     if (!installationResult.response.ok) fail("installation_unavailable", "Release App installation could not be verified.");
     const installation = asObject(installationResult.value, "App installation");
+    // The GitHub App slug determines the `slug[bot]` login that the App uses
+    // for the pull requests it creates. Capture it from the authenticated App
+    // response so PR authorship can be compared against the exact login of
+    // this installation instead of a weaker "some bot" heuristic.
+    if (typeof app.slug !== "string" || !/^[A-Za-z0-9-]{1,200}$/.test(app.slug)) {
+      fail("app_identity_mismatch", "GitHub App identity does not expose an authenticated bot login.");
+    }
     const installationId = Number(installation.id ?? this.installationId);
     if (!Number.isSafeInteger(installationId) || installationId <= 0) fail("installation_mismatch", "GitHub installation identity is incomplete.");
     if (installation.app_id !== undefined && app.id !== undefined && String(installation.app_id) !== String(app.id)) {
@@ -533,6 +557,7 @@ export class GitHubAppAuthenticator {
     const identity = {
       appId: app.id === undefined ? undefined : Number(app.id),
       appClientId: app.client_id ? String(app.client_id) : undefined,
+      appSlug: String(app.slug),
       installationId,
       repository: this.repository,
       repositoryId: scopedRepositoryId,
@@ -605,7 +630,13 @@ export class GitHubRestApi {
     const entries = allEntries.filter((entry) => entry.type === "blob");
     return computeTreeDigestFromEntries(this, entries);
   }
-  getCommitPullRequests(sha) { return this.request("GET", `${this.apiRepository}/commits/${normalizeSha(sha)}/pulls?per_page=100`); }
+  getCommitPullRequests(sha) {
+    return this.paginatedItems({
+      endpoint: `${this.apiRepository}/commits/${normalizeSha(sha)}/pulls`,
+      key: "pulls",
+      label: "commit pull requests",
+    });
+  }
   createBlob(content) { return this.request("POST", `${this.apiRepository}/git/blobs`, { content, encoding: "utf-8" }); }
   createTree(input) { return this.request("POST", `${this.apiRepository}/git/trees`, input); }
   createCommit(input) { return this.request("POST", `${this.apiRepository}/git/commits`, input); }
@@ -616,28 +647,60 @@ export class GitHubRestApi {
   mergePullRequest(number, input = {}) {
     const value = asObject(input, "merge request");
     if (value.merge_method !== "squash") fail("merge_policy_violation", "Release candidates may only use protected squash merge.");
-    const body = { ...value };
-    if (body.expected_head_sha !== undefined) {
-      body.sha = normalizeSha(body.expected_head_sha, "expected merge head SHA");
-      delete body.expected_head_sha;
+    // The protected merge carries exactly the squash policy and the expected
+    // head identity. Refuse any additional field so no caller can smuggle an
+    // administrative, bypass or protection-related option into the request.
+    const allowed = new Set(["merge_method", "expected_head_sha", "sha"]);
+    for (const key of Object.keys(value)) {
+      if (!allowed.has(key)) {
+        fail("merge_policy_violation", "Protected squash merge accepts only the expected head identity.", { field: key });
+      }
     }
-    if (body.sha === undefined) fail("merge_identity_missing", "Protected squash merge requires an expected head SHA.");
+    const body = { merge_method: value.merge_method };
+    const expectedHeadSha = value.expected_head_sha === undefined ? undefined : normalizeSha(value.expected_head_sha, "expected merge head SHA");
+    const explicitSha = value.sha === undefined ? undefined : normalizeSha(value.sha, "expected merge head SHA");
+    if (expectedHeadSha !== undefined && explicitSha !== undefined && expectedHeadSha !== explicitSha) {
+      fail("merge_policy_violation", "Conflicting expected head identities in the protected merge request.");
+    }
+    const sha = explicitSha ?? expectedHeadSha;
+    if (sha === undefined) fail("merge_identity_missing", "Protected squash merge requires an expected head SHA.");
+    body.sha = sha;
     return this.request("PUT", `${this.apiRepository}/pulls/${Number(number)}/merge`, body);
   }
-  async listPullRequests(input = {}) {
+  /**
+   * One bounded pagination loop for every listing read. It walks provider pages
+   * until a short page proves the collection is complete and fails closed only
+   * when the collection genuinely exceeds the controller bound, so a long
+   * repository history can no longer be mistaken for untrusted evidence.
+   */
+  async paginatedItems({ endpoint, key, label, query = {} }) {
     const all = [];
     for (let page = 1; page <= MAX_COLLECTION_ITEMS / 100; page += 1) {
-      const query = new URLSearchParams({ state: input.state ?? "open", base: input.base ?? "main", per_page: "100" });
-      if (page > 1) query.set("page", String(page));
-      const value = await this.request("GET", `${this.apiRepository}/pulls?${query}`);
-      const items = asArray(value, "pull requests");
+      const search = new URLSearchParams({ per_page: "100", ...query });
+      if (page > 1) search.set("page", String(page));
+      const value = await this.request("GET", `${endpoint}?${search}`);
+      const items = asArray(Array.isArray(value) ? value : value[key] ?? value, label);
       all.push(...items);
-      if (all.length > MAX_COLLECTION_ITEMS) fail("pagination_incomplete", "pull requests exceed the bounded collection limit.");
+      if (all.length > MAX_COLLECTION_ITEMS) fail("pagination_incomplete", `${label} exceed the bounded collection limit.`);
       if (items.length < 100) return all;
     }
-    fail("pagination_incomplete", "GitHub returned more pull requests than the bounded controller can inspect.");
+    fail("pagination_incomplete", `GitHub returned more ${label} than the bounded controller can inspect.`);
   }
-  listReviews(number) { return this.request("GET", `${this.apiRepository}/pulls/${Number(number)}/reviews?per_page=100`); }
+  listPullRequests(input = {}) {
+    return this.paginatedItems({
+      endpoint: `${this.apiRepository}/pulls`,
+      key: "pulls",
+      label: "pull requests",
+      query: { state: input.state ?? "open", base: input.base ?? "main" },
+    });
+  }
+  listReviews(number) {
+    return this.paginatedItems({
+      endpoint: `${this.apiRepository}/pulls/${Number(number)}/reviews`,
+      key: "reviews",
+      label: "reviews",
+    });
+  }
   listReviewRequests(number) { return this.request("GET", `${this.apiRepository}/pulls/${Number(number)}/requested_reviewers`); }
   async listReviewThreads(number) {
     const [owner, repo] = this.repository.split("/");
@@ -664,27 +727,27 @@ export class GitHubRestApi {
     fail("review_threads_unavailable", "GitHub returned more review threads than the bounded controller can inspect.");
   }
   async getCheckRuns(sha) {
-    const value = await this.request("GET", `${this.apiRepository}/commits/${normalizeSha(sha)}/check-runs?per_page=100`);
-    const items = asArray(value.check_runs ?? value, "check runs");
-    assertCompleteCollection(value, items, "check runs");
-    return value;
+    const items = await this.paginatedItems({
+      endpoint: `${this.apiRepository}/commits/${normalizeSha(sha)}/check-runs`,
+      key: "check_runs",
+      label: "check runs",
+    });
+    return { total_count: items.length, check_runs: items };
   }
   async getWorkflowRuns(input = {}) {
-    const query = new URLSearchParams({ per_page: "100" });
-    if (input.headSha) query.set("head_sha", normalizeSha(input.headSha));
-    if (input.event) query.set("event", input.event);
-    if (input.branch) query.set("branch", input.branch);
+    const query = {};
+    if (input.headSha) query.head_sha = normalizeSha(input.headSha);
+    if (input.event) query.event = input.event;
+    if (input.branch) query.branch = input.branch;
     // The REST route takes a workflow file name (for example `ci.yaml`),
     // while the run provenance returned by GitHub carries the full path. Keep
     // those identities separate: callers still validate the full path below.
     const workflowId = input.workflow ? String(input.workflow).split("/").at(-1) : undefined;
     const endpoint = workflowId
-      ? `${this.apiRepository}/actions/workflows/${encodeURIComponent(workflowId)}/runs?${query}`
-      : `${this.apiRepository}/actions/runs?${query}`;
-    const value = await this.request("GET", endpoint);
-    const items = asArray(value.workflow_runs ?? value, "workflow runs");
-    assertCompleteCollection(value, items, "workflow runs");
-    return value;
+      ? `${this.apiRepository}/actions/workflows/${encodeURIComponent(workflowId)}/runs`
+      : `${this.apiRepository}/actions/runs`;
+    const items = await this.paginatedItems({ endpoint, key: "workflow_runs", label: "workflow runs", query });
+    return { total_count: items.length, workflow_runs: items };
   }
   getWorkflowRun(id) { return this.request("GET", `${this.apiRepository}/actions/runs/${Number(id)}`); }
   getWorkflowRunAttempt(id, runAttempt) {
@@ -695,50 +758,55 @@ export class GitHubRestApi {
   async getWorkflowRunJobs(id, runAttempt = 1) {
     const numericId = normalizePositiveInteger(id, "workflow run ID");
     const numericAttempt = normalizeRunAttempt(runAttempt);
-    const value = await this.request("GET", `${this.apiRepository}/actions/runs/${numericId}/attempts/${numericAttempt}/jobs?per_page=100`);
-    const items = asArray(value.jobs ?? value, "workflow run jobs");
-    assertCompleteCollection(value, items, "workflow run jobs");
-    return value;
+    const items = await this.paginatedItems({
+      endpoint: `${this.apiRepository}/actions/runs/${numericId}/attempts/${numericAttempt}/jobs`,
+      key: "jobs",
+      label: "workflow run jobs",
+    });
+    return { total_count: items.length, jobs: items };
   }
   getTagRef(tag) { return this.request("GET", `${this.apiRepository}/git/ref/tags/${encodeURIComponent(tag)}`); }
   getTag(sha) { return this.request("GET", `${this.apiRepository}/git/tags/${normalizeSha(sha)}`); }
   async listReleases() {
-    const value = await this.request("GET", `${this.apiRepository}/releases?per_page=100`);
-    const items = asArray(value, "releases");
-    assertCompleteCollection(value, items, "releases");
-    return value;
+    const items = await this.paginatedItems({ endpoint: `${this.apiRepository}/releases`, key: "releases", label: "releases" });
+    return { total_count: items.length, releases: items };
   }
   getReleaseByTag(tag) { return this.request("GET", `${this.apiRepository}/releases/tags/${encodeURIComponent(tag)}`); }
   createRelease(input) { return this.request("POST", `${this.apiRepository}/releases`, input); }
   getRelease(id) { return this.request("GET", `${this.apiRepository}/releases/${Number(id)}`); }
   updateRelease(id, input) { return this.request("PATCH", `${this.apiRepository}/releases/${Number(id)}`, input); }
-  compareCommits(base, head) { return this.request("GET", `${this.apiRepository}/compare/${encodeURIComponent(base)}...${normalizeSha(head)}`); }
+  compareCommits(base, head, options = {}) {
+    const query = new URLSearchParams();
+    if (options.page !== undefined) query.set("page", String(normalizePositiveInteger(options.page, "compare page")));
+    if (options.perPage !== undefined) query.set("per_page", String(normalizePositiveInteger(options.perPage, "compare page size")));
+    const suffix = query.size > 0 ? `?${query}` : "";
+    return this.request("GET", `${this.apiRepository}/compare/${encodeURIComponent(base)}...${normalizeSha(head)}${suffix}`);
+  }
   getArtifact(id) { return this.request("GET", `${this.apiRepository}/actions/artifacts/${Number(id)}`); }
   async listRunArtifacts(runId) {
     const numericId = normalizePositiveInteger(runId, "workflow run ID");
-    const value = await this.request("GET", `${this.apiRepository}/actions/runs/${numericId}/artifacts?per_page=100`);
-    const items = asArray(value.artifacts ?? value, "workflow run artifacts");
-    assertCompleteCollection(value, items, "workflow run artifacts");
-    return value;
+    const items = await this.paginatedItems({
+      endpoint: `${this.apiRepository}/actions/runs/${numericId}/artifacts`,
+      key: "artifacts",
+      label: "workflow run artifacts",
+    });
+    return { total_count: items.length, artifacts: items };
   }
   async listArtifacts(input = {}) {
-    const query = new URLSearchParams({ per_page: "100" });
-    if (input.name) query.set("name", input.name);
-    const value = await this.request("GET", `${this.apiRepository}/actions/artifacts?${query}`);
-    const items = asArray(value.artifacts ?? value, "artifacts");
-    assertCompleteCollection(value, items, "artifacts");
-    return value;
+    const items = await this.paginatedItems({
+      endpoint: `${this.apiRepository}/actions/artifacts`,
+      key: "artifacts",
+      label: "artifacts",
+      query: input.name === undefined ? {} : { name: input.name },
+    });
+    return { total_count: items.length, artifacts: items };
   }
-  async listBranches() {
-    const all = [];
-    for (let page = 1; page <= MAX_COLLECTION_ITEMS / 100; page += 1) {
-      const value = await this.request("GET", `${this.apiRepository}/branches?per_page=100&page=${page}`);
-      const items = asArray(value, "repository branches");
-      all.push(...items);
-      if (all.length > MAX_COLLECTION_ITEMS) fail("pagination_incomplete", "repository branches exceed the bounded collection limit.");
-      if (items.length < 100) return all;
-    }
-    fail("pagination_incomplete", "GitHub returned more branches than the bounded controller can inspect.");
+  listBranches() {
+    return this.paginatedItems({
+      endpoint: `${this.apiRepository}/branches`,
+      key: "branches",
+      label: "repository branches",
+    });
   }
   getCollaboratorPermission(actor) {
     return this.request("GET", `${this.apiRepository}/collaborators/${encodeURIComponent(actor)}/permission`);
@@ -1048,21 +1116,31 @@ export function buildArtifactRecord(metadata, expected = {}, now = Date.now()) {
 
 function normalizeCheckpoint(checkpoint, expected) {
   const value = asObject(checkpoint, "checkpoint");
+  const checkpointKind = boundedString(value.checkpointKind, "checkpoint kind", 80);
+  if (!RELEASE_CHECKPOINT_KINDS.includes(checkpointKind)) {
+    fail("checkpoint_kind_invalid", "Checkpoint kind is not an approved immutable checkpoint.", { checkpointKind });
+  }
   const result = {
     ...value,
     schemaVersion: RELEASE_AUTOMATION_SCHEMA_VERSION,
     evidenceKind: "release-checkpoint",
-    checkpointKind: boundedString(value.checkpointKind, "checkpoint kind", 80),
+    checkpointKind,
     repository: normalizeRepository(value.repository ?? expected.repository),
     operationId: normalizeOperationId(value.operationId ?? expected.operationId),
     attempt: Number(value.attempt ?? expected.attempt),
     preparationArtifactId: Number(value.preparationArtifactId),
     preparationArtifactDigest: normalizeDigest(value.preparationArtifactDigest, "preparation artifact digest"),
     trustedControllerSha: normalizeSha(value.trustedControllerSha ?? expected.trustedControllerSha, "trusted controller SHA"),
+    // A checkpoint records the run that produced it, not the preparation's
+    // origin run: the artifact is uploaded by the executing run.
+    producerRunId: checkpointPositiveInteger(value.producerRunId ?? expected.producerRunId, "checkpoint producing run ID"),
+    producerRunAttempt: checkpointPositiveInteger(value.producerRunAttempt ?? expected.producerRunAttempt, "checkpoint producing run attempt"),
+    producerControllerSha: checkpointSha(value.producerControllerSha ?? expected.producerControllerSha, "checkpoint producing controller SHA"),
     createdAt: value.createdAt ?? new Date().toISOString(),
   };
   if (!Number.isSafeInteger(result.preparationArtifactId) || result.preparationArtifactId <= 0) fail("checkpoint_invalid", "Checkpoint artifact ID is malformed.");
   if (result.attempt < 1 || result.attempt > MAX_CANDIDATE_ATTEMPTS) fail("checkpoint_invalid", "Checkpoint attempt is outside the allowed bound.");
+  assertCheckpointKindFields(result);
   ensureSafeEvidenceValue(result, "checkpoint");
   return { ...result, contentDigest: jsonDigest(result) };
 }
@@ -1078,13 +1156,18 @@ export async function persistImmutableCheckpoint(artifacts, checkpoint, expected
     retentionDays: PREPARATION_ARTIFACT_RETENTION_DAYS,
     overwrite: false,
   });
+  // The provider metadata must describe the run that actually uploaded this
+  // checkpoint, which is the recorded producing run.
   const record = buildArtifactRecord(metadata, {
     name,
     repository: normalized.repository,
-    runId: expected.originRunId,
-    repositoryId: expected.repositoryId,
-    headSha: expected.headSha,
+    runId: normalized.producerRunId,
+    repositoryId: expected?.repositoryId,
+    headSha: normalized.producerControllerSha,
   });
+  if (record.workflowRunAttempt !== undefined && record.workflowRunAttempt !== normalized.producerRunAttempt) {
+    fail("artifact_provenance_mismatch", "Checkpoint artifact attempt does not match its recorded producing attempt.");
+  }
   return { checkpoint: normalized, artifact: record };
 }
 
@@ -1212,6 +1295,11 @@ export async function createActionsArtifactStore({
     async read(id, { digest, expectedFilename = "release-evidence.json", workflowRunId } = {}) {
       const numericId = Number(id);
       if (!Number.isSafeInteger(numericId) || numericId <= 0) fail("artifact_identity_mismatch", "Artifact ID is malformed.");
+      // The download must name the run that actually produced the artifact;
+      // falling back to a store default could resolve another run's artifact.
+      if (workflowRunId === undefined || workflowRunId === null || workflowRunId === "") {
+        fail("artifact_provenance_mismatch", "Artifact readback requires the explicit producing workflow run.");
+      }
       const filename = normalizeArtifactFilename(expectedFilename);
       const directory = await temporaryArtifactDirectory("media-finder-release-download-");
       try {
@@ -1270,6 +1358,173 @@ function normalizePrNumber(value) {
   const number = Number(value);
   if (!Number.isSafeInteger(number) || number <= 0) fail("identity_mismatch", "Pull request number is malformed.");
   return number;
+}
+
+function requiredPullRequestIdentity(value, label) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 300) {
+    fail("candidate_identity_mismatch", `Release pull request is missing its ${label}.`);
+  }
+  return value;
+}
+
+function pullRequestRepositoryId(value, label) {
+  const repository = asObject(value, `release pull request ${label}`);
+  const id = Number(repository.id);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    fail("candidate_identity_mismatch", `Release pull request is missing its ${label} ID.`);
+  }
+  return id;
+}
+
+/**
+ * Mandatory release-PR identity. Every checked identity must be present in the
+ * provider response; an omitted field fails closed instead of being replaced by
+ * a configured repository name or skipped. The author login must equal the
+ * exact `slug[bot]` login of the authenticated installation App; a generic
+ * `user.type === "Bot"` never satisfies authorship.
+ *
+ * The recorded base SHA is an immutable preparation input. An unmerged PR whose
+ * live base advanced is no longer the authenticated candidate for that base; it
+ * stops as `base_changed` (which the bounded stale-base replacement reconciles)
+ * instead of being merged or silently re-based. A merged PR has already passed
+ * its merge gate, so only the immutable identities are re-checked there.
+ */
+function assertPullRequestIdentity(pullRequest, { repositoryId, branch, headSha, baseSha, botLogin, allowStaleBase = false } = {}) {
+  const pr = asObject(pullRequest, "release pull request");
+  const expectedRepositoryId = normalizePositiveInteger(repositoryId, "expected repository ID");
+  const expectedBranch = requiredPullRequestIdentity(branch, "expected release branch");
+  const expectedHeadSha = normalizeSha(headSha, "expected pull request head SHA");
+  const recordedBaseSha = normalizeSha(baseSha, "recorded base SHA");
+  const expectedBotLogin = requiredPullRequestIdentity(botLogin, "authenticated App bot login");
+
+  if (pullRequestRepositoryId(pr.base?.repo, "base repository") !== expectedRepositoryId) {
+    fail("candidate_identity_mismatch", "Release PR base repository is not the authenticated release repository.");
+  }
+  if (pr.base?.ref !== "main") fail("candidate_identity_mismatch", "Release PR does not target main.");
+  const observedBaseSha = normalizeSha(requiredPullRequestIdentity(pr.base?.sha, "base SHA"), "pull request base SHA");
+  if (pullRequestRepositoryId(pr.head?.repo, "head repository") !== expectedRepositoryId) {
+    fail("candidate_identity_mismatch", "Release PR head repository is not the authenticated release repository.");
+  }
+  if (pr.head?.ref !== expectedBranch) {
+    fail("candidate_identity_mismatch", "Release PR head branch is not the generated release branch.");
+  }
+  if (normalizeSha(requiredPullRequestIdentity(pr.head?.sha, "head SHA"), "pull request head SHA") !== expectedHeadSha) {
+    fail("candidate_identity_mismatch", "Release PR head is not the prepared candidate commit.");
+  }
+  const author = pr.user;
+  if (author === null || typeof author !== "object" || Array.isArray(author)) {
+    fail("candidate_identity_mismatch", "Release pull request is missing its author identity.");
+  }
+  if (author.type !== "Bot") fail("candidate_identity_mismatch", "Release PR was not created by a bot account.");
+  const authorLogin = requiredPullRequestIdentity(author.login, "author login");
+  if (authorLogin.toLowerCase() !== expectedBotLogin.toLowerCase()) {
+    fail("candidate_identity_mismatch", "Release PR author is not the authenticated installation App.", {
+      expectedAuthor: expectedBotLogin,
+      observedAuthor: authorLogin,
+    });
+  }
+  const merged = pr.merged === true || Boolean(pr.merged_at);
+  // `allowStaleBase` is used only to inspect a candidate that is already known
+  // to be stale (base advanced past its recorded base). The base field is still
+  // mandatory; only the equality to the recorded base is deferred to the caller.
+  if (!allowStaleBase && !merged && observedBaseSha !== recordedBaseSha) {
+    fail("base_changed", "Release PR base advanced past the recorded preparation base; reconcile the stale candidate before merge.", {
+      recordedBaseSha,
+      observedBaseSha,
+    });
+  }
+  return { merged, observedBaseSha };
+}
+
+/**
+ * Reconcile an uncertain `createPullRequest` against live provider state.
+ *
+ * A pull request that already carries the generated branch, the prepared head,
+ * the recorded base, the authenticated repository and the exact App author is
+ * adopted. Any other pull request that claims the branch is a conflict: the
+ * controller stops without closing, editing, labelling or force-pushing it.
+ */
+async function findMatchingReleasePullRequest(api, auth, { state, branch, repositoryId, botLogin } = {}) {
+  if (typeof api?.listPullRequests !== "function" || typeof api?.getPullRequest !== "function") {
+    fail("pull_request_reconciliation_unavailable", "Live pull request state is required to reconcile an uncertain creation.");
+  }
+  const response = await apiCall(api, auth, "listPullRequests", [{ state: "open", base: "main" }]);
+  const listed = collectionItems(response, "pulls", "open pull requests")
+    .map((item) => asObject(item, "open pull request"))
+    .filter((item) => item.head?.ref === branch);
+  if (listed.length > 1) fail("mutation_ambiguous", "Multiple open pull requests claim the generated release branch.");
+  if (listed.length === 0) return undefined;
+  const number = normalizePrNumber(listed[0].number);
+  const pullRequest = asObject(await apiCall(api, auth, "getPullRequest", [number]), "release pull request");
+  assertPullRequestIdentity(pullRequest, {
+    repositoryId,
+    branch,
+    headSha: state.preparedCommitSha,
+    baseSha: state.baseSha,
+    botLogin,
+  });
+  return { ...pullRequest, number };
+}
+
+/**
+ * Read the live pull request for a generated release branch in any state.
+ * Used to reconcile a candidate whose recorded base is no longer current main:
+ * a missing or already closed pull request means the earlier attempt was
+ * already dispositioned, while an open one is closed only after its terminal
+ * disposition is persisted.
+ */
+async function readReleasePullRequestByBranch(api, auth, branch) {
+  if (typeof api?.listPullRequests !== "function" || typeof api?.getPullRequest !== "function") {
+    fail("pull_request_reconciliation_unavailable", "Live pull request state is required to reconcile the release candidate.");
+  }
+  const response = await apiCall(api, auth, "listPullRequests", [{ state: "all", base: "main" }]);
+  const listed = collectionItems(response, "pulls", "release pull requests")
+    .map((item) => asObject(item, "release pull request"))
+    .filter((item) => item.head?.ref === branch);
+  if (listed.length > 1) fail("mutation_ambiguous", "Multiple pull requests claim the generated release branch.");
+  if (listed.length === 0) return undefined;
+  const number = normalizePrNumber(listed[0].number);
+  const pullRequest = asObject(await apiCall(api, auth, "getPullRequest", [number]), "release pull request");
+  return { ...pullRequest, number };
+}
+
+/** The run identity that produces a checkpoint written by this execution. */
+function producerIdentity(context, config) {
+  return {
+    producerRunId: context.runId,
+    producerRunAttempt: context.runAttempt,
+    producerControllerSha: normalizeSha(config.trustedControllerSha ?? context.sha, "producing controller SHA"),
+  };
+}
+
+/** Persist the terminal stale-attempt disposition before anything is closed. */
+/**
+ * Persist the terminal stale-attempt disposition before anything is closed.
+ * An already-recorded disposition for this attempt is reused instead of being
+ * written twice: the artifact name is immutable, so a rerun after a crash
+ * between the disposition and the close must not collide with it.
+ */
+async function persistStaleDisposition({ artifacts, evidence, artifact, prNumber, currentMainSha, producer, recorded }) {
+  if (recorded !== undefined) return recorded.artifact;
+  if (!artifacts || typeof artifacts.upload !== "function") {
+    fail("checkpoint_writer_unavailable", "A stale candidate cannot be closed without durable immutable disposition evidence.");
+  }
+  const checkpoint = await persistImmutableCheckpoint(artifacts, {
+    checkpointKind: "stale-base",
+    repository: evidence.repository,
+    operationId: evidence.operationId,
+    attempt: evidence.attempt,
+    preparationArtifactId: artifact.id,
+    preparationArtifactDigest: artifact.digest,
+    trustedControllerSha: evidence.trustedControllerSha,
+    ...(prNumber === undefined ? {} : { prNumber }),
+    prHeadSha: evidence.preparedCommitSha,
+    prBaseSha: evidence.baseSha,
+    disposition: "terminal_stale_base",
+    currentMainSha,
+    ...producer,
+  }, { ...evidence, artifact });
+  return checkpoint.artifact;
 }
 
 function normalizedCheckName(value) {
@@ -1333,17 +1588,38 @@ async function validateInitiatingActor(api, auth, actor) {
   }
 }
 
+// A mutation whose response was never received may still have been applied.
+// These failures are therefore "post-mutation transport failures": the caller
+// must read live provider state before retrying instead of blindly repeating or
+// reporting the request as not applied.
+const POST_MUTATION_TRANSPORT_CODES = new Set([
+  "token_expired",
+  "github_unavailable",
+  "response_too_large",
+  "malformed_response",
+]);
+
+function isPostMutationTransportFailure(error) {
+  if (!(error instanceof ReleaseAutomationError)) return false;
+  if (POST_MUTATION_TRANSPORT_CODES.has(error.code)) return true;
+  return error.code === "github_api_error" && Number(error.details?.status) >= 500;
+}
+
 async function mutationWithReconcile(api, auth, mutation, reconcile) {
   await ensureApiAuth(auth);
-  try {
-    return await mutation();
-  } catch (error) {
-    if (!(error instanceof ReleaseAutomationError) || error.code !== "token_expired") throw error;
-    const observed = await reconcile();
-    if (observed?.completed) return observed.value;
-    if (observed?.ambiguous) fail("mutation_ambiguous", "Mutation outcome is ambiguous after token expiry; resume after reconciling state.");
-    await ensureApiAuth(auth);
-    return mutation();
+  let retried = false;
+  for (;;) {
+    try {
+      return await mutation();
+    } catch (error) {
+      if (!isPostMutationTransportFailure(error)) throw error;
+      const observed = await reconcile();
+      if (observed?.completed) return observed.value;
+      if (observed?.ambiguous) fail("mutation_ambiguous", "Mutation outcome is ambiguous after a transport failure; resume after reconciling state.");
+      if (retried) fail("mutation_ambiguous", "Mutation could not be confirmed after reconciling live state.", { code: error.code });
+      retried = true;
+      await ensureApiAuth(auth);
+    }
   }
 }
 
@@ -1354,9 +1630,58 @@ function normalizeClock(clock = {}) {
   };
 }
 
+/**
+ * One deadline for the whole release operation.
+ *
+ * The hosted workflow job has a hard limit, so the controller assigns a single
+ * budget below it once and every bounded wait consumes from that same budget
+ * instead of restarting a fresh per-call deadline. Expiry stops the operation
+ * with the completed boundary so a re-dispatch can resume from the immutable
+ * preparation/checkpoint records.
+ */
+export function createOperationBudget({ clock = normalizeClock(), deadlineMs = DEFAULT_OPERATION_DEADLINE_MS } = {}) {
+  const configured = Number(deadlineMs);
+  if (!Number.isSafeInteger(configured) || configured <= 0) {
+    fail("operation_deadline_invalid", "The operation deadline must be a positive whole number of milliseconds.");
+  }
+  if (configured > MAX_OPERATION_DEADLINE_MS) {
+    fail("operation_deadline_invalid", "The operation deadline must stay below the hosted workflow job limit.", {
+      deadlineMs: configured,
+      bound: MAX_OPERATION_DEADLINE_MS,
+    });
+  }
+  const normalizedClock = normalizeClock(clock);
+  const deadlineAt = normalizedClock.now() + configured;
+  const budget = {
+    deadlineMs: configured,
+    deadlineAt,
+    clock: normalizedClock,
+    remaining(label = "operation") {
+      const remaining = deadlineAt - normalizedClock.now();
+      if (remaining <= 0) budget.expire(label);
+      return remaining;
+    },
+    expire(label = "operation") {
+      const completedBoundary = typeof budget.boundaryProbe === "function" ? budget.boundaryProbe() : undefined;
+      fail("operation_deadline_exceeded", "The operation-wide release deadline elapsed; resume from the immutable recovery state.", {
+        label,
+        deadlineMs: configured,
+        deadlineAt: new Date(deadlineAt).toISOString(),
+        ...(completedBoundary === undefined ? {} : { completedBoundary }),
+      });
+    },
+    watch(boundaryProbe) {
+      budget.boundaryProbe = boundaryProbe;
+      return budget;
+    },
+  };
+  return budget;
+}
+
 async function pollUntil(probe, {
   clock = normalizeClock(),
-  deadlineMs = DEFAULT_OPERATION_DEADLINE_MS,
+  budget,
+  deadlineMs = budget === undefined ? DEFAULT_OPERATION_DEADLINE_MS : undefined,
   label = "operation",
   maxPolls = 1000,
 } = {}) {
@@ -1365,10 +1690,14 @@ async function pollUntil(probe, {
   for (let poll = 0; poll < maxPolls; poll += 1) {
     const result = await probe();
     if (result?.state === "passed" || result?.state === "failed" || result?.state === "stale" || result?.state === "untrusted") return result;
-    if (clock.now() - start >= deadlineMs) {
+    const budgetRemaining = budget === undefined ? Number.POSITIVE_INFINITY : budget.remaining(label);
+    const callRemaining = deadlineMs === undefined ? Number.POSITIVE_INFINITY : deadlineMs - (clock.now() - start);
+    const remaining = Math.min(budgetRemaining, callRemaining);
+    if (remaining <= 0) {
+      if (budget !== undefined) budget.expire(label);
       fail("timeout", `${label} exceeded its bounded deadline; resume from immutable state.`, { deadlineMs });
     }
-    await clock.sleep(Math.min(delay, MAX_POLL_DELAY_MS));
+    await clock.sleep(Math.min(delay, MAX_POLL_DELAY_MS, remaining));
     delay = Math.min(delay * 2, MAX_POLL_DELAY_MS);
   }
   fail("timeout", `${label} exceeded its bounded poll count; resume from immutable state.`, { maxPolls });
@@ -1458,7 +1787,20 @@ function authenticatedAppIdentity(auth, repository, expectedRepositoryId) {
   if (expectedRepositoryId !== undefined && repositoryId !== normalizePositiveInteger(expectedRepositoryId, "expected repository ID")) {
     fail("repository_scope_mismatch", "Authenticated App identity repository ID does not match the release target.");
   }
-  return { appId, installationId, repositoryId, repository: normalizeRepository(repository) };
+  return { appId, installationId, repositoryId, repository: normalizeRepository(repository), appSlug: identity.appSlug };
+}
+
+/**
+ * The exact GitHub login an App-authored pull request carries. A missing or
+ * malformed authenticated slug is a hard failure: PR authorship is an identity
+ * gate, not a best-effort hint, and a generic `Bot` type never satisfies it.
+ */
+function appBotLogin(identity) {
+  const slug = asObject(identity, "authenticated App identity").appSlug;
+  if (typeof slug !== "string" || !/^[A-Za-z0-9-]{1,200}$/.test(slug)) {
+    fail("app_identity_mismatch", "The authenticated App bot login is unavailable.");
+  }
+  return `${slug}[bot]`;
 }
 
 function workflowActorLogin(run) {
@@ -1538,13 +1880,114 @@ async function authenticatePreparationRun(api, auth, listedRun, {
   };
 }
 
-function preparationArtifactName(value) {
+function releaseArtifactName(value) {
   if (typeof value !== "string" || value.length > 200) return undefined;
-  const match = value.match(/^((?:release-[a-z0-9-]{1,80}))-preparation-attempt-([1-9][0-9]*)$/);
+  const match = value.match(/^((?:release-[a-z0-9-]{1,80}))-(preparation|pr-created|stale-base|merged)-attempt-([1-9][0-9]*)$/);
   if (!match) return undefined;
-  const attempt = Number(match[2]);
+  const attempt = Number(match[3]);
   if (!Number.isSafeInteger(attempt) || attempt < 1 || attempt > MAX_CANDIDATE_ATTEMPTS) return undefined;
-  return { operationId: match[1], attempt, name: value };
+  return { operationId: match[1], kind: match[2], attempt, name: value };
+}
+
+function checkpointPositiveInteger(value, label) {
+  const numeric = Number(value);
+  if (!Number.isSafeInteger(numeric) || numeric <= 0) fail("checkpoint_invalid", `${label} is malformed.`);
+  return numeric;
+}
+
+function checkpointSha(value, label) {
+  if (typeof value !== "string" || !SHA_PATTERN.test(value)) fail("checkpoint_invalid", `${label} must be a 40-character Git SHA.`);
+  return value.toLowerCase();
+}
+
+function assertCheckpointKindFields(record) {
+  const label = `Checkpoint kind ${record.checkpointKind}`;
+  if (!RELEASE_CHECKPOINT_KINDS.includes(record.checkpointKind)) {
+    fail("checkpoint_kind_invalid", "Checkpoint kind is not an approved immutable checkpoint.", {
+      checkpointKind: record.checkpointKind,
+    });
+  }
+  checkpointPositiveInteger(record.prNumber, `${label} pull request number`);
+  checkpointSha(record.prHeadSha, `${label} head SHA`);
+  checkpointSha(record.prBaseSha, `${label} base SHA`);
+  if (record.checkpointKind === "stale-base") {
+    if (record.disposition !== "terminal_stale_base") {
+      fail("checkpoint_invalid", "A stale-attempt checkpoint must record its terminal disposition.");
+    }
+    checkpointSha(record.currentMainSha, `${label} current main SHA`);
+  }
+  if (record.checkpointKind === "merged") {
+    checkpointSha(record.mergedSha, `${label} merged SHA`);
+  }
+}
+
+/**
+ * Validate one immutable checkpoint record. Every checked identity must be
+ * present; a record whose content digest, chain link, producing run or kind
+ * does not match is refused instead of being trusted from its artifact name.
+ */
+export function assertCheckpointRecord(value, expected = {}) {
+  const record = asObject(value, "checkpoint record");
+  if (record.schemaVersion !== RELEASE_AUTOMATION_SCHEMA_VERSION || record.evidenceKind !== "release-checkpoint") {
+    fail("checkpoint_invalid", "Checkpoint record schema is unsupported.");
+  }
+  const repository = normalizeRepository(record.repository);
+  if (expected.repository && repository.toLowerCase() !== normalizeRepository(expected.repository).toLowerCase()) {
+    fail("repository_mismatch", "Checkpoint record repository does not match the operation.");
+  }
+  const operationId = normalizeOperationId(record.operationId);
+  if (expected.operationId !== undefined && operationId !== normalizeOperationId(expected.operationId)) {
+    fail("checkpoint_invalid", "Checkpoint record operation does not match.");
+  }
+  const attempt = Number(record.attempt);
+  if (!Number.isSafeInteger(attempt) || attempt < 1 || attempt > MAX_CANDIDATE_ATTEMPTS) {
+    fail("checkpoint_invalid", "Checkpoint attempt is outside the allowed bound.");
+  }
+  if (expected.attempt !== undefined && attempt !== Number(expected.attempt)) {
+    fail("checkpoint_invalid", "Checkpoint attempt does not match.");
+  }
+  const preparationArtifactId = Number(record.preparationArtifactId);
+  if (!Number.isSafeInteger(preparationArtifactId) || preparationArtifactId <= 0) {
+    fail("checkpoint_invalid", "Checkpoint chain link to the preparation artifact is missing.");
+  }
+  if (expected.preparationArtifactId !== undefined && preparationArtifactId !== Number(expected.preparationArtifactId)) {
+    fail("checkpoint_invalid", "Checkpoint chain link does not match the preparation artifact.");
+  }
+  if (typeof record.preparationArtifactDigest !== "string" || !DIGEST_PATTERN.test(record.preparationArtifactDigest)) {
+    fail("checkpoint_invalid", "Checkpoint chain link to the preparation artifact digest is missing or malformed.");
+  }
+  const preparationArtifactDigest = record.preparationArtifactDigest.toLowerCase();
+  if (expected.preparationArtifactDigest !== undefined && preparationArtifactDigest !== normalizeArtifactDigest(expected.preparationArtifactDigest, "expected preparation artifact digest")) {
+    fail("checkpoint_invalid", "Checkpoint chain digest does not match the preparation artifact.");
+  }
+  checkpointSha(record.trustedControllerSha, "checkpoint trusted controller SHA");
+  const producerRunId = checkpointPositiveInteger(record.producerRunId, "Checkpoint producing run ID");
+  if (expected.producerRunId !== undefined && producerRunId !== Number(expected.producerRunId)) {
+    fail("checkpoint_invalid", "Checkpoint producing run does not match.");
+  }
+  const producerRunAttempt = checkpointPositiveInteger(record.producerRunAttempt, "Checkpoint producing run attempt");
+  if (expected.producerRunAttempt !== undefined && producerRunAttempt !== Number(expected.producerRunAttempt)) {
+    fail("checkpoint_invalid", "Checkpoint producing run attempt does not match.");
+  }
+  const producerControllerSha = checkpointSha(record.producerControllerSha, "Checkpoint producing controller SHA");
+  if (expected.producerControllerSha !== undefined && producerControllerSha !== normalizeSha(expected.producerControllerSha, "expected producing controller SHA")) {
+    fail("checkpoint_invalid", "Checkpoint producing controller revision does not match.");
+  }
+  assertCheckpointKindFields({ ...record, checkpointKind: boundedString(record.checkpointKind, "checkpoint kind", 80), prNumber: record.prNumber, prHeadSha: record.prHeadSha, prBaseSha: record.prBaseSha, mergedSha: record.mergedSha, currentMainSha: record.currentMainSha, disposition: record.disposition });
+  const content = { ...record };
+  delete content.contentDigest;
+  delete content.artifact;
+  if (typeof record.contentDigest !== "string" || !DIGEST_PATTERN.test(record.contentDigest)) {
+    fail("checkpoint_invalid", "Checkpoint content digest is missing or malformed.");
+  }
+  if (jsonDigest(content) !== record.contentDigest.toLowerCase()) {
+    fail("checkpoint_invalid", "Checkpoint content digest is inconsistent.");
+  }
+  ensureSafeEvidenceValue(record, "checkpoint record");
+  if (expected.now !== undefined && record.expiresAt !== undefined && Date.parse(record.expiresAt) <= Number(expected.now)) {
+    fail("artifact_expired", "Checkpoint record has expired.");
+  }
+  return record;
 }
 
 function decodedArtifactValue(value) {
@@ -1583,22 +2026,42 @@ function assertPreparationAppIdentity(evidence, identity) {
   }
 }
 
-function branchCarriesVersion(ref, version) {
-  if (typeof ref !== "string") return false;
-  const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`^release-[a-z0-9-]+-v${escaped}-attempt-[1-9][0-9]*$`).test(ref);
+const RELEASE_BRANCH_PATTERN = /^release-[a-z0-9-]+-v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))-attempt-[1-9][0-9]*$/;
+
+function releaseVersionFromRef(ref) {
+  if (typeof ref !== "string") return undefined;
+  const match = ref.match(RELEASE_BRANCH_PATTERN);
+  return match === null ? undefined : match[1];
 }
 
+function branchCarriesVersion(ref, version) {
+  return releaseVersionFromRef(ref) === version;
+}
+
+/**
+ * Serialize release requests: no release-shaped state may exist for the
+ * requested version, and no *other* version may be active at the same time. A
+ * second active version is refused before preparation so out-of-order
+ * publication cannot be started.
+ */
 async function assertNoConflictingVersionState(api, auth, version, { repository } = {}) {
   const conflicts = [];
+  const active = [];
+  const record = (kind, ref, number) => {
+    const refVersion = releaseVersionFromRef(ref);
+    if (refVersion === undefined) return;
+    if (refVersion === version) {
+      conflicts.push({ kind, ref, ...(number === undefined ? {} : { number }) });
+    } else {
+      active.push({ kind, ref, version: refVersion, ...(number === undefined ? {} : { number }) });
+    }
+  };
   if (typeof api?.listPullRequests === "function") {
     const response = await apiCall(api, auth, "listPullRequests", [{ state: "all", base: "main" }]);
     const pulls = collectionItems(response, "pulls", "release pull requests");
     for (const pull of pulls) {
       const value = asObject(pull, "release pull request");
-      if (branchCarriesVersion(value.head?.ref, version)) {
-        conflicts.push({ kind: "pull_request", number: value.number, ref: value.head.ref });
-      }
+      record("pull_request", value.head?.ref, value.number);
     }
   }
   if (typeof api?.listBranches === "function") {
@@ -1606,7 +2069,7 @@ async function assertNoConflictingVersionState(api, auth, version, { repository 
     const branches = collectionItems(response, "branches", "release branches");
     for (const branch of branches) {
       const value = asObject(branch, "release branch");
-      if (branchCarriesVersion(value.name, version)) conflicts.push({ kind: "branch", ref: value.name });
+      record("branch", value.name);
     }
   }
   if (conflicts.length > 0) {
@@ -1616,15 +2079,26 @@ async function assertNoConflictingVersionState(api, auth, version, { repository 
       conflicts,
     });
   }
+  if (active.length > 0) {
+    fail("concurrent_release", "Another stable release operation is active.", {
+      repository,
+      version,
+      active,
+    });
+  }
 }
 
 /**
- * Discover an immutable preparation artifact from trusted workflow history.
- * The caller's dispatch run is deliberately not used as the origin: a later
- * trusted controller can recover the original run and download its artifact
- * through the provider's actual ID, digest, expiry, and producing run ID.
+ * Authenticate every immutable preparation artifact this version has ever
+ * produced from trusted workflow history. The caller's dispatch run is
+ * deliberately not used as the origin: a later trusted controller recovers the
+ * original run and downloads its artifact through the provider's actual ID,
+ * digest, expiry, and producing run ID.
+ *
+ * The attempt number is durable here: each preparation attempt is one uniquely
+ * named immutable artifact, so a rerun cannot reset the bounded attempt count.
  */
-export async function discoverPreparationEvidence({
+async function collectPreparationCandidates({
   api,
   auth,
   artifacts,
@@ -1652,6 +2126,7 @@ export async function discoverPreparationEvidence({
   }]);
   const runs = collectionItems(runsResponse, "workflow_runs", "preparation workflow runs");
   const candidates = [];
+  const checkpoints = [];
   let firstFailure;
 
   for (const listedRun of runs) {
@@ -1675,8 +2150,8 @@ export async function discoverPreparationEvidence({
       continue;
     }
     const artifactHints = collectionItems(artifactResponse, "artifacts", "preparation workflow artifacts")
-      .map((item) => asObject(item, "preparation artifact listing"))
-      .map((item) => ({ item, parsed: preparationArtifactName(item.name) }))
+      .map((item) => asObject(item, "release artifact listing"))
+      .map((item) => ({ item, parsed: releaseArtifactName(item.name) }))
       .filter(({ parsed }) => parsed !== undefined);
     for (const { item: hint, parsed: nameParts } of artifactHints) {
       // Names are locators, never authority. They still provide a bounded
@@ -1688,7 +2163,7 @@ export async function discoverPreparationEvidence({
         repository: targetRepository,
         version: requestedVersion,
         originRunId: listedRunId,
-      });
+      }) || candidates.some(({ evidence }) => evidence.operationId === nameParts.operationId);
       let metadata;
       let record;
       let downloaded;
@@ -1717,16 +2192,19 @@ export async function discoverPreparationEvidence({
         if (deterministicName) firstFailure ??= error;
         continue;
       }
-      if (payload?.version !== requestedVersion) continue;
+      if (nameParts.kind === "preparation" && payload?.version !== requestedVersion) continue;
+      const isPreparation = nameParts.kind === "preparation";
       try {
-        const payloadOriginRunId = normalizeRunId(payload.originRunId);
+        const payloadOriginRunId = normalizeRunId(isPreparation ? payload.originRunId : payload.producerRunId);
         const payloadOriginAttempt = normalizeRequiredRunAttempt(
-          payload.originRunAttempt,
-          "preparation evidence origin workflow run attempt",
+          isPreparation ? payload.originRunAttempt : payload.producerRunAttempt,
+          isPreparation ? "preparation evidence origin workflow run attempt" : "checkpoint producing run attempt",
           "artifact_provenance_mismatch",
         );
         if (payloadOriginRunId !== listedRunId) {
-          fail("artifact_provenance_mismatch", "Preparation evidence origin run does not match the producing run.");
+          fail("artifact_provenance_mismatch", isPreparation
+            ? "Preparation evidence origin run does not match the producing run."
+            : "Checkpoint producing run does not match its listing run.");
         }
         // The immutable payload is the only place where discovery can learn
         // which attempt produced the artifact. Re-authenticate that exact
@@ -1744,25 +2222,104 @@ export async function discoverPreparationEvidence({
         if (record.workflowRunAttempt !== undefined && record.workflowRunAttempt !== origin.runAttempt) {
           fail("artifact_provenance_mismatch", "Preparation artifact workflow attempt does not match its authenticated producing attempt.");
         }
-        const evidence = assertPreparationArtifact(payload, {
-          repository: targetRepository,
-          trustedControllerSha: origin.headSha,
-          originRunId: origin.runId,
-          originRunAttempt: origin.runAttempt,
-          version: requestedVersion,
-          now,
-        });
-        assertPreparationAppIdentity(evidence, identity);
-        if (nameParts.operationId !== evidence.operationId || nameParts.attempt !== evidence.attempt) {
-          fail("artifact_identity_mismatch", "Preparation artifact name does not match its authenticated immutable payload.");
+        if (isPreparation) {
+          const evidence = assertPreparationArtifact(payload, {
+            repository: targetRepository,
+            trustedControllerSha: origin.headSha,
+            originRunId: origin.runId,
+            originRunAttempt: origin.runAttempt,
+            version: requestedVersion,
+            now,
+          });
+          assertPreparationAppIdentity(evidence, identity);
+          if (nameParts.operationId !== evidence.operationId || nameParts.attempt !== evidence.attempt) {
+            fail("artifact_identity_mismatch", "Preparation artifact name does not match its authenticated immutable payload.");
+          }
+          candidates.push({ evidence, artifact: record, origin });
+        } else {
+          // A checkpoint is only evidence when its own authenticated record
+          // proves the producing run, attempt, controller revision and chain
+          // link. The artifact name is a locator, never authority.
+          const checkpoint = assertCheckpointRecord(payload, {
+            repository: targetRepository,
+            operationId: nameParts.operationId,
+            attempt: nameParts.attempt,
+            producerRunId: origin.runId,
+            producerRunAttempt: origin.runAttempt,
+            producerControllerSha: origin.headSha,
+            now,
+          });
+          if (checkpoint.checkpointKind !== nameParts.kind) {
+            fail("artifact_identity_mismatch", "Checkpoint artifact name does not match its authenticated record kind.");
+          }
+          checkpoints.push({ checkpoint, artifact: record, origin });
         }
-        candidates.push({ evidence, artifact: record, origin });
       } catch (error) {
         firstFailure ??= error;
       }
     }
   }
 
+  return { requestedVersion, targetRepository, identity, targetRepositoryId, candidates, checkpoints, firstFailure };
+}
+
+/** Group validated checkpoint records by kind for one candidate attempt. */
+function selectAttemptCheckpoints(checkpoints, attempt) {
+  const byKind = new Map();
+  for (const entry of checkpoints) {
+    if (entry.checkpoint.attempt !== Number(attempt)) continue;
+    const kind = entry.checkpoint.checkpointKind;
+    if (byKind.has(kind)) {
+      fail("checkpoint_ambiguous", "Multiple immutable checkpoints claim the same kind and attempt.", {
+        checkpointKind: kind,
+        attempt: Number(attempt),
+        artifacts: [byKind.get(kind).artifact.id, entry.artifact.id].sort((left, right) => left - right),
+      });
+    }
+    byKind.set(kind, entry);
+  }
+  return byKind;
+}
+
+/**
+ * Discover and validate the immutable checkpoint chain for this version from
+ * trusted workflow history. Every record is authenticated against its
+ * producing workflow run, attempt, actor, controller revision, artifact ID and
+ * digest before it can influence a mutation; unrelated or forged artifacts are
+ * rejected rather than trusted from their name.
+ */
+export async function discoverCheckpointChain(options = {}) {
+  const { requestedVersion, targetRepository, checkpoints, firstFailure } = await collectPreparationCandidates(options);
+  if (checkpoints.length === 0) {
+    if (firstFailure) throw firstFailure;
+    return { records: [], version: requestedVersion, repository: targetRepository };
+  }
+  const operationIds = new Set(checkpoints.map(({ checkpoint }) => checkpoint.operationId));
+  for (const entry of checkpoints) {
+    selectAttemptCheckpoints(checkpoints, entry.checkpoint.attempt);
+  }
+  if (operationIds.size > 1) {
+    fail("duplicate_release_state", "Multiple authenticated release operations claim checkpoint records for this version.", {
+      repository: targetRepository,
+      version: requestedVersion,
+      operations: [...operationIds].sort(),
+    });
+  }
+  return {
+    records: [...checkpoints].sort((left, right) => left.checkpoint.attempt - right.checkpoint.attempt),
+    version: requestedVersion,
+    repository: targetRepository,
+  };
+}
+
+/**
+ * Discover the single authenticated preparation artifact for a blocked
+ * recovery path. Multiple attempts of one operation require checkpoint
+ * authority, so this strict form still refuses to choose between them.
+ */
+export async function discoverPreparationEvidence(options = {}) {
+  const { api, auth } = options;
+  const { requestedVersion, targetRepository, candidates, firstFailure } = await collectPreparationCandidates(options);
   if (candidates.length === 0) {
     await assertNoConflictingVersionState(api, auth, requestedVersion, { repository: targetRepository });
     if (firstFailure) throw firstFailure;
@@ -1793,6 +2350,232 @@ export async function discoverPreparationEvidence({
     artifact: selected.artifact,
     origin: selected.origin,
   };
+}
+
+/**
+ * Resolve what a repeated production request means for one repository/version
+ * operation:
+ *
+ *   fresh       - no authenticated preparation exists; prepare attempt 1
+ *   resume      - an attempt whose recorded base is current main, or a
+ *                 candidate that already merged and must reach publication
+ *   replacement - every recorded attempt is stale; the next bounded attempt is
+ *                 prepared from current main with re-captured release notes
+ *
+ * The attempt count is derived from the immutable preparation artifacts, so it
+ * survives reruns. A stale attempt that still has an open pull request is
+ * dispositioned and closed before the replacement is prepared, and a candidate
+ * with manual edits stops instead of being closed or overwritten.
+ */
+async function resolveReleaseRequest({
+  api,
+  auth,
+  artifacts,
+  context,
+  version,
+  repository,
+  repositoryId,
+  allowedActors = [],
+  now = Date.now(),
+  botLogin,
+  producer,
+} = {}) {
+  const { requestedVersion, targetRepository, identity, candidates, firstFailure } = await collectPreparationCandidates({
+    api,
+    auth,
+    artifacts,
+    context,
+    version,
+    repository,
+    repositoryId,
+    allowedActors,
+    now,
+  });
+  if (candidates.length === 0) {
+    await assertNoConflictingVersionState(api, auth, requestedVersion, { repository: targetRepository });
+    if (firstFailure) throw firstFailure;
+    return { kind: "fresh", attempt: 1 };
+  }
+  const operationIds = new Set(candidates.map(({ evidence }) => evidence.operationId));
+  if (operationIds.size > 1) {
+    fail("duplicate_release_state", "Multiple authenticated release operations claim the requested version.", {
+      repository: targetRepository,
+      version: requestedVersion,
+      operations: [...operationIds].sort(),
+    });
+  }
+  const operationId = candidates[0].evidence.operationId;
+  const mainRef = await apiCall(api, auth, "getRef", ["heads/main"]);
+  const currentMainSha = normalizeSha(mainRef.object?.sha, "current main SHA");
+  const ordered = [...candidates].sort((left, right) => left.evidence.attempt - right.evidence.attempt);
+  const attempts = ordered.map(({ evidence }) => evidence.attempt);
+  const current = ordered.filter(({ evidence }) => evidence.baseSha === currentMainSha);
+  if (current.length > 1) {
+    fail("duplicate_release_state", "Multiple authenticated preparation attempts claim current main.", {
+      repository: targetRepository,
+      version: requestedVersion,
+      operationId,
+      attempts: current.map(({ evidence }) => evidence.attempt),
+    });
+  }
+  if (current.length === 1) {
+    return { kind: "resume", state: { ...current[0].evidence, artifact: current[0].artifact } };
+  }
+  const highest = ordered.at(-1);
+  const branch = branchName(highest.evidence.operationId, highest.evidence.version, highest.evidence.attempt);
+  // The immutable chain is the durable authority for this attempt's pull
+  // request association; a live branch lookup is only the fallback when no
+  // checkpoint recorded one.
+  const chain = await discoverCheckpointChain({
+    api,
+    auth,
+    artifacts,
+    context,
+    version: requestedVersion,
+    repository: targetRepository,
+    repositoryId: identity.repositoryId,
+    allowedActors,
+    now,
+  });
+  const recorded = selectAttemptCheckpoints(chain.records, highest.evidence.attempt);
+  const recordedPr = recorded.get("merged") ?? recorded.get("pr-created");
+  const recordedStale = recorded.get("stale-base");
+  const live = recordedPr === undefined
+    ? await readReleasePullRequestByBranch(api, auth, branch)
+    : asObject(await apiCall(api, auth, "getPullRequest", [recordedPr.checkpoint.prNumber]), "release pull request");
+  if (live !== undefined) {
+    const runtime = {
+      prNumber: live.number,
+      prHeadSha: highest.evidence.preparedCommitSha,
+      prBaseSha: highest.evidence.baseSha,
+    };
+    // The live candidate must still be this attempt's own unaltered App pull
+    // request. Manual edits stop the operation instead of being closed,
+    // overwritten or force-pushed.
+    assertPullRequestIdentity(live, {
+      repositoryId: identity.repositoryId,
+      branch,
+      headSha: highest.evidence.preparedCommitSha,
+      baseSha: highest.evidence.baseSha,
+      botLogin,
+      allowStaleBase: true,
+    });
+    if (live.merged === true || live.merged_at) {
+      return {
+        kind: "resume",
+        state: { ...highest.evidence, artifact: highest.artifact },
+        runtime: { ...runtime, mergedSha: normalizeSha(live.merge_commit_sha, "recorded merged SHA") },
+      };
+    }
+    if (recorded.get("merged") !== undefined) {
+      fail("mutation_ambiguous", "A merged checkpoint exists but the live release pull request is not merged.", {
+        prNumber: live.number,
+        attempt: highest.evidence.attempt,
+      });
+    }
+    if (live.state !== "open" && recordedStale === undefined && recordedPr !== undefined) {
+      // A recorded association that is already closed without a terminal
+      // disposition is ambiguous: the close and the disposition are not atomic.
+      fail("mutation_ambiguous", "A recorded release pull request is closed without a durable stale-attempt disposition.", {
+        prNumber: live.number,
+        attempt: highest.evidence.attempt,
+      });
+    }
+    if (live.state === "open") {
+      await persistStaleDisposition({
+        artifacts,
+        evidence: highest.evidence,
+        artifact: highest.artifact,
+        prNumber: live.number,
+        currentMainSha,
+        producer,
+        recorded: recordedStale,
+      });
+      await mutationWithReconcile(
+        api,
+        auth,
+        () => invoke(api, "updatePullRequest", [live.number, { state: "closed" }]),
+        async () => {
+          const observed = await apiCall(api, auth, "getPullRequest", [live.number]);
+          return observed.state === "closed" ? { completed: true, value: observed } : { ambiguous: true };
+        },
+      );
+    }
+  }
+  if (highest.evidence.attempt >= MAX_CANDIDATE_ATTEMPTS) {
+    fail("base_changed_repeatedly", "Candidate attempt budget is exhausted after repeated base changes.", {
+      repository: targetRepository,
+      version: requestedVersion,
+      operationId,
+      attempts,
+      bound: MAX_CANDIDATE_ATTEMPTS,
+      currentMainSha,
+    });
+  }
+  return { kind: "replacement", attempt: highest.evidence.attempt + 1, operationId, previousAttempt: highest.evidence.attempt };
+}
+
+/**
+ * Reconcile the immutable checkpoint chain with live GitHub state before any
+ * mutation. A recorded merge is adopted only when the live pull request is
+ * merged; a recorded PR association is adopted for this attempt; a terminal
+ * disposition or a contradiction stops instead of guessing.
+ */
+async function reconcileRecordedCheckpoints({ api, auth, chain, state, botLogin }) {
+  if (!chain || chain.records.length === 0) return { kind: "none" };
+  const recorded = selectAttemptCheckpoints(chain.records, state.attempt);
+  const branch = branchName(state.operationId, state.version, state.attempt);
+  const identity = {
+    repositoryId: state.repositoryId,
+    branch,
+    headSha: state.preparedCommitSha,
+    baseSha: state.baseSha,
+    botLogin,
+    allowStaleBase: true,
+  };
+  const merged = recorded.get("merged");
+  const prCreated = recorded.get("pr-created");
+  const stale = recorded.get("stale-base");
+  if (merged !== undefined) {
+    const live = asObject(await apiCall(api, auth, "getPullRequest", [merged.checkpoint.prNumber]), "release pull request");
+    assertPullRequestIdentity(live, identity);
+    if (!(live.merged === true || live.merged_at)) {
+      fail("mutation_ambiguous", "A merged checkpoint exists but the live release pull request is not merged.", {
+        prNumber: merged.checkpoint.prNumber,
+        artifact: merged.artifact.id,
+      });
+    }
+    return {
+      kind: "merged",
+      prNumber: merged.checkpoint.prNumber,
+      mergedSha: normalizeSha(live.merge_commit_sha ?? merged.checkpoint.mergedSha, "recorded merged SHA"),
+    };
+  }
+  if (prCreated !== undefined) {
+    const live = asObject(await apiCall(api, auth, "getPullRequest", [prCreated.checkpoint.prNumber]), "release pull request");
+    assertPullRequestIdentity(live, identity);
+    if (live.merged === true || live.merged_at) {
+      return {
+        kind: "merged",
+        prNumber: prCreated.checkpoint.prNumber,
+        mergedSha: normalizeSha(live.merge_commit_sha, "live merged SHA"),
+      };
+    }
+    if (live.state !== "open") {
+      fail("candidate_closed", "Recorded release pull request is closed before merge.", {
+        prNumber: prCreated.checkpoint.prNumber,
+      });
+    }
+    return { kind: "pr-created", prNumber: prCreated.checkpoint.prNumber };
+  }
+  if (stale !== undefined) {
+    fail("checkpoint_ambiguous", "A terminal stale-attempt disposition contradicts the active candidate state.", {
+      attempt: state.attempt,
+      artifact: stale.artifact.id,
+      currentMainSha: stale.checkpoint.currentMainSha,
+    });
+  }
+  return { kind: "none" };
 }
 
 function pullRequestAssociationMatches(run, { headSha, baseSha, repository, repositoryId } = {}) {
@@ -1989,6 +2772,32 @@ function jobsForWorkflowRun(jobs, run, headSha, { includeEdge = false } = {}) {
   return { statuses, failures, pending, edge };
 }
 
+/**
+ * The release gate always covers exactly the seven approved verification
+ * contexts. A narrower, duplicated or extended set would be a silent policy
+ * bypass, so it is refused instead of being evaluated.
+ */
+function canonicalCheckContexts(requiredContexts) {
+  const values = asArray(requiredContexts, "required check contexts");
+  for (const context of values) {
+    if (typeof context !== "string" || context.trim() === "") {
+      fail("check_contexts_invalid", "Required check contexts must be non-empty strings.");
+    }
+  }
+  const normalized = values.map(normalizedCheckName);
+  const canonical = REQUIRED_CHECK_CONTEXTS.map(normalizedCheckName);
+  if (
+    normalized.length !== canonical.length ||
+    new Set(normalized).size !== normalized.length ||
+    canonical.some((context) => !normalized.includes(context))
+  ) {
+    fail("check_contexts_invalid", "Release gates must cover exactly the seven approved verification contexts.", {
+      contexts: values,
+    });
+  }
+  return values;
+}
+
 export function evaluateRequiredChecks(checkRuns, {
   headSha,
   baseSha,
@@ -2001,6 +2810,7 @@ export function evaluateRequiredChecks(checkRuns, {
 } = {}) {
   const head = normalizeSha(headSha, "candidate head SHA");
   const base = normalizeSha(baseSha, "candidate base SHA");
+  const contexts = canonicalCheckContexts(requiredContexts);
   const runs = collectionItems(checkRuns, "check_runs", "check runs");
   const workflows = collectionItems(workflowRuns, "workflow_runs", "workflow runs");
   const jobs = workflowJobs === undefined ? undefined : collectionItems(workflowJobs, "jobs", "workflow run jobs");
@@ -2016,22 +2826,22 @@ export function evaluateRequiredChecks(checkRuns, {
     runAttempt,
   });
   if (!run) {
-    for (const context of requiredContexts) statuses[context] = "missing";
+    for (const context of contexts) statuses[context] = "missing";
     return { state: "pending", statuses, failures, headSha: head, baseSha: base };
   }
   const runResult = workflowRunState(run.value);
   if (runResult === "failed") {
-    for (const context of requiredContexts) {
+    for (const context of contexts) {
       statuses[context] = "failed";
       failures.push({ context, reason: "workflow_failed" });
     }
     return { state: "failed", statuses, failures, headSha: head, baseSha: base, workflowRunId: run.runId, workflowRunAttempt: run.runAttempt };
   }
   if (jobs === undefined) {
-    for (const context of requiredContexts) statuses[context] = "pending";
+    for (const context of contexts) statuses[context] = "pending";
     return { state: "pending", statuses, failures, headSha: head, baseSha: base, workflowRunId: run.runId, workflowRunAttempt: run.runAttempt };
   }
-  for (const context of requiredContexts) {
+  for (const context of contexts) {
     const current = checkRunForContext(runs, context, head);
     if (!current) {
       statuses[context] = "missing";
@@ -2059,7 +2869,7 @@ export function evaluateRequiredChecks(checkRuns, {
   }
   const pending = Object.values(statuses).some((value) => ["pending", "missing", "stale"].includes(value));
   if (failures.length > 0) return { state: "failed", statuses, failures, workflowRunId: run.runId, workflowRunAttempt: run.runAttempt };
-  if (pending || Object.keys(statuses).length !== requiredContexts.length || runResult === "pending") return { state: "pending", statuses, failures, headSha: head, baseSha: base, workflowRunId: run.runId, workflowRunAttempt: run.runAttempt };
+  if (pending || Object.keys(statuses).length !== contexts.length || runResult === "pending") return { state: "pending", statuses, failures, headSha: head, baseSha: base, workflowRunId: run.runId, workflowRunAttempt: run.runAttempt };
   return { state: "passed", statuses, failures: [], headSha: head, baseSha: base, workflowRunId: run.runId, workflowRunAttempt: run.runAttempt };
 }
 
@@ -2250,23 +3060,18 @@ async function validateMainBranchProtection(api, auth, expectedContexts = REQUIR
 async function validatePullRequestGates(api, auth, state, options = {}) {
   const pr = await apiCall(api, auth, "getPullRequest", [state.prNumber]);
   asObject(pr, "pull request");
-  const headSha = String(pr.head?.sha ?? "").toLowerCase();
-  if (headSha !== normalizeSha(state.prHeadSha, "recorded PR head SHA")) fail("candidate_tampered", "Release PR head changed after preparation.");
-  const baseSha = normalizeSha(state.baseSha, "recorded base SHA");
-  if (String(pr.base?.ref ?? "") !== "main" || String(pr.base?.repo?.full_name ?? state.repository).toLowerCase() !== state.repository.toLowerCase()) {
-    fail("candidate_identity_mismatch", "Release PR does not target this repository's main branch.");
+  const expectedBranch = branchName(state.operationId, state.version, state.attempt);
+  if (state.branch !== undefined && state.branch !== expectedBranch) {
+    fail("candidate_identity_mismatch", "Recorded release branch does not match the generated candidate identity.");
   }
-  if (String(pr.head?.repo?.full_name ?? state.repository).toLowerCase() !== state.repository.toLowerCase()) {
-    fail("candidate_identity_mismatch", "Release PR head is not in the target repository.");
-  }
-  const expectedBranch = state.branch ?? branchName(state.operationId, state.version, state.attempt);
-  if (pr.head?.ref !== undefined && pr.head.ref !== expectedBranch) {
-    fail("candidate_identity_mismatch", "Release PR branch does not match the authenticated release candidate.");
-  }
-  if (pr.user?.type !== undefined && pr.user.type !== "Bot") {
-    fail("candidate_identity_mismatch", "Release PR was not created by the release App.");
-  }
-  if (pr.merged_at || pr.merged === true) return { state: "merged", pr };
+  const { merged } = assertPullRequestIdentity(pr, {
+    repositoryId: state.repositoryId,
+    branch: expectedBranch,
+    headSha: state.preparedCommitSha,
+    baseSha: state.baseSha,
+    botLogin: options.botLogin,
+  });
+  if (merged) return { state: "merged", pr };
   if (pr.state !== "open") fail("candidate_closed", "Release PR is closed before merge.");
   if (typeof api.listReviewThreads !== "function") fail("review_threads_unavailable", "Release PR discussion evidence is unavailable.");
   const threads = await apiCall(api, auth, "listReviewThreads", [state.prNumber]);
@@ -2282,7 +3087,7 @@ async function validatePullRequestGates(api, auth, state, options = {}) {
   if (asArray(reviews, "reviews").some((review) => String(review.state).toUpperCase() === "CHANGES_REQUESTED")) {
     fail("changes_requested", "Release PR has a changes-requested review.");
   }
-  return { state: "open", pr, baseSha };
+  return { state: "open", pr, baseSha: state.baseSha };
 }
 
 function branchName(operationId, version, attempt) {
@@ -2554,7 +3359,19 @@ export async function checkMainPublication(api, auth, mergedSha, options = {}) {
   const jobs = collectionItems(jobsResponse, "jobs", "main workflow jobs");
   const jobResult = jobsForWorkflowRun(jobs, verification, normalizedSha, { includeEdge: true });
   if (jobResult.failures.length > 0) return { state: "failed", verification: verification.value, edge: jobResult.edge, statuses: jobResult.statuses, failures: jobResult.failures };
-  if (jobResult.pending || runResult === "pending") return { state: "pending", verification: verification.value, edge: jobResult.edge, statuses: jobResult.statuses };
+  if (jobResult.pending || runResult === "pending") {
+    if (runResult === "success") {
+      // A completed successful run can never produce the missing job later, so
+      // absent main or edge evidence is a permanent failure, not a pending wait.
+      const missing = Object.entries(jobResult.statuses)
+        .filter(([, value]) => value === "missing")
+        .map(([context]) => ({ context, reason: "missing" }));
+      if (missing.length > 0) {
+        return { state: "failed", verification: verification.value, edge: jobResult.edge, statuses: jobResult.statuses, failures: missing };
+      }
+    }
+    return { state: "pending", verification: verification.value, edge: jobResult.edge, statuses: jobResult.statuses };
+  }
   return { state: "passed", verification: verification.value, edge: jobResult.edge, statuses: jobResult.statuses };
 }
 
@@ -2740,7 +3557,7 @@ export async function runCredentialFreePreparer({
   python = process.env.PYTHON ?? "python3",
   cwd = process.cwd(),
   input,
-  timeoutMs = 120_000,
+  timeoutMs = DEFAULT_PREPARER_TIMEOUT_MS,
   environment = process.env,
 } = {}) {
   if (!fs.existsSync(scriptPath)) fail("preparer_unavailable", "Deterministic release preparer is unavailable.");
@@ -2841,6 +3658,66 @@ async function computeWorkingTreeDigest(cwd) {
   return digest.digest("hex");
 }
 
+async function captureCompleteHistory(api, auth, previousStableTag, baseSha, repository) {
+  const commits = [];
+  const seen = new Set();
+  let declaredTotal;
+  for (let page = 1; page <= MAX_HISTORY_PAGES; page += 1) {
+    const comparison = asObject(
+      await apiCall(api, auth, "compareCommits", [previousStableTag, baseSha, { page, perPage: HISTORY_PAGE_SIZE }]),
+      "release history comparison",
+    );
+    if (comparison.total_commits !== undefined) {
+      const total = Number(comparison.total_commits);
+      if (!Number.isSafeInteger(total) || total < 0) fail("history_input_invalid", "GitHub reported a malformed release history total.");
+      if (declaredTotal === undefined) {
+        if (total > MAX_HISTORY_COMMITS) {
+          fail("history_bound_exceeded", "Release history exceeds the bounded capture limit; history cannot be truncated silently.", {
+            total,
+            bound: MAX_HISTORY_COMMITS,
+          });
+        }
+        declaredTotal = total;
+      } else if (total !== declaredTotal) {
+        fail("history_incomplete", "Release history changed while it was being captured.");
+      }
+    }
+    const pageCommits = asArray(comparison.commits ?? [], "release history commits");
+    if (pageCommits.length > HISTORY_PAGE_SIZE) {
+      fail("history_incomplete", "GitHub returned more history commits than the requested page size.");
+    }
+    for (const commit of pageCommits) {
+      const value = asObject(commit, "release history commit");
+      const sha = normalizeSha(value.sha, "history commit SHA");
+      if (seen.has(sha)) fail("history_incomplete", "Release history pagination repeated a commit.");
+      seen.add(sha);
+      commits.push({ sha, url: boundedRepositoryUrl(repository, commit.html_url ?? commit.url, "history commit URL") });
+    }
+    if (commits.length > MAX_HISTORY_COMMITS) {
+      fail("history_bound_exceeded", "Release history exceeds the bounded capture limit; history cannot be truncated silently.", {
+        collected: commits.length,
+        bound: MAX_HISTORY_COMMITS,
+      });
+    }
+    if (pageCommits.length < HISTORY_PAGE_SIZE) {
+      // A short page is the provider's own end-of-history signal. When the
+      // provider also declares a total, both must agree exactly.
+      if (declaredTotal !== undefined && commits.length !== declaredTotal) {
+        fail("history_incomplete", "Release history capture did not return the declared commit count.", {
+          declared: declaredTotal,
+          collected: commits.length,
+        });
+      }
+      return commits;
+    }
+    if (declaredTotal !== undefined && commits.length >= declaredTotal) {
+      if (commits.length > declaredTotal) fail("history_incomplete", "Release history capture returned more commits than declared.");
+      return commits;
+    }
+  }
+  fail("history_incomplete", "Release history pagination exceeded the bounded page count.", { bound: MAX_HISTORY_PAGES });
+}
+
 async function captureHistory(api, auth, previousStableTag, baseSha, repository, requestedVersion, baseTreeDigest) {
   if (typeof api.captureReleaseInputs === "function") {
     const snapshot = await apiCall(api, auth, "captureReleaseInputs", [{ previousStableTag, baseSha, repository, requestedVersion }]);
@@ -2852,11 +3729,7 @@ async function captureHistory(api, auth, previousStableTag, baseSha, repository,
   normalizeSha(baseCommit.tree?.sha ?? baseCommit.treeSha, "base Git tree SHA");
   const trustedBaseTreeDigest = normalizeDigest(baseTreeDigest, "base tree digest");
   const previousSha = await resolveTagCommitSha(api, auth, previousStableTag);
-  const comparison = await apiCall(api, auth, "compareCommits", [previousStableTag, baseSha]);
-  const commits = asArray(comparison.commits ?? [], "release history commits").slice(0, MAX_HISTORY_COMMITS).map((commit) => ({
-    sha: normalizeSha(commit.sha, "history commit SHA"),
-    url: boundedRepositoryUrl(repository, commit.html_url ?? commit.url, "history commit URL"),
-  }));
+  const commits = await captureCompleteHistory(api, auth, previousStableTag, baseSha, repository);
   const pullRequests = [];
   const seenPullRequests = new Set();
   if (typeof api.getCommitPullRequests === "function") {
@@ -2891,6 +3764,173 @@ async function captureHistory(api, auth, previousStableTag, baseSha, repository,
   };
 }
 
+/**
+ * Create a clean checkout of the recorded base commit on a path that never
+ * holds write credentials. `git worktree` shares the trusted controller's
+ * object database while keeping a separate, empty working directory, so no
+ * candidate content and no credential ever reaches the source checkout.
+ */
+export async function createCleanBaseCheckout({ sourceCwd = process.cwd(), baseSha, temporaryDirectory } = {}) {
+  const base = normalizeSha(baseSha, "recorded base SHA");
+  const repositoryRoot = path.resolve(sourceCwd);
+  const parent = path.resolve(temporaryDirectory ?? os.tmpdir());
+  await fsp.mkdir(parent, { recursive: true, mode: 0o700 });
+  const checkoutRoot = await fsp.mkdtemp(path.join(parent, "media-finder-release-base-"));
+  // `git worktree add` requires an empty or non-existent target directory.
+  await fsp.rm(checkoutRoot, { recursive: true, force: true });
+  const environment = sanitizeCredentialEnvironment(process.env);
+  const runGit = async (arguments_) => {
+    try {
+      return await execFileAsync("git", ["-C", repositoryRoot, ...arguments_], {
+        env: environment,
+        shell: false,
+        maxBuffer: MAX_RESPONSE_BYTES,
+        encoding: "utf8",
+      });
+    } catch {
+      fail("regeneration_checkout_unavailable", "The clean base checkout could not be created or inspected.");
+    }
+  };
+  const cleanup = async () => {
+    try {
+      await execFileAsync("git", ["-C", repositoryRoot, "worktree", "remove", "--force", checkoutRoot], {
+        env: environment,
+        shell: false,
+        maxBuffer: MAX_RESPONSE_BYTES,
+      });
+    } catch {
+      // The worktree may already be gone; fall through to direct removal.
+    }
+    try {
+      await execFileAsync("git", ["-C", repositoryRoot, "worktree", "prune"], { env: environment, shell: false, maxBuffer: MAX_RESPONSE_BYTES });
+    } catch {
+      // Pruning is best effort; the checkout itself is still removed below.
+    }
+    await fsp.rm(checkoutRoot, { recursive: true, force: true });
+  };
+  try {
+    await runGit(["worktree", "add", "--detach", checkoutRoot, base]);
+    const head = (await runGit(["-C", checkoutRoot, "rev-parse", "HEAD"])).stdout.trim();
+    if (normalizeSha(head, "clean checkout HEAD") !== base) {
+      fail("regeneration_checkout_invalid", "The clean checkout is not at the recorded base commit.");
+    }
+    const status = (await runGit(["-C", checkoutRoot, "status", "--porcelain"])).stdout;
+    if (status.trim() !== "") fail("regeneration_checkout_invalid", "The clean checkout of the recorded base is not clean.");
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
+  return { root: checkoutRoot, cleanup };
+}
+
+function assertReproducedCandidateTree(evidence, prepared, { baseSha, version, snapshot }) {
+  const mismatch = (message, details = {}) => fail("candidate_regeneration_mismatch", message, details);
+  if (prepared.version !== version) mismatch("Regenerated candidate version differs from the recorded version.");
+  if (prepared.baseCommit !== baseSha) mismatch("Regenerated candidate base differs from the recorded base commit.");
+  if (prepared.previousStableTag !== boundedString(evidence.previousStableTag, "recorded previous stable tag", 100)) {
+    mismatch("Regenerated candidate previous stable tag differs from the recorded tag.");
+  }
+  if (prepared.previousStableSha !== normalizeSha(evidence.previousStableSha, "recorded previous stable SHA")) {
+    mismatch("Regenerated candidate previous stable commit differs from the recorded commit.");
+  }
+  if (prepared.snapshotSha256 !== sha256(`${canonicalJson(snapshot)}\n`)) {
+    mismatch("Regeneration did not consume the recorded captured release inputs.");
+  }
+  const recordedTree = normalizeExpectedTreeMap(evidence.expectedTree?.files);
+  const producedTree = prepared.expectedTree;
+  const recordedPaths = Object.keys(recordedTree);
+  const producedPaths = Object.keys(producedTree);
+  if (recordedPaths.length !== producedPaths.length || recordedPaths.some((filePath, index) => filePath !== producedPaths[index])) {
+    mismatch("Regenerated candidate tree does not contain the recorded file set.", {
+      recordedFiles: recordedPaths.length,
+      producedFiles: producedPaths.length,
+    });
+  }
+  for (const filePath of recordedPaths) {
+    if (recordedTree[filePath].mode !== producedTree[filePath].mode || recordedTree[filePath].sha256 !== producedTree[filePath].sha256) {
+      mismatch("Regenerated candidate content differs from the recorded immutable tree.", { path: filePath });
+    }
+  }
+  const recordedDigest = normalizeDigest(evidence.candidateTreeSha256 ?? evidence.expectedTree?.digest, "recorded candidate tree digest");
+  if (prepared.candidateTreeSha256 !== recordedDigest) {
+    mismatch("Regenerated candidate tree digest differs from the recorded immutable tree.");
+  }
+  const recordedFiles = normalizeCandidateFiles(evidence.candidateFiles);
+  if (recordedFiles.length !== prepared.changedFiles.length) {
+    mismatch("Regenerated candidate changed-file set differs from the recorded candidate.");
+  }
+  for (const [index, recorded] of recordedFiles.entries()) {
+    const produced = prepared.changedFiles[index];
+    if (recorded.path !== produced.path || recorded.mode !== produced.mode || sha256(recorded.content) !== sha256(produced.content)) {
+      mismatch("Regenerated candidate changed-file content differs from the recorded candidate.", { path: recorded.path });
+    }
+  }
+  return true;
+}
+
+/**
+ * Reproduce the entire recorded candidate tree from the recorded base, the
+ * requested version and the captured snapshot by running the credential-free
+ * preparer in a clean checkout of the recorded base. Any difference from the
+ * recorded expected tree is refused.
+ */
+export async function reproduceCandidateTree({
+  state,
+  cwd = process.cwd(),
+  preparer,
+  environment = process.env,
+  scriptPath,
+  python,
+  timeoutMs,
+  temporaryDirectory,
+} = {}) {
+  const evidence = asObject(state, "release state");
+  const baseSha = normalizeSha(evidence.baseSha, "recorded base SHA");
+  const version = parseStableVersion(evidence.version, "recorded version").text;
+  const snapshot = evidence.notesInputSnapshot;
+  if (snapshot === null || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    fail("regeneration_input_missing", "The captured release inputs are required to reproduce the candidate tree.");
+  }
+  const input = {
+    repository: normalizeRepository(evidence.repository),
+    baseSha,
+    version,
+    previousStableTag: boundedString(evidence.previousStableTag, "recorded previous stable tag", 100),
+    previousStableSha: normalizeSha(evidence.previousStableSha, "recorded previous stable SHA"),
+    notesInputSnapshot: snapshot,
+  };
+  const checkout = typeof preparer?.createCheckout === "function"
+    ? await preparer.createCheckout({ baseSha, sourceCwd: cwd })
+    : await createCleanBaseCheckout({ sourceCwd: cwd, baseSha, temporaryDirectory });
+  if (!checkout || typeof checkout.root !== "string" || checkout.root.length === 0) {
+    fail("regeneration_checkout_unavailable", "The clean checkout of the recorded base is unavailable.");
+  }
+  try {
+    const raw = typeof preparer?.prepare === "function"
+      ? await preparer.prepare({ root: checkout.root, version, snapshot, ...input })
+      : await runCredentialFreePreparer({
+        cwd: checkout.root,
+        input,
+        environment,
+        ...(scriptPath === undefined ? {} : { scriptPath }),
+        ...(python === undefined ? {} : { python }),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      });
+    if (!raw) fail("regeneration_failed", "The credential-free preparer returned no output while reproducing the candidate tree.");
+    const prepared = candidateFilesFromPreparationResult(raw, checkout.root);
+    assertReproducedCandidateTree(evidence, prepared, { baseSha, version, snapshot });
+    return {
+      version,
+      baseSha,
+      candidateFiles: prepared.changedFiles,
+      expectedTree: prepared.expectedTree,
+      candidateTreeSha256: prepared.candidateTreeSha256,
+    };
+  } finally {
+    if (typeof checkout.cleanup === "function") await checkout.cleanup();
+  }
+}
+
 function boundedRepositoryUrl(repository, value, label) {
   const url = boundedString(value, label, 500);
   const parsed = new URL(url);
@@ -2899,6 +3939,9 @@ function boundedRepositoryUrl(repository, value, label) {
 }
 
 async function preparePhase({ api, auth, artifacts, context, input, config, preparer, cwd }) {
+  // Preparation is bounded by the same operation-wide budget as the waits, so a
+  // deadline that already elapsed stops before any candidate object is created.
+  const preparationBudgetMs = config.budget === undefined ? undefined : config.budget.remaining("release preparation");
   validateDispatchContext(context, {
     repository: config.repository,
     allowedActors: config.allowedActors,
@@ -2915,7 +3958,7 @@ async function preparePhase({ api, auth, artifacts, context, input, config, prep
   }
   const main = await apiCall(api, auth, "getRef", ["heads/main"]);
   const baseSha = normalizeSha(main.object?.sha, "main SHA");
-  if (context.sha && normalizeSha(context.sha, "workflow SHA") !== baseSha && config.allowDispatchShaDrift !== true) fail("base_identity_mismatch", "Workflow SHA is not the current main commit.");
+  if (context.sha && normalizeSha(context.sha, "workflow SHA") !== baseSha) fail("base_identity_mismatch", "Workflow SHA is not the current main commit.");
   const latest = await readLatestStable(api, auth);
   const requested = validateRequestedVersion(input.version, {
     currentVersion: input.currentVersion ?? currentVersionFromWorkspace(cwd),
@@ -2940,7 +3983,12 @@ async function preparePhase({ api, auth, artifacts, context, input, config, prep
   };
   const rawPrepared = preparer
     ? await preparer.prepare?.({ root: cwd, version: requested.text, snapshot: notesInputSnapshot, ...prepInput })
-    : await runCredentialFreePreparer({ cwd, input: prepInput, environment: config.environment });
+    : await runCredentialFreePreparer({
+      cwd,
+      input: prepInput,
+      environment: config.environment,
+      ...(preparationBudgetMs === undefined ? {} : { timeoutMs: Math.min(DEFAULT_PREPARER_TIMEOUT_MS, preparationBudgetMs) }),
+    });
   if (!rawPrepared) fail("preparer_failed", "Deterministic release preparer returned no output.");
   const prepared = candidateFilesFromPreparationResult(rawPrepared, cwd);
   const snapshotDigest = sha256(`${canonicalJson(notesInputSnapshot)}\n`);
@@ -3089,7 +4137,7 @@ async function loadAndVerifyPreparation({ api, auth, artifacts, state, input, co
   const downloaded = await artifacts.read(record.id, {
     digest: record.digest,
     expectedFilename: "release-evidence.json",
-    workflowRunId: state.originRunId,
+    workflowRunId: record.workflowRunId,
   });
   const recoveredValue = decodedArtifactValue(downloaded);
   const recovered = assertPreparationArtifact(recoveredValue, {
@@ -3111,9 +4159,9 @@ async function ensureSameVersionConflict(api, auth, state, config) {
   const active = pulls.filter((pr) => String(pr.head?.ref ?? "").startsWith("release-"));
   for (const pr of active) {
     if (Number(pr.number) === Number(state.prNumber)) continue;
-    const versionMatch = String(pr.head?.ref ?? "").match(/-v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))-/);
-    if (versionMatch && versionMatch[1] !== state.version) fail("concurrent_release", "Another stable release operation is active.");
-    if (versionMatch && versionMatch[1] === state.version) fail("duplicate_release_state", "An authenticated same-version release operation already exists.");
+    const activeVersion = releaseVersionFromRef(pr.head?.ref);
+    if (activeVersion !== undefined && activeVersion !== state.version) fail("concurrent_release", "Another stable release operation is active.");
+    if (activeVersion === state.version) fail("duplicate_release_state", "An authenticated same-version release operation already exists.");
   }
 }
 
@@ -3172,8 +4220,54 @@ async function exposeCandidateRef(api, auth, branch, commitSha) {
 
 async function executePhase({ api, auth, artifacts, publisher, context, input, config, preparer, cwd, clock }) {
   const loaded = await loadAndVerifyPreparation({ api, auth, artifacts, state: input.state, input, config, context, clock });
-  let state = { ...loaded.evidence, artifact: loaded.artifact, status: "authorized" };
+  const identity = authenticatedAppIdentity(auth, loaded.evidence.repository, config.repositoryId ?? loaded.evidence.repositoryId);
+  const botLogin = appBotLogin(identity);
+  // Runtime decisions (a recorded PR association or merged SHA) are applied
+  // after the immutable evidence is validated, so they never alter the digest
+  // of the persisted payload.
+  let state = { ...loaded.evidence, artifact: loaded.artifact, status: "authorized", ...(input.runtime ?? {}) };
+  if (input.runtime?.mergedSha !== undefined) state = { ...state, status: "merged" };
+  // Report the completed boundary when the operation-wide deadline expires.
+  config.budget?.watch(() => ({
+    operationId: state.operationId,
+    repository: state.repository,
+    attempt: state.attempt,
+    status: state.status,
+    prNumber: state.prNumber,
+    preparedCommitSha: state.preparedCommitSha,
+    baseSha: state.baseSha,
+    mergedSha: state.mergedSha,
+    deadlineAt: new Date(config.budget.deadlineAt).toISOString(),
+  }));
   await ensureSameVersionConflict(api, auth, state, config);
+  // Reconcile the immutable checkpoint chain with live state before any
+  // mutation, so a crash before or after a side effect resumes the recorded
+  // identity instead of creating or closing anything a second time.
+  const checkpointChain = await discoverCheckpointChain({
+    api,
+    auth,
+    artifacts,
+    context,
+    version: state.version,
+    repository: state.repository,
+    repositoryId: state.repositoryId,
+    allowedActors: config.allowedActors,
+    now: clock.now(),
+  });
+  const recordedCheckpoints = await reconcileRecordedCheckpoints({ api, auth, chain: checkpointChain, state, botLogin });
+  if (recordedCheckpoints.kind === "merged" || recordedCheckpoints.kind === "pr-created") {
+    state = {
+      ...state,
+      branch: branchName(state.operationId, state.version, state.attempt),
+      prNumber: recordedCheckpoints.prNumber,
+      prHeadSha: state.preparedCommitSha,
+      prBaseSha: state.baseSha,
+      status: recordedCheckpoints.kind === "merged" ? "merged" : "pr_created",
+      ...(recordedCheckpoints.kind === "merged"
+        ? { mergedSha: normalizeSha(recordedCheckpoints.mergedSha, "recorded merged SHA") }
+        : {}),
+    };
+  }
   if (state.prNumber === undefined) {
     // Inspect the authoritative protection response before any branch or PR
     // mutation can expose this candidate.
@@ -3191,20 +4285,50 @@ async function executePhase({ api, auth, artifacts, publisher, context, input, c
     const branch = branchName(state.operationId, state.version, state.attempt);
     await exposeCandidateRef(api, auth, branch, state.preparedCommitSha);
     state = { ...state, branch, prHeadSha: state.preparedCommitSha, prBaseSha: state.baseSha };
-    const pr = await mutationWithReconcile(
-      api,
-      auth,
-      () => invoke(api, "createPullRequest", [{
-        title: `chore(release): prepare ${releaseTag(state.version)}`,
-        head: branch,
-        base: "main",
-        body: releaseNotesFromEvidence(state),
-        maintainer_can_modify: false,
-      }]),
-      async () => ({ completed: false, ambiguous: true }),
-    );
+    // Reconcile before create: an interrupted earlier attempt may already have
+    // created the authentic App pull request for this exact candidate. Adopt
+    // only a live pull request carrying every expected identity; a conflicting
+    // claim on the generated branch stops the operation without closing,
+    // editing, labelling or force-pushing it.
+    let pr = await findMatchingReleasePullRequest(api, auth, {
+      state,
+      branch,
+      repositoryId: state.repositoryId,
+      botLogin,
+    });
+    if (!pr) {
+      pr = await mutationWithReconcile(
+        api,
+        auth,
+        () => invoke(api, "createPullRequest", [{
+          title: `chore(release): prepare ${releaseTag(state.version)}`,
+          head: branch,
+          base: "main",
+          body: releaseNotesFromEvidence(state),
+          maintainer_can_modify: false,
+        }]),
+        // The creation request may have succeeded even though its response
+        // never arrived. Re-read live pull-request state before concluding
+        // that the creation did not happen.
+        async () => {
+          const existing = await findMatchingReleasePullRequest(api, auth, {
+            state,
+            branch,
+            repositoryId: state.repositoryId,
+            botLogin,
+          });
+          return existing ? { completed: true, value: existing } : { completed: false, ambiguous: false };
+        },
+      );
+      assertPullRequestIdentity(pr, {
+        repositoryId: state.repositoryId,
+        branch,
+        headSha: state.preparedCommitSha,
+        baseSha: state.baseSha,
+        botLogin,
+      });
+    }
     const prNumber = normalizePrNumber(pr.number);
-    if (String(pr.head?.sha ?? "").toLowerCase() !== state.preparedCommitSha.toLowerCase()) fail("candidate_identity_mismatch", "GitHub created a PR with an unexpected head.");
     state = { ...state, prNumber, prHeadSha: state.preparedCommitSha, prBaseSha: state.baseSha, status: "pr_created" };
     if (artifacts && typeof artifacts.upload === "function") {
       const checkpoint = await persistImmutableCheckpoint(artifacts, {
@@ -3218,22 +4342,24 @@ async function executePhase({ api, auth, artifacts, publisher, context, input, c
         prNumber,
         prHeadSha: state.prHeadSha,
         prBaseSha: state.prBaseSha,
+        ...producerIdentity(context, config),
       }, state);
       state = { ...state, prCheckpoint: checkpoint.artifact };
     }
   } else {
     await verifyPreparedCommit(api, auth, state);
   }
-  const gates = await validatePullRequestGates(api, auth, state, config);
+  const gates = await validatePullRequestGates(api, auth, state, { ...config, botLogin });
   if (gates.state === "merged") {
     state = { ...state, mergedSha: normalizeSha(gates.pr.merge_commit_sha, "merged SHA"), status: "merged" };
   } else {
     const checkResult = await waitForPullRequestChecks(api, auth, {
-      headSha: state.prHeadSha,
+      headSha: state.preparedCommitSha,
       baseSha: state.baseSha,
       requiredContexts: REQUIRED_CHECK_CONTEXTS,
       repository: state.repository,
       repositoryId: state.repositoryId,
+      budget: config.budget,
       deadlineMs: config.deadlineMs,
       clock,
     });
@@ -3245,65 +4371,129 @@ async function executePhase({ api, auth, artifacts, publisher, context, input, c
       if (refreshed.merged_at || refreshed.merged === true) {
         state = { ...state, mergedSha: normalizeSha(refreshed.merge_commit_sha, "merged SHA"), status: "merged" };
       } else {
-        if (state.attempt >= MAX_CANDIDATE_ATTEMPTS) fail("base_changed_repeatedly", "Candidate attempt budget is exhausted after repeated base changes.");
-        if (artifacts && typeof artifacts.upload === "function") {
-          await persistImmutableCheckpoint(artifacts, {
-            checkpointKind: "stale-base",
-            repository: state.repository,
-            operationId: state.operationId,
-            attempt: state.attempt,
-            preparationArtifactId: state.artifact.id,
-            preparationArtifactDigest: state.artifact.digest,
-            trustedControllerSha: state.trustedControllerSha,
-            prNumber: state.prNumber,
-            prHeadSha: state.prHeadSha,
-            prBaseSha: state.baseSha,
-            disposition: "terminal_stale_base",
-            currentMainSha: latestMainSha,
-          }, state);
-        } else {
-          fail("checkpoint_writer_unavailable", "Stale candidate cannot be closed without durable immutable disposition evidence.");
-        }
+        // The candidate must still be this attempt's own unaltered App pull
+        // request. A manual edit stops the operation instead of being closed,
+        // overwritten or force-pushed.
+        assertPullRequestIdentity(refreshed, {
+          repositoryId: state.repositoryId,
+          branch: branchName(state.operationId, state.version, state.attempt),
+          headSha: state.preparedCommitSha,
+          baseSha: state.baseSha,
+          botLogin,
+          allowStaleBase: true,
+        });
+        await persistStaleDisposition({
+          artifacts,
+          evidence: state,
+          artifact: state.artifact,
+          prNumber: state.prNumber,
+          currentMainSha: latestMainSha,
+          producer: producerIdentity(context, config),
+          recorded: selectAttemptCheckpoints(checkpointChain.records, state.attempt).get("stale-base"),
+        });
         await mutationWithReconcile(api, auth, () => invoke(api, "updatePullRequest", [state.prNumber, { state: "closed" }]), async () => {
           const observed = await apiCall(api, auth, "getPullRequest", [state.prNumber]);
           return observed.state === "closed" ? { completed: true, value: observed } : { ambiguous: true };
         });
-        fail("base_changed", "Candidate was closed as stale; resume with a new bounded candidate attempt.", { attempt: state.attempt, nextAttempt: state.attempt + 1 });
+        if (state.attempt >= MAX_CANDIDATE_ATTEMPTS) {
+          fail("base_changed_repeatedly", "Candidate attempt budget is exhausted after repeated base changes.", {
+            attempt: state.attempt,
+            bound: MAX_CANDIDATE_ATTEMPTS,
+            currentMainSha: latestMainSha,
+          });
+        }
+        fail("base_changed", "Candidate was closed as stale; the same version resumes with the next bounded attempt.", {
+          attempt: state.attempt,
+          nextAttempt: state.attempt + 1,
+          currentMainSha: latestMainSha,
+          resume: "Dispatch the same canonical version to create the next bounded candidate attempt.",
+        });
       }
     } else {
-      // Re-read protection after all candidate checks and immediately before
-      // the protected squash mutation. This closes the settings-drift race
-      // without changing or bypassing repository rules.
-      await validateMainBranchProtection(api, auth, REQUIRED_CHECK_CONTEXTS, {
-        repository: state.repository,
-        repositoryId: state.repositoryId,
+      // Reproduce the entire recorded candidate tree from the recorded base,
+      // the requested version and the captured snapshot before the protected
+      // merge. The reproduction runs the credential-free preparer in a clean
+      // checkout of the recorded base on a path that never holds write
+      // credentials, and any difference from the recorded immutable tree stops
+      // the merge.
+      await reproduceCandidateTree({
+        state,
+        cwd,
+        preparer,
+        environment: config.environment ?? process.env,
       });
-      const merge = await mutationWithReconcile(
-        api,
-        auth,
-        () => invoke(api, "mergePullRequest", [state.prNumber, { merge_method: "squash", expected_head_sha: state.prHeadSha }]),
-        async () => {
-          const observed = await apiCall(api, auth, "getPullRequest", [state.prNumber]);
-          if (observed.merged_at || observed.merged === true) return { completed: true, value: observed };
-          if (observed.state !== "open") return { ambiguous: true };
-          return { completed: false, ambiguous: false };
-        },
-      );
-      if (merge.merged !== true && !merge.merged_at) fail("merge_rejected", "Protected squash merge was not accepted.");
-      state = { ...state, mergedSha: normalizeSha(merge.sha ?? merge.merge_commit_sha, "merged SHA"), status: "merged" };
+      // Revalidate the candidate immediately before the protected mutation.
+      // Polling can take hours, so the authenticated identity, the open state,
+      // resolved discussions and unhandled review requests are re-read here:
+      // a head change, newly opened conversation or new review request
+      // invalidates every earlier result for this candidate. Re-reading also
+      // reconciles a merge that happened while the checks were pending.
+      const revalidated = await validatePullRequestGates(api, auth, state, { ...config, botLogin });
+      if (revalidated.state === "merged") {
+        state = { ...state, mergedSha: normalizeSha(revalidated.pr.merge_commit_sha, "merged SHA"), status: "merged" };
+      } else {
+        // Re-read protection after all candidate checks and immediately before
+        // the protected squash mutation. This closes the settings-drift race
+        // without changing or bypassing repository rules.
+        await validateMainBranchProtection(api, auth, REQUIRED_CHECK_CONTEXTS, {
+          repository: state.repository,
+          repositoryId: state.repositoryId,
+        });
+        const merge = await mutationWithReconcile(
+          api,
+          auth,
+          () => invoke(api, "mergePullRequest", [state.prNumber, { merge_method: "squash", expected_head_sha: state.preparedCommitSha }]),
+          async () => {
+            const observed = await apiCall(api, auth, "getPullRequest", [state.prNumber]);
+            if (observed.merged_at || observed.merged === true) return { completed: true, value: observed };
+            if (observed.state !== "open") return { ambiguous: true };
+            return { completed: false, ambiguous: false };
+          },
+        );
+        if (merge.merged !== true && !merge.merged_at) fail("merge_rejected", "Protected squash merge was not accepted.");
+        state = { ...state, mergedSha: normalizeSha(merge.sha ?? merge.merge_commit_sha, "merged SHA"), status: "merged" };
+      }
     }
   }
   const merged = normalizeSha(state.mergedSha, "merged SHA");
+  if (artifacts && typeof artifacts.upload === "function" && state.prNumber !== undefined &&
+      selectAttemptCheckpoints(checkpointChain.records, state.attempt).get("merged") === undefined) {
+    // Record the accepted merged SHA as an immutable checkpoint chained to the
+    // preparation artifact so recovery can bind the merge to its intent.
+    const mergedCheckpoint = await persistImmutableCheckpoint(artifacts, {
+      checkpointKind: "merged",
+      repository: state.repository,
+      operationId: state.operationId,
+      attempt: state.attempt,
+      preparationArtifactId: state.artifact.id,
+      preparationArtifactDigest: state.artifact.digest,
+      trustedControllerSha: state.trustedControllerSha,
+      prNumber: state.prNumber,
+      prHeadSha: state.preparedCommitSha,
+      prBaseSha: state.baseSha,
+      mergedSha: merged,
+      ...producerIdentity(context, config),
+    }, state);
+    state = { ...state, mergedCheckpoint: mergedCheckpoint.artifact };
+  }
   await verifyCandidateTree(api, auth, merged, state.expectedTree.digest, state.expectedTree.files, state.candidateFiles);
   const mainRef = await apiCall(api, auth, "getRef", ["heads/main"]);
   const mainSha = normalizeSha(mainRef.object?.sha, "main SHA after merge");
-  if (mainSha !== merged && typeof api.compareCommits === "function") {
+  if (mainSha !== merged) {
+    // Reachability of the accepted merge commit is a release gate, so a missing
+    // comparison primitive fails closed instead of skipping the check.
+    if (typeof api.compareCommits !== "function") {
+      fail("merged_not_on_main", "Merged commit ancestry cannot be verified without the compare endpoint.", {
+        mergedSha: merged,
+        mainSha,
+      });
+    }
     const comparison = await apiCall(api, auth, "compareCommits", [merged, mainSha]);
     if (!["ahead", "identical"].includes(String(comparison.status).toLowerCase())) fail("merged_not_on_main", "Accepted merge commit is not reachable from main.");
   }
   const mainPublication = await pollUntil(
     () => checkMainPublication(api, auth, merged, { repository: state.repository, repositoryId: state.repositoryId }),
-    { clock, deadlineMs: config.deadlineMs, label: "main and edge verification" },
+    { clock, budget: config.budget, deadlineMs: config.deadlineMs, label: "main and edge verification" },
   );
   if (mainPublication.state !== "passed") fail("main_edge_not_verified", "Main verification and edge publication for the exact merged SHA did not succeed.", mainPublication);
   const tag = releaseTag(state.version);
@@ -3360,9 +4550,10 @@ async function executePhase({ api, auth, artifacts, publisher, context, input, c
     releaseId: Number(release.id),
     releaseUrl: release.html_url,
     mainWorkflowRunId: mainPublication.verification?.id,
-    edgeWorkflowRunId: mainPublication.edge?.id,
+    edgeWorkflowRunId: mainPublication.edge?.run_id ?? mainPublication.verification?.id,
+    edgeJobId: mainPublication.edge?.id,
   };
-  const publication = await waitForPublication(api, auth, artifacts, publisher, state, { clock, deadlineMs: config.deadlineMs });
+  const publication = await waitForPublication(api, auth, artifacts, publisher, state, { clock, budget: config.budget, deadlineMs: config.deadlineMs });
   if (publication.state !== "passed" || !publication.publication) {
     const run = publication.run;
     fail(publication.state === "failed" ? "publication_failed" : "publication_incomplete", "Stable publication did not produce validated canonical evidence; the release remains incomplete.", {
@@ -3376,72 +4567,310 @@ async function executePhase({ api, auth, artifacts, publisher, context, input, c
       publicationState: publication.state,
     });
   }
-  state = { ...state, publication: publication.publication, status: "complete" };
+  state = {
+    ...state,
+    publication: publication.publication,
+    releaseWorkflowRunId: publication.run?.id,
+    status: "complete",
+  };
   if (config.evidencePath) await writeJsonFile(config.evidencePath, buildStructuredEvidence(state));
   return { state, publication: publication.publication };
 }
 
-export function buildStructuredEvidence(state) {
-  const value = asObject(state, "release state");
-  const nextAction = value.status === "complete"
-    ? "No action required."
-    : "Resume the same operation after reviewing the recorded completed boundary.";
+export const RELEASE_SUMMARY_EVIDENCE_KIND = "release-summary";
+
+const REQUIRED_PUBLICATION_PLATFORMS = Object.freeze(["linux/amd64", "linux/arm64"]);
+
+function safeGithubURL(repository, suffix) {
+  if (typeof repository !== "string" || !REPOSITORY_PATTERN.test(repository)) return undefined;
+  return `https://github.com/${repository}/${suffix}`;
+}
+
+function safeRunURL(repository, runId) {
+  const numeric = Number(runId);
+  if (!Number.isSafeInteger(numeric) || numeric <= 0) return undefined;
+  return safeGithubURL(repository, `actions/runs/${numeric}`);
+}
+
+function safePullRequestURL(repository, number) {
+  const numeric = Number(number);
+  if (!Number.isSafeInteger(numeric) || numeric <= 0) return undefined;
+  return safeGithubURL(repository, `pull/${numeric}`);
+}
+
+/**
+ * Project validated stable-publication evidence into the summary shape. The
+ * canonical field is `actualTags`; the projection emits the three tag names
+ * plus their full records and never re-emits a `publication` object.
+ */
+function projectPublication(publication) {
+  if (publication === undefined || publication === null) return undefined;
+  const value = asObject(publication, "publication evidence");
+  const actualTags = Array.isArray(value.actualTags) ? value.actualTags.map((tag) => asObject(tag, "publication tag")) : [];
+  const tagNames = actualTags.map((tag) => tag.name).filter((name) => typeof name === "string");
+  return {
+    state: value.state,
+    image: value.image,
+    version: value.version,
+    releaseTag: value.releaseTag,
+    tagNames,
+    tagDetails: actualTags,
+    digest: value.digest,
+    platforms: Array.isArray(value.platforms) ? [...value.platforms] : [],
+    sourceRevision: value.sourceRevision,
+    workflowURL: value.workflowURL,
+    releaseURL: value.releaseURL,
+  };
+}
+
+/** Completion requires the canonical three-tag, two-platform publication evidence. */
+function publicationIsVerified(publication) {
+  if (publication === undefined) return false;
+  return publication.tagNames.length === 3 &&
+    typeof publication.digest === "string" && IMAGE_DIGEST_PATTERN.test(publication.digest) &&
+    REQUIRED_PUBLICATION_PLATFORMS.every((platform) => publication.platforms.includes(platform)) &&
+    typeof publication.sourceRevision === "string" && SHA_PATTERN.test(publication.sourceRevision);
+}
+
+// One authoritative next action per failure code or status. A failure that
+// reported an explicit resume instruction (`details.resume`) always wins.
+const FAILURE_NEXT_ACTIONS = Object.freeze({
+  base_changed: "Re-dispatch the same canonical version from the trusted workflow to obtain the next bounded candidate attempt.",
+  base_changed_before_candidate: "Re-dispatch the same canonical version from the trusted workflow to obtain the next bounded candidate attempt.",
+  base_changed_repeatedly: "The three-attempt budget is exhausted and a rerun cannot reset it; review the recorded reasons before requesting this version again.",
+  operation_deadline_exceeded: "Re-dispatch the same canonical version from the trusted workflow to resume from the immutable recovery state.",
+  operation_deadline_invalid: "Fix the requested deadline and re-dispatch the same canonical version.",
+  concurrent_release: "Wait for the active release operation to finish, then re-dispatch this version.",
+  duplicate_release_state: "Reconcile the existing authenticated release state before re-dispatching this version.",
+  checks_not_green: "Re-dispatch the same canonical version after the candidate checks succeed; do not merge without all seven contexts.",
+  main_edge_not_verified: "Re-run the guarded main verification and edge publication, then resume the same canonical version.",
+  publication_failed: "Re-run the guarded publisher for this release and then resume the same canonical version.",
+  publication_incomplete: "Re-run the guarded publisher for this release and then resume the same canonical version.",
+  timeout: "Re-dispatch the same canonical version from the trusted workflow to resume from the immutable recovery state.",
+});
+
+function releaseNextAction({ status, error } = {}) {
+  const explicit = error?.details?.resume;
+  if (typeof explicit === "string" && explicit.length > 0 && explicit.length <= 500) return explicit;
+  if (error !== undefined && typeof error?.code === "string") {
+    return FAILURE_NEXT_ACTIONS[error.code] ?? "Review the safe diagnostic and the recorded completed boundary, then re-dispatch the same canonical version to resume.";
+  }
+  if (status === "complete") return "No action required.";
+  if (status === "incomplete") {
+    return "Publication evidence is missing or unverified; re-dispatch the same canonical version and reconcile the stable publication.";
+  }
+  return "Re-dispatch the same canonical version from the trusted workflow to resume the recorded operation.";
+}
+
+/**
+ * Canonical, idempotent structured evidence. Passing an already-projected
+ * evidence object returns it unchanged, so a second projection can never drop
+ * identities. The projection reports success only with verified publication
+ * evidence, and it preserves a caller-supplied next action and error block.
+ */
+export function buildStructuredEvidence(stateOrEvidence) {
+  const value = asObject(stateOrEvidence, "release state");
+  if (value.evidenceKind === RELEASE_SUMMARY_EVIDENCE_KIND) return value;
+  const repository = typeof value.repository === "string" && REPOSITORY_PATTERN.test(value.repository)
+    ? value.repository
+    : undefined;
+  const publication = projectPublication(value.publication);
+  const claimsComplete = value.status === "complete";
+  const verified = publicationIsVerified(publication);
+  const status = claimsComplete && !verified ? "incomplete" : value.status;
+  // The projection owns the next action; a caller-supplied string cannot
+  // override the per-failure or per-status authority.
+  const nextAction = releaseNextAction({ status, error: value.error });
+  const prNumber = Number(value.prNumber);
+  const pullRequest = Number.isSafeInteger(prNumber) && prNumber > 0
+    ? {
+      number: prNumber,
+      url: typeof value.prUrl === "string" && SAFE_URL_PATTERN.test(value.prUrl)
+        ? value.prUrl
+        : safePullRequestURL(repository, prNumber),
+      headSha: value.prHeadSha ?? value.preparedCommitSha,
+      baseSha: value.prBaseSha ?? value.baseSha,
+    }
+    : undefined;
+  const mainRunId = value.mainWorkflowRunId;
+  const edgeRunId = value.edgeWorkflowRunId ?? value.mainWorkflowRunId;
+  const releaseRunId = value.releaseWorkflowRunId;
+  const version = typeof value.version === "string" && VERSION_PATTERN.test(value.version) ? value.version : undefined;
   return {
     schemaVersion: RELEASE_AUTOMATION_SCHEMA_VERSION,
+    evidenceKind: RELEASE_SUMMARY_EVIDENCE_KIND,
     operationId: value.operationId,
-    status: value.status,
-    repository: value.repository,
+    status,
+    repository,
     attempt: value.attempt,
-    pullRequest: value.prNumber ? {
-      number: value.prNumber,
-      url: value.prUrl,
-      headSha: value.prHeadSha,
-      baseSha: value.prBaseSha ?? value.baseSha,
-    } : undefined,
+    baseSha: value.baseSha,
+    preparedCommitSha: value.preparedCommitSha,
+    pullRequest,
     mergedSha: value.mergedSha,
-    release: value.releaseId ? { id: value.releaseId, url: value.releaseUrl, tag: releaseTag(value.version) } : undefined,
+    release: value.releaseId
+      ? {
+        id: value.releaseId,
+        url: value.releaseUrl,
+        tag: version === undefined ? undefined : releaseTag(version),
+      }
+      : undefined,
+    tagNames: publication?.tagNames,
+    tagDetails: publication?.tagDetails,
+    digest: publication?.digest,
+    platforms: publication?.platforms,
+    sourceRevision: publication?.sourceRevision,
+    image: publication?.image,
+    releaseTag: publication?.releaseTag,
+    publicationState: publication?.state,
     workflow: {
-      mainRunId: value.mainWorkflowRunId,
-      edgeRunId: value.edgeWorkflowRunId,
-      releaseRunId: value.releaseWorkflowRunId,
+      requestRunId: value.originRunId,
+      requestRunURL: safeRunURL(repository, value.originRunId),
+      mainRunId,
+      mainRunURL: safeRunURL(repository, mainRunId),
+      edgeRunId,
+      edgeRunURL: safeRunURL(repository, edgeRunId),
+      edgeJobId: value.edgeJobId,
+      releaseRunId,
+      releaseRunURL: safeRunURL(repository, releaseRunId),
     },
-    tags: value.publication?.tags,
-    digest: value.publication?.digest,
-    platforms: value.publication?.platforms,
-    sourceRevision: value.publication?.sourceRevision,
     nextAction,
+    ...(value.error === undefined ? {} : { error: value.error }),
+  };
+}
+
+/**
+ * Canonical blocked evidence for a failed or timed-out controller run. It
+ * carries the completed boundary when the failure reported one, its own next
+ * action and the safe error block, so the workflow summary never replaces them
+ * with a generic resume message.
+ */
+export function buildBlockedEvidence({ error, environment = process.env } = {}) {
+  const failure = error instanceof ReleaseAutomationError
+    ? error
+    : new ReleaseAutomationError("controller_failed", "Release controller failed safely.");
+  const candidate = failure.details?.completedBoundary;
+  const boundary = candidate !== null && typeof candidate === "object" && !Array.isArray(candidate) ? candidate : undefined;
+  const projected = buildStructuredEvidence({
+    operationId: boundary?.operationId ?? environment.RELEASE_OPERATION_ID,
+    repository: boundary?.repository,
+    attempt: boundary?.attempt,
+    status: "blocked",
+    prNumber: boundary?.prNumber,
+    prHeadSha: boundary?.preparedCommitSha,
+    baseSha: boundary?.baseSha,
+    preparedCommitSha: boundary?.preparedCommitSha,
+    mergedSha: boundary?.mergedSha,
+    error: { code: failure.code, message: failure.message, details: failure.details },
+  });
+  return {
+    ...projected,
+    status: "blocked",
   };
 }
 
 export function formatWorkflowSummary(stateOrEvidence) {
-  const evidence = stateOrEvidence.schemaVersion === RELEASE_AUTOMATION_SCHEMA_VERSION && stateOrEvidence.operationId
-    ? buildStructuredEvidence(stateOrEvidence)
-    : stateOrEvidence;
+  // The projection is idempotent, so already-projected evidence passes through
+  // unchanged and no identity can be lost by a second projection.
+  const evidence = buildStructuredEvidence(stateOrEvidence);
+  const workflow = evidence.workflow ?? {};
   const lines = [
     `## Stable release ${evidence.status ?? "unknown"}`,
     "",
     `- Operation: \`${evidence.operationId ?? "unknown"}\``,
+    `- Repository: ${evidence.repository ?? "unknown"} (attempt ${evidence.attempt ?? "unknown"})`,
     `- Pull request: ${evidence.pullRequest?.url ?? "not created"}`,
     `- Head/base: \`${evidence.pullRequest?.headSha ?? "unknown"}\` / \`${evidence.pullRequest?.baseSha ?? "unknown"}\``,
     `- Merged SHA: \`${evidence.mergedSha ?? "not merged"}\``,
     `- Release: ${evidence.release?.url ?? "not created"}`,
-    `- Tags: ${(evidence.tags ?? []).join(", ") || "not verified"}`,
+    `- Main/edge workflow runs: ${workflow.mainRunId ?? "unknown"} / ${workflow.edgeRunId ?? "unknown"}`,
+    `- Release workflow run: ${workflow.releaseRunId ?? "unknown"}`,
+    `- Workflow URLs: ${workflow.mainRunURL ?? "unavailable"} / ${workflow.releaseRunURL ?? "unavailable"}`,
+    `- Tags: ${(evidence.tagNames ?? []).join(", ") || "not verified"}`,
     `- Digest: \`${evidence.digest ?? "not verified"}\``,
     `- Platforms: ${(evidence.platforms ?? []).join(", ") || "not verified"}`,
+    `- Source revision: \`${evidence.sourceRevision ?? "not verified"}\``,
     `- Next action: ${evidence.nextAction ?? "Review the recorded boundary before resuming."}`,
-    "",
-    "Machine-readable evidence:",
-    "",
-    "```json",
-    canonicalJson(evidence),
-    "```",
   ];
+  if (evidence.error !== undefined) {
+    lines.push(`- Failure: \`${evidence.error.code ?? "unknown"}\` ${evidence.error.message ?? ""}`.trimEnd());
+  }
+  lines.push("", "Machine-readable evidence:", "", "```json", canonicalJson(evidence), "```");
   return lines.join("\n");
 }
 
 async function writeSummary(summary, environment = process.env) {
   if (!environment.GITHUB_STEP_SUMMARY) return;
   await fsp.appendFile(environment.GITHUB_STEP_SUMMARY, `${summary}\n`, "utf8");
+}
+
+/**
+ * The single production entry point invoked by the main-only preparation
+ * workflow (`--phase request --version <version>`).
+ *
+ * It composes the documented flow rather than replacing it: an authenticated
+ * same-version preparation is resumed, otherwise preparation runs first, and
+ * the operation then continues through candidate checks, the protected squash
+ * merge and publication. A re-dispatch with the same canonical version is the
+ * documented resume path, so duplicate authenticated state is reconciled
+ * instead of rejected.
+ */
+async function requestPhase({ api, auth, artifacts, publisher, context, input, config, preparer, cwd, clock }) {
+  const requestedVersion = parseStableVersion(input.version, "requested version").text;
+  const repository = config.repository ?? context.repository;
+  let state = input.state;
+  let resolvedRuntime;
+  if (!state) {
+    const resolved = await resolveReleaseRequest({
+      api,
+      auth,
+      artifacts,
+      context,
+      version: requestedVersion,
+      repository,
+      repositoryId: config.repositoryId,
+      allowedActors: config.allowedActors,
+      now: clock.now(),
+      botLogin: appBotLogin(authenticatedAppIdentity(auth, repository, config.repositoryId)),
+      producer: producerIdentity(context, config),
+    });
+    if (resolved.kind === "resume") {
+      state = resolved.state;
+      resolvedRuntime = resolved.runtime;
+    } else {
+      // A fresh request prepares attempt 1. A replacement prepares the next
+      // bounded attempt from current main and re-captures the release-note
+      // inputs from that base instead of reusing the stale snapshot.
+      const prepared = await preparePhase({
+        api,
+        auth,
+        artifacts,
+        context,
+        input: {
+          ...input,
+          version: requestedVersion,
+          attempt: resolved.attempt ?? 1,
+          ...(resolved.operationId === undefined ? {} : { operationId: resolved.operationId }),
+          notesInputSnapshot: undefined,
+        },
+        config,
+        preparer,
+        cwd,
+      });
+      state = prepared.state;
+    }
+  }
+  return await executePhase({
+    api,
+    auth,
+    artifacts,
+    publisher,
+    context,
+    input: { ...input, state, ...(resolvedRuntime === undefined ? {} : { runtime: resolvedRuntime }) },
+    config,
+    preparer,
+    cwd,
+    clock,
+  });
 }
 
 export async function runReleaseAutomation({
@@ -3507,7 +4936,15 @@ export async function runReleaseAutomation({
     statePath: config.statePath,
     evidencePath: config.evidencePath ?? path.join(cwd, ".release-automation", "evidence.json"),
   };
-  if (["execute", "resume"].includes(phase)) {
+  // Assign the single operation-wide deadline once, before any privileged work,
+  // so every bounded wait shares the same budget instead of defaulting per poll.
+  if (actualConfig.budget === undefined) {
+    actualConfig.budget = createOperationBudget({
+      clock: normalizeClock(clock),
+      deadlineMs: config.operationDeadlineMs ?? DEFAULT_OPERATION_DEADLINE_MS,
+    });
+  }
+  if (["execute", "resume", "request"].includes(phase)) {
     // Recovery is a privileged read as well as a write. Require the current
     // installation's complete App identity before accepting explicit state or
     // discovering an artifact from workflow history.
@@ -3517,12 +4954,11 @@ export async function runReleaseAutomation({
   // later workflow attempt discovers the original run from immutable state so
   // its download is scoped to that run rather than the current run's name.
   if (!artifacts) {
-    const originRunId = phase !== "prepare" && recoveredState?.originRunId
-      ? recoveredState.originRunId
-      : actualContext.runId;
+    // Uploads (preparation evidence and checkpoints) are produced by this
+    // executing run; every download names the artifact's producing run.
     artifacts = await createActionsArtifactStore({
       repository,
-      workflowRunId: originRunId,
+      workflowRunId: actualContext.runId,
       tokenProvider: async () => (await actualAuth.ensureToken()).token,
       metadataReader: async (artifactId) => apiCall(api, actualAuth, "getArtifact", [artifactId]),
       temporaryDirectory: path.join(os.tmpdir(), "media-finder-release-artifacts"),
@@ -3571,6 +5007,8 @@ export async function runReleaseAutomation({
       state = discovered.state;
     }
     result = await executePhase({ api, auth: actualAuth, artifacts, publisher, context: actualContext, input: { ...input, state }, config: actualConfig, preparer, cwd, clock: normalizeClock(clock) });
+  } else if (phase === "request") {
+    result = await requestPhase({ api, auth: actualAuth, artifacts, publisher, context: actualContext, input, config: actualConfig, preparer, cwd, clock: normalizeClock(clock) });
   } else {
     fail("phase_invalid", "Release automation phase is unsupported.");
   }
@@ -3606,20 +5044,14 @@ async function cli() {
       statePath,
       currentVersion: environment.RELEASE_CURRENT_VERSION,
     };
-    if (phase === "prepare" && !input.version) fail("invalid_version", "workflow_dispatch version input is required.");
+    if (["prepare", "request"].includes(phase) && !input.version) fail("invalid_version", "workflow_dispatch version input is required.");
     const result = await runReleaseAutomation({ phase, input, config: { statePath, environment, evidencePath: environment.RELEASE_EVIDENCE_PATH } });
     process.stdout.write(`${canonicalJson(result.evidence)}\n`);
   } catch (error) {
     const failure = error instanceof ReleaseAutomationError
       ? error
       : new ReleaseAutomationError("controller_failed", "Release controller failed safely.");
-    const evidence = {
-      schemaVersion: RELEASE_AUTOMATION_SCHEMA_VERSION,
-      status: "blocked",
-      operationId: process.env.RELEASE_OPERATION_ID,
-      nextAction: "Review the safe diagnostic and resume only after the recorded blocker is resolved.",
-      error: { code: failure.code, message: failure.message, details: failure.details },
-    };
+    const evidence = buildBlockedEvidence({ error: failure, environment: process.env });
     try {
       await writeSummary(formatWorkflowSummary(evidence), process.env);
       if (process.env.RELEASE_EVIDENCE_PATH) await writeJsonFile(process.env.RELEASE_EVIDENCE_PATH, evidence);

@@ -94,11 +94,11 @@ Automation SHALL renew expiring installation credentials during long operations 
 - **THEN** automation stops safely without repeating an uncertain mutation
 
 ### Requirement: Bounded stale-base candidate replacement
-An otherwise authentic unmerged release candidate whose base becomes stale SHALL be closed and replaced automatically by a new branch and PR from current main. Its evidence SHALL be retained, its candidate attempt SHALL become terminal, and the replacement SHALL require all seven checks for its own head/base. Automation SHALL permit at most three candidate attempts per repository/version operation, including across reruns. This behavior SHALL NOT overwrite manual edits or resolve discussions.
+An otherwise authentic unmerged release candidate whose base becomes stale SHALL be closed and replaced automatically by a new branch and PR from current main. The run that discovers the stale base SHALL reconcile merge state, record the terminal stale-attempt disposition and close the stale PR, then stop with `base_changed`; the operator SHALL re-dispatch the same canonical version, and that resumed operation SHALL prepare the replacement branch and PR rooted at current main with the next attempt number. Its evidence SHALL be retained, its candidate attempt SHALL become terminal, and the replacement SHALL require all seven checks for its own head/base. Automation SHALL permit at most three candidate attempts per repository/version operation, including across reruns. This behavior SHALL NOT overwrite manual edits or resolve discussions.
 
 #### Scenario: Main advances before merge
-- **WHEN** the current unmerged candidate becomes stale with remaining attempts
-- **THEN** automation reconciles merge state, records and closes the stale attempt, regenerates a new candidate and notes from current main, and obtains new checks without force-push
+- **WHEN** the current unmerged candidate becomes stale with remaining attempts and a trusted run discovers it
+- **THEN** the discovering run reconciles merge state, records the terminal disposition and closes the stale PR without force-push, retains its branch and evidence, and stops with `base_changed`, so the operator re-dispatches the same canonical version and its resumed operation prepares the replacement candidate and notes from current main and obtains all seven checks for its own head/base
 
 #### Scenario: Retry budget exhausted
 - **WHEN** all three candidate attempts become stale

@@ -2,10 +2,13 @@
 
 This guide documents the approved target behavior and one-time setup for the
 repository-scoped automation for a stable Media Finder release. The controller's
-request and recovery integration, and its live validation, remain incomplete;
-the feature is not active or delivered, and this guide is not evidence that a
-release can be run. After implementation and live validation, an authorized
-repository writer will submit one explicit product version in GitHub Actions.
+request and recovery integration is implemented in the current uncommitted
+candidate on the checkpoint branch, but that work is not delivered or activated
+and no live validation has been performed; the feature is not active or
+operational, this guide is not evidence that a release can be run, and no
+release can be run until delivery, activation and live validation have each
+succeeded. An authorized repository writer will then submit one explicit product
+version in GitHub Actions.
 The trusted controller will prepare a release branch and pull request, wait for
 the required checks, perform a normal protected squash merge, verify the
 resulting `main` and `edge` state, and publish the stable GitHub Release and
@@ -16,9 +19,9 @@ first real product release requires separate product-release authorization after
 the automation and its live prerequisites have been verified. Until the trusted
 workflow and live event path are validated, this feature remains inactive. The
 main-only dispatch entry point is
-`.github/workflows/prepare-release.yaml`; the file is present, but its full
-request/recovery integration and live event path remain unvalidated. Do not
-attempt a release.
+`.github/workflows/prepare-release.yaml`. The file is present and invokes the
+`--phase request` controller entry point, but the workflow has not been activated
+and no live event path has been validated. Do not attempt a release.
 
 ## One-time setup
 
@@ -157,6 +160,9 @@ credentials. It will record the requested version, previous stable tag,
 original base, expected generated tree, prepared head, PR, merge, release, and
 image identities. It will regenerate from captured inputs and refuse an
 unexpected dependency, API, SDK, schema, generated-value, or other tree change.
+History capture is bounded: when the complete previous-stable range cannot be
+captured within that bound, the operation stops with an explicit bound error
+instead of silently truncating the range it puts in the notes.
 
 Installation tokens will be checked for App identity, installation, repository
 scope, and permissions whenever they are issued. Before each authenticated API
@@ -208,15 +214,18 @@ repository policy. The workflow reports the actual expiry. If evidence is
 missing, deleted, expired, altered, forged, ambiguous, or from an untrusted
 run, recovery stops. Do not rebuild expectations from mutable PR content.
 
-If `main` advances before an otherwise authentic candidate merges, the
-controller first reconciles whether the merge already happened. If it did not,
-it records the stale attempt, closes that PR, retains its branch and evidence,
-and creates a new branch and PR from current `main`. The replacement must pass
-all seven checks for its own head/base and never force-pushes or overwrites
-manual edits. There are at most **three candidate attempts per repository and
-version, including across reruns**. When the budget is exhausted, the
-operation stops with the reported stale-base reason; a rerun cannot reset the
-count.
+If `main` advances before an otherwise authentic candidate merges, the run
+that discovers this first reconciles whether the merge already happened. If it
+did not, that run records the terminal stale attempt, closes the PR while
+retaining its branch and evidence, and stops with `base_changed`; it does not
+create the replacement itself. Re-dispatch the same canonical version from the
+trusted workflow. The resumed operation prepares the next bounded attempt (a
+new branch and PR from current `main`), regenerates the notes from that base,
+and requires all seven checks for the replacement head/base; it never
+force-pushes or overwrites manual edits. There are at most **three candidate
+attempts per repository and version, including across reruns**. When the budget
+is exhausted, the operation stops with `base_changed_repeatedly`; a rerun
+cannot reset the count.
 
 ## Stop conditions
 

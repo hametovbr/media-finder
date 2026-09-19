@@ -1,99 +1,207 @@
 # Automated stable release implementation checkpoint
 
-This is an explicitly non-final implementation checkpoint for the active
-[automated-stable-release change](../openspec/changes/automated-stable-release/proposal.md).
-The owner requested completion of the current minimal-notes unit, a local commit
-on a separate branch, and a pause. This checkpoint is not delivery, activation,
-or a product release. General repository instructions and skills are unchanged.
+This records the archived
+[automated-stable-release change](../openspec/changes/archive/2026-09-19-automated-stable-release/proposal.md)
+and the hosted verification checkpoint obtained for it. The change is
+synchronized and archived; delivery and activation remain separately authorized
+subsequent phases. The workflow is not activated, the feature is not operational,
+and no release can be run. General repository instructions and skills are
+unchanged.
 
 ## Resume context
 
 - Original implementation base: `66774725cc1b02080dfa819f8fda3c066d3624d3`.
-- The active [design](../openspec/changes/automated-stable-release/design.md),
-  [requirements](../openspec/changes/automated-stable-release/specs/deployment-and-delivery/spec.md),
-  and [tasks](../openspec/changes/automated-stable-release/tasks.md) are authoritative.
+- Checkpoint branch: `checkpoint/automated-stable-release-2026-09-16`, published
+  to `origin` at commit `1e16ae3eb630cd0b848269b57045d6af30268bf6`; the local
+  remote-tracking ref
+  `refs/remotes/origin/checkpoint/automated-stable-release-2026-09-16` resolves to
+  that commit. The published commit is only the checkpoint *base*: none of the
+  controller work described below (request composition, checkpoint chain,
+  operation-wide deadline, stale-base replacement, evidence fixes) is in it. That
+  work is committed on the explicitly non-final branch
+  `feat/automated-stable-release`, which exists to obtain the hosted verification
+  evidence named under "Verification limits". The working tree has no untracked
+  files.
+- The archived [design](../openspec/changes/archive/2026-09-19-automated-stable-release/design.md),
+  [requirements](../openspec/changes/archive/2026-09-19-automated-stable-release/specs/deployment-and-delivery/spec.md),
+  and [tasks](../openspec/changes/archive/2026-09-19-automated-stable-release/tasks.md) are the
+  authoritative record of the change, and the synchronized requirement text is now
+  canonical in `openspec/specs/deployment-and-delivery/spec.md`.
 - The owner approved the minimal English release-notes contract: exact automatic
-  generation disclaimer, captured commit/PR links and previous stable range,
-  and a link to `docs/operations.md` at the recorded base commit. No authored-note
+  generation disclaimer, captured commit/PR links and previous stable range, and a
+  link to `docs/operations.md` at the recorded base commit. No authored-note
   format, free-form guidance discovery, or manual notes-preparation step.
 - The owner reports installing the dedicated App and granting Administration
   read. This has not been verified through the actual installation token.
-- Continue implementation only when the owner resumes work. Do not infer
-  archive, push, merge, or stable-release authorization from this checkpoint.
+- Delivery and activation are separately authorized subsequent phases: do not infer
+  merge or stable-release authorization from this record.
 
 ## Implemented portions
 
-The deterministic preparer updates lockstep versions and derived conformance
-values, verifies the complete tree, preserves dependency/API/SDK versions, and
-produces immutable English notes. Rollback guards cover unexpected filesystem
-changes. The minimal-notes revision removes the unshipped authored-guidance path.
+The [operator guide](release-automation.md) documents the approved target
+behavior. The implementation is an uncommitted working-tree change on the
+checkpoint branch and covers OpenSpec tasks 2.1-2.6 and 3.1-3.5:
 
-The controller has scoped token issuance, nested branch-protection inspection,
-trusted CI/run-attempt evidence, draft/readback and publication checks, and
-unreachable prepared Git objects persisted before branch exposure. Recovery
-can discover preparation artifacts without local state and verifies the original
-run attempt, actor, repository, App, digest and expiry. Preparation artifacts
-remain valid after the producer run fails, is cancelled, times out, or is still
-running; this does not weaken CI or publisher success gates. Duplicate intent
-and conflicting repository state are rejected.
+- **Preparer (1.1-1.3).** Deterministic lockstep version and derived-conformance
+  regeneration with full-tree verification, unchanged dependency/API/SDK versions,
+  rollback guards, and the immutable minimal English notes contract. The unshipped
+  authored-guidance input and rendering path is removed.
+- **Controller (2.1-2.6, 3.1, 3.2, 3.5).** The main-only dispatch entry point
+  `.github/workflows/prepare-release.yaml` invokes
+  `--phase request --version <version>`; the request phase composes discovery,
+  preparation (attempt 1 or the next bounded attempt) and execution. Scoped App
+  token lifecycle with per-issuance App, installation, repository and permission
+  validation, including the required Administration read and rejection of
+  Administration write. Mandatory authenticated release-PR identity (base/head
+  repository IDs, base ref, base SHA, head ref, head SHA, exact App bot author)
+  with reconcile-before-create, including interruption after PR creation but
+  before the association is recorded. Isolated credential-free regeneration from
+  the recorded base in a clean checkout that holds no write credentials. The
+  exact seven-check gate (narrowed, duplicated or extended context sets are
+  refused), authenticated protection revalidation before candidate exposure and
+  immediately before the merge, mandatory merged-commit ancestry on `main`, and a
+  normal expected-head squash merge with no bypass, administrative merge,
+  approval, dismissal or auto-merge. Immutable preparation and checkpoint
+  artifacts with producing-run provenance, digest/chain verification, actual
+  expiry and crash reconciliation before and after side effects. One
+  operation-wide deadline shared by every bounded wait; serialized requests;
+  bounded listing reads that fail with an explicit error instead of truncating.
+  The stale-base disposition records the terminal checkpoint, closes the PR and
+  stops with `base_changed`; the documented same-version re-dispatch prepares the
+  bounded replacement from current `main`, under a durable three-attempt limit
+  that reruns cannot reset. History capture is bounded and fails with an explicit
+  bound error instead of silently truncating the included range. Canonical
+  structured evidence and the complete English workflow summary, including a
+  blocked-evidence projection that preserves the failure's own safe next action.
+- **Publisher (3.3, 3.4).** Registry fixture coverage for tag/version and
+  digest/revision mismatch, missing architecture, partial pushes, immutable-tag
+  reuse, older-release reruns and moving-tag regression. The publisher
+  implementation was not changed; its existing behavior, including the manually
+  published Release path, is exercised by 32 tests.
+- **Delivery policy and operator setup (4.1, 4.2).** `pnpm delivery:validate`,
+  the delivery-policy tests, and the operator guide.
 
-The stable publisher has registry fixture coverage for immutable digest reuse,
-partial publication, moving-tag regression, platform and source provenance, and
-ambiguous registry failures. The preparation workflow, delivery policy and
-operator guide are present. These portions do not establish an operational
-end-to-end release process.
-
-## Next implementation work
-
-Resume with authentic PR association and checkpoint recovery (tasks 2.2, 2.4,
-2.5, 2.6 and 3.1). Authenticate the exact App bot author and complete PR repository,
-branch and head identities. Reconcile an existing PR before creation, including
-interruption after creation but before recording its association. Persist and
-recover PR, stale-attempt and merged-SHA checkpoints through trusted artifacts.
-
-Keep checkpoint-producing run/attempt/controller SHA distinct from the original
-preparation. SDK upload readback must use the current producer run; downloads
-must use the artifact's actual producing run. Validate schemas, metadata,
-expiry, digest, chain links and live state before downstream mutations. Do not
-make provenance checks optional to accommodate incomplete test fixtures.
-
-Remaining dependent work:
-
-- Isolated credential-free regeneration from the recorded base and captured
-  inputs before merge; complete bounded history capture without silent truncation.
-- Automatic stale-PR replacement with three attempts across reruns, preserving
-  branches and persisting disposition before closure.
-- One overall deadline and safe token-expiry/network-failure reconciliation.
-- Production `--phase request --version <version>` composition. The preparation
-  workflow already invokes this interface; the controller does not yet implement
-  that phase. Do not activate or describe the workflow as usable.
-- Correct final structured evidence and English summary. The current controller
-  still reads `publication.tags` instead of canonical `actualTags`, and projects
-  structured evidence a second time when formatting the summary, losing fields.
-- Whole-change independent review and all remaining acceptance/delivery gates.
+These portions do not establish an operational end-to-end release process.
 
 ## Checkpoint verification
 
-Accepted OpenSpec tasks: 1.1, 1.2, 1.3, 3.3, 4.1 and 4.2 (6 of 22).
-The revised minimal-notes unit is complete. The controller parent tasks remain
-open; their implemented portions are not whole-task acceptance.
+Independent verification and two independent review rounds ran on this frozen
+candidate and both review rounds returned `pass` with Critical 0, Important 0:
 
-The primary agent verified the frozen implementation with 20 preparer/workspace
-Python tests and 74 controller/publisher Node tests. Python lint and formatting
-also passed for the preparer and its tests. Documentation validation passed for 477 files, strict OpenSpec validation passed
-for all 10 items, and delivery-policy validation passed.
+- HEAD `1e16ae3eb630cd0b848269b57045d6af30268bf6` on
+  `checkpoint/automated-stable-release-2026-09-16`, 7 modified tracked files, no
+  untracked files, `git diff | sha256sum` =
+  `25ae122e242e9b26adef205bb08d80f34bee33baf913a570dd6f8e4f13c30495`.
+- This document, `tasks.md` and the operator guide were actualized after that
+  hash. No implementation file was touched, so the reviewed implementation diff is
+  unchanged by this documentation turn. On the actualized worktree revision (the
+  same HEAD with 8 modified tracked files and no untracked files), the
+  documentation check passed for 476 files and strict `pnpm spec:validate`
+  reported 10 passed, 0 failed; both were re-run after these documentation edits.
+
+Gate results reproduced on that candidate:
+
+| Gate | Result |
+| --- | --- |
+| `node --test scripts/release-automation.test.mjs` | 113 tests, 113 pass, 0 fail |
+| `node --test scripts/release-publication.test.mjs` | 32 tests, 32 pass, 0 fail |
+| `pnpm delivery:test` (sandbox-observed) | 155 tests, 155 pass, 0 fail; `scripts/validate-delivery.test.mjs` alone 133/133 |
+| `pnpm delivery:validate` | passed |
+| `pnpm docs:check` | passed for 476 files |
+| `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 pnpm spec:validate` | 10 passed, 0 failed (strict) |
+| `uv run ruff format --check .` | 321 files already formatted |
+| `uv run ruff check .` | passed |
+| `uv run mypy` | passed (100 source files) |
+| `uv run pytest` (sandbox-observed) | 628 passed |
+
+Superseded evidence: the earlier "44 controller + 30 publisher" and "20 Python"
+figures hold only for the pre-change revision, and the round-1 candidate
+(`git diff | sha256sum` `9dc14f5bb5e309efa612dd0680696c6234b976561b16ad92de317d23283eb5e0`)
+reported 108 controller tests; the current candidate is 113 + 32. The
+documentation check is 476 files on a quiet worktree whose status was confirmed
+with `git status --short --untracked-files=all`; the 477 reported during
+implementation did not reproduce and is recorded as an evidence mismatch.
+
+Sandbox caveat: `pnpm delivery:test` and `uv run pytest` were observed inside the
+restricted sandbox and are not host-confirmed, because no wider execution boundary
+was available in the delegated sessions. They are recorded as sandbox-observed,
+never as host-passed, per [agent execution](agent-execution.md).
+
+Accepted OpenSpec tasks: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 3.1, 3.2,
+3.3, 3.4, 3.5, 4.1 and 4.2 (16 of 22). Task 4.4 is only partially satisfied: both
+review rounds passed and their findings were resolved, but the authenticated
+security verification it also requires is blocked.
+
+## Remaining work and next authorization
+
+- **4.3** needs independent wheel builds, production-image smoke and current
+  hosted browser evidence; none was obtained.
+- **4.4** needs the authenticated `pnpm security:verify` run required by
+  `SECURITY.md`; without live access it is a blocker, not a waived gate.
+- **4.5** needs separate access authorization and a disposable validation
+  repository; App-created PR, `main` and Release event propagation are unvalidated.
+- **5.1** needs the owner's authorization to synchronize the
+  `deployment-and-delivery` delta and archive this change.
+- **5.2** needs delivery through the normal reviewed PR process with seven
+  successful final-candidate checks and confirmed `main`/`edge` provenance.
+- **5.3** needs installation-token issuance, exact permission and
+  repository-scope evidence and an authenticated `main`-branch protection read
+  before the feature can be declared operational.
+
+The next required authorization is canonical-spec synchronization plus archive of
+this change; delivery through a reviewed pull request is separate and follows it.
+Merge remains **NO**: synchronization and archive, the live authenticated checks,
+these six tasks and the seven required checks on a final delivery head are all
+outstanding. A local review pass is not delivery readiness, and this verified
+candidate is an uncommitted worktree state that cannot substitute for those final
+checks.
+
+### Required design clarification
+
+Independent verification accepted the re-dispatch reading of the OpenSpec 2.5
+stale-base replacement ("automatically create") — its wording was "accept the
+re-dispatch reading, **conditional on an explicit design note**", because the
+design's same-run imperative and the delta's "SHALL be closed and replaced
+automatically" "do not state a re-dispatch" and the operator guide's stale
+paragraph "also omits that step". The change artifacts now record that sequence —
+design decision 4, the delta's bounded-stale-base requirement and its "Main
+advances before merge" scenario, and the operator guide's stale paragraph — and
+code agrees with them. In a dedicated `openspec-update-change` turn the owner
+confirmed this clarification and design decision 4 was tightened so that
+"automatically create" explicitly means creation on the same-version resumption
+after the terminal `base_changed` boundary, not in the run that discovers the
+stale base; strict OpenSpec validation and the documentation check passed after
+that edit. The revision made during the repair round was not preceded by a
+recorded `openspec-update-change` invocation, so that earlier provenance remains
+unresolved evidence. Archive is the next required authorization and needs a
+separate owner request; it cannot be chained into the planning turn.
+
+### Residual clarity debt
+
+Review finding N1 (Minor) remains open and was deliberately not fixed here
+because the affected files are outside this documentation scope: stale docblocks
+at `scripts/release-automation.mjs` L4669 and L4743-4745, and a legacy comment
+with a non-discriminating assertion at `scripts/release-automation.test.mjs`
+L5368-5379, still describe the removed caller-supplied next-action behavior; the
+assertion passes through the unknown-code fallback and cannot detect a preserved
+caller action. Both reviewers confirmed the behavior itself is satisfied by the
+discriminating neighbouring test. This is clarity debt for a later
+delivery-shaping turn, not a functional gap.
 
 ## Verification limits
 
-Focused checks for the completed portions do not replace whole-change checks or
-live evidence. Earlier independent wheel builds, UI unit/build checks and module
-conformance passed for their recorded implementation states. A full Python run
-had a wheel-isolation installation timeout reaching PyPI; a focused reproduction
-confirmed the network failure. Chromium installation failed at the browser CDN.
-Docker/image smoke, current hosted browser evidence, authenticated repository
-security, actual App event propagation and GHCR validation remain unavailable or
-not performed. Disposable validation-repository access is a separate prerequisite.
+Focused and local checks for the implemented portions do not replace the
+whole-change, host and live gates. Unavailable evidence includes: the App
+installation token (issuance, exact permissions and repository scope), the
+authenticated `main`-branch protection read, live App-created PR/`main`/Release
+event propagation, GHCR manifest validation, production-image smoke, hosted
+browser evidence, independent wheel builds, and `pnpm security:verify`. Earlier
+independent wheel builds, UI unit/build checks and module conformance passed for
+their recorded implementation states only. A full Python run previously hit a
+wheel-isolation installation timeout against PyPI and Chromium installation failed
+at the browser CDN; neither is reclassified here. Disposable validation-repository
+access is a separate prerequisite.
 
 Canonical specification synchronization, archive, final review, protected-branch
-delivery and feature activation remain incomplete. No product release is part
-of this checkpoint.
+delivery and feature activation remain incomplete. No product release is part of
+this checkpoint.
