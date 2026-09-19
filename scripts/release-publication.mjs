@@ -617,10 +617,6 @@ export function createDockerRegistryClient({ cwd = process.cwd(), command = runC
         "--label",
         `${OCI_REVISION_LABEL}=${revision}`,
         "--provenance=mode=max",
-        "--cache-from",
-        "type=gha",
-        "--cache-to",
-        "type=gha,mode=max",
         "--push",
         ".",
       ];

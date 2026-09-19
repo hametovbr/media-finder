@@ -27,7 +27,10 @@ jobs:
       contents: read
 
   publish:
-    if: ${{ github.event.release.prerelease == false }}
+    # The event must be named explicitly: on a manual dispatch
+    # `github.event.release` is absent, and GitHub's loose equality makes the
+    # missing `prerelease` (null) compare equal to false.
+    if: ${{ github.event_name == 'release' && github.event.release.prerelease == false }}
     needs: verification
     runs-on: ubuntu-latest
     permissions:
@@ -112,7 +115,7 @@ jobs:
           fi
           for context in documentation python unit integration contract browser image; do
             conclusion="$(gh api "repos/$repository/commits/$revision/check-runs?per_page=100" \
-              --jq "[.check_runs[] | select(.name == \"verification / $context\")][0].conclusion")"
+              --jq "[.check_runs[] | select(.name == \"verification / $context\" and .app.slug == \"github-actions\")][0].conclusion")"
             if [ "$conclusion" != "success" ]; then
               echo "release commit lacks a successful verification / $context check"
               exit 1
@@ -151,10 +154,11 @@ jobs:
           RELEASE_PRERELEASE: "false"
           RELEASE_DRAFT: "false"
           RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/${{ inputs.release_tag }}
-          GITHUB_SHA: ${{ steps.resolve.outputs.revision }}
           IMAGE_NAME: ghcr.io/${{ github.repository }}
           PUBLICATION_EVIDENCE_PATH: release-publication-evidence.json
-        run: node "$RUNNER_TEMP/release-publication.mjs"
+        # GITHUB_SHA is reserved by the runner and a workflow `env:` entry cannot
+        # replace it, so the release revision is assigned for this process only.
+        run: GITHUB_SHA="${{ steps.resolve.outputs.revision }}" node "$RUNNER_TEMP/release-publication.mjs"
       - name: Upload stable publication evidence
         if: ${{ always() && hashFiles('release-publication-evidence.json') != '' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
