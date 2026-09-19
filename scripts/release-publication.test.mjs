@@ -36,14 +36,19 @@ function descriptor(platform, digest, annotations) {
   };
 }
 
-function imageDetails(version, revision, platforms = ["linux/amd64", "linux/arm64"]) {
+// `versionLabel` reproduces what an image actually carries: images this project
+// published before the current publisher exist with a `v` prefix, an absent label
+// or an unparseable value, and each of those must be handled deliberately.
+function imageDetails(version, revision, platforms = ["linux/amd64", "linux/arm64"], versionLabel = version) {
   return Object.fromEntries(
     platforms.map((platform) => [
       platform,
       {
         config: {
           Labels: {
-            "org.opencontainers.image.version": version,
+            ...(versionLabel === null
+              ? {}
+              : { "org.opencontainers.image.version": versionLabel }),
             "org.opencontainers.image.revision": revision,
           },
         },
@@ -60,6 +65,7 @@ function registryInspection({
   platformDetails = platforms,
   variant,
   formattedDigest,
+  versionLabel,
 } = {}) {
   const manifests = platforms.map((platform) =>
     descriptor(platform, PLATFORM_DIGESTS[platform] ?? `sha256:${"6".repeat(64)}`),
@@ -90,7 +96,12 @@ function registryInspection({
         ...(variant ? { annotations: { "org.example.fixture.variant": variant } } : {}),
         manifests,
       },
-      image: imageDetails(version, revision, platformDetails),
+      image: imageDetails(
+        version,
+        revision,
+        platformDetails,
+        versionLabel === undefined ? version : versionLabel,
+      ),
     },
   };
 }
@@ -644,6 +655,116 @@ test("an older rerun cannot downgrade either moving tag", async () => {
   assert.equal(registry.retagCount, 0);
   assert.equal(registry.refs.get(oldTags.minor).formatted.manifest.digest, LATER_DIGEST);
   assert.equal(registry.refs.get(oldTags.latest).formatted.manifest.digest, LATER_DIGEST);
+});
+
+test("a moving tag from an earlier release carrying the published v-prefixed label is reconciled", async () => {
+  const version = "0.5.0";
+  const tags = expectedRefs(version);
+  // The registry's actual state, taken from `ghcr.io/hametovbr/media-finder:latest`:
+  // both moving tags point at the v0.4.0 image, whose version label carries the
+  // prefix the publisher writes without. Reconciliation must interpret that label
+  // rather than refuse the release.
+  // `variant` keeps the legacy index distinct from the target, so the digest
+  // assertions below prove the moving tags were moved rather than left in place.
+  const legacy = registryInspection({
+    version: "0.4.0",
+    versionLabel: "v0.4.0",
+    revision: OTHER_REVISION,
+    variant: "legacy",
+  });
+  const legacyDigest = legacy.formatted.manifest.digest;
+  assert.notEqual(legacyDigest, registryInspection({ version }).formatted.manifest.digest);
+  const registry = new FixtureRegistry({
+    [tags.immutable]: registryInspection({ version }),
+    [tags.minor]: legacy,
+    [tags.latest]: legacy,
+  });
+
+  const result = await publish(registry, {
+    releaseTag: `v${version}`,
+    version,
+    releaseURL: `https://github.com/acme/media-finder/releases/tag/v${version}`,
+  });
+
+  assert.equal(registry.buildCount, 0);
+  assert.equal(registry.retagCount, 2);
+  const target = registryInspection({ version }).formatted.manifest.digest;
+  assert.notEqual(target, legacyDigest);
+  assert.equal(registry.refs.get(tags.minor).formatted.manifest.digest, target);
+  assert.equal(registry.refs.get(tags.latest).formatted.manifest.digest, target);
+  assert.equal(legacyDigest !== registry.refs.get(tags.latest).formatted.manifest.digest, true);
+});
+
+test("a v-prefixed moving tag from a newer release still refuses a regression", async () => {
+  const oldVersion = "1.2.2";
+  const oldTags = expectedRefs(oldVersion);
+  const newer = registryInspection({
+    version: "1.2.4",
+    versionLabel: "v1.2.4",
+    revision: OTHER_REVISION,
+  });
+  const registry = new FixtureRegistry({
+    [oldTags.immutable]: registryInspection({ version: oldVersion }),
+    [oldTags.minor]: newer,
+    [oldTags.latest]: newer,
+  });
+
+  await assert.rejects(
+    publish(registry, {
+      releaseTag: `v${oldVersion}`,
+      version: oldVersion,
+      releaseURL: `https://github.com/acme/media-finder/releases/tag/v${oldVersion}`,
+    }),
+    (error) => error.code === "moving_tag_regression",
+  );
+  assert.equal(registry.retagCount, 0);
+});
+
+for (const [name, versionLabel] of [
+  ["an absent version label", null],
+  ["an unparseable version label", "not-a-version"],
+  ["a version label carrying build metadata", `${VERSION}+build.1`],
+  ["a version label with an unexpected prefix", "release-1.2.2"],
+  ["a version label repeating the published prefix", "vv1.2.2"],
+]) {
+  test(`a moving tag with ${name} still refuses`, async () => {
+    const tags = expectedRefs();
+    const unreadable = registryInspection({
+      version: "1.2.2",
+      versionLabel,
+      revision: OTHER_REVISION,
+    });
+    const registry = new FixtureRegistry({
+      [tags.immutable]: registryInspection(),
+      [tags.minor]: unreadable,
+      [tags.latest]: unreadable,
+    });
+
+    await assert.rejects(
+      publish(registry),
+      (error) => error.code === "moving_tag_conflict",
+    );
+    assert.equal(registry.retagCount, 0);
+  });
+}
+
+test("a moving tag carrying the published prefix is not accepted as the immutable release", async () => {
+  const tags = expectedRefs();
+  // The moving tags point at an image whose label carries the published prefix at
+  // the requested version. Reconciling that label must not make it stand in for the
+  // immutable release, whose identity stays canonical.
+  const prefixed = registryInspection({ versionLabel: `v${VERSION}` });
+  const registry = new FixtureRegistry({
+    [tags.immutable]: registryInspection(),
+    [tags.minor]: prefixed,
+    [tags.latest]: prefixed,
+  });
+
+  await assert.rejects(
+    publish(registry),
+    (error) => error.code === "tag_version_mismatch",
+  );
+  assert.equal(registry.retagCount, 0);
 });
 
 test("same-version moving tag with a different digest is an immutable conflict", async () => {
