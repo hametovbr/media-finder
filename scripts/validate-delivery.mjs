@@ -329,6 +329,127 @@ const BROWSER_EVIDENCE_OUTPUTS = [
 const STABLE_PUBLICATION_CONCURRENCY_GROUP = "stable-container-publication";
 const RELEASE_PUBLICATION_STEP_NAME = "Publish and verify stable image";
 const RELEASE_PUBLICATION_COMMAND = "node scripts/release-publication.mjs";
+// Shape assertions alone cannot evaluate GitHub's expression coercion: a job
+// condition that only tests `github.event.release.prerelease == false` reads as
+// equivalent to the intended guard but is true on a manual dispatch, because the
+// absent `prerelease` is null and `null == false` under loose equality. The event
+// name is therefore pinned deliberately rather than left to incidental review.
+const RELEASE_EVENT_PUBLISH_CONDITION =
+  "${{ github.event_name == 'release' && github.event.release.prerelease == false }}";
+// The runner reserves GITHUB_SHA for every step, so a workflow `env:` entry is
+// ignored and the publisher would otherwise read the dispatch revision. The
+// override is part of the command, where it replaces the variable for the child
+// process, so the whole invocation is pinned rather than matched by substring.
+const TRUSTED_PUBLICATION_COMMAND =
+  'GITHUB_SHA="${{ steps.resolve.outputs.revision }}" node "$RUNNER_TEMP/release-publication.mjs"';
+const TRUSTED_PUBLISHER_STAGING_COMMAND =
+  'cp trusted/scripts/release-publication.mjs "$RUNNER_TEMP/release-publication.mjs"';
+const TRUSTED_PUBLISHER_STAGING_STATEMENTS = [
+  "set -euo pipefail",
+  TRUSTED_PUBLISHER_STAGING_COMMAND,
+  "rm -rf trusted",
+];
+// The resolution step is the only gate between a manual dispatch and a registry
+// write, so each refusal it must perform is pinned by its literal shell text and
+// must still terminate the step: a guard whose failure branch is missing, or whose
+// `exit 1` became a no-op, reads identically to a correct one under substring
+// search but lets an invalid release reach the publisher.
+const RESOLUTION_REFUSAL_FRAGMENTS = [
+  'if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]',
+  'select(.draft == false and .prerelease == false) | "stable"',
+  'echo "release tag could not be resolved to a commit"',
+  'if [ "$version" != "${RELEASE_TAG#v}" ]',
+  'echo "release commit lacks a successful verification / $context check"',
+];
+// Every required context must be verified on the release commit: dropping one from
+// the step's own list would otherwise silently accept a release that never passed
+// it, and a uniform refusal elsewhere in the loop hides the omission.
+const RESOLUTION_CONTEXT_FRAGMENT =
+  "for context in documentation python unit integration contract browser image; do";
+const REFUSAL_LINE_DISTANCE = 5;
+const TRUSTED_PUBLISHER_PATH = "trusted";
+
+// Shell comments can carry any text, including a command the step never runs, so
+// executable assertions read the step after comments are stripped. A `#` only
+// introduces a comment at the start of a word, so the preceding character must be
+// whitespace or a shell operator — `true;# cp ...` hides the copy from bash, while
+// `${RELEASE_TAG#v}` and `\#` keep theirs. Quote state is tracked separately
+// because `#` inside quotes is literal.
+function executableShell(command) {
+  const lines = [];
+  for (const rawLine of String(command ?? "").split("\n")) {
+    let line = "";
+    let quote = null;
+    for (let index = 0; index < rawLine.length; index += 1) {
+      const character = rawLine[index];
+      const boundary = index === 0 || /[\s;|&()<>`]/.test(rawLine[index - 1]);
+      if (quote === null && character === "#" && boundary) break;
+      if (character === "'" && quote !== '"') quote = quote === "'" ? null : "'";
+      else if (character === '"' && quote !== "'") quote = quote === '"' ? null : '"';
+      line += character;
+    }
+    lines.push(line);
+  }
+  return lines.join("\n");
+}
+
+// Comment stripping still leaves text that a shell may consume without running it,
+// so the staging step is compared as a whole command list rather than searched:
+// anything extra — a here-document body, a parameter, a second command — is a
+// difference, not a larger match.
+function executableStatements(command) {
+  return executableShell(command)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+// A statement is only executable when the shell reads it as code, so the lines
+// carrying a standalone `exit 1` are collected with quotes tracked across lines:
+// `: "\n exit 1\n "` contains the text but never runs it, and a guard followed by
+// such a line does not refuse anything.
+//
+// This is a heuristic backstop, not a shell interpreter. Text that carries an
+// `exit 1` inside a here-document, a line continuation or a command substitution
+// still reads as an exit here, so static text alone cannot establish that a
+// refusal happens. What establishes it is execution: the test suite runs this step
+// with controlled `gh` and `git` responses and requires every refusal to end the
+// process with no revision output, which is why those tests, not these assertions,
+// are the evidence for refusal behaviour.
+function executableExitLines(command) {
+  const lines = String(command ?? "").split("\n");
+  const exits = new Set();
+  let quote = null;
+  lines.forEach((rawLine, lineIndex) => {
+    let code = "";
+    for (let index = 0; index < rawLine.length; index += 1) {
+      const character = rawLine[index];
+      const boundary = index === 0 || /[\s;|&()<>`]/.test(rawLine[index - 1]);
+      if (quote === null) {
+        if (character === "#" && boundary) break;
+        if (character === "'" || character === '"') {
+          quote = character;
+          continue;
+        }
+        code += character;
+      } else if (character === quote) {
+        quote = null;
+      }
+    }
+    if (/^\s*exit 1\s*$/.test(code)) exits.add(lineIndex);
+  });
+  return exits;
+}
+
+// A refusal is reported only when the guard is followed by an exit this heuristic
+// reads as executable on a nearby line, which is what a rewritten or quoted
+// `exit 1` removes. Execution, not this check, establishes that the step stops.
+function refusesAfter(command, fragment, exits) {
+  const lines = String(command ?? "").split("\n");
+  const start = lines.findIndex((line) => line.includes(fragment));
+  if (start < 0) return false;
+  return [...exits].some((index) => index > start && index - start <= REFUSAL_LINE_DISTANCE);
+}
 const RELEASE_PUBLICATION_EVIDENCE_ACTION =
   "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
 const RELEASE_PREPARATION_WORKFLOW_PATH = ".github/workflows/prepare-release.yaml";
@@ -1397,8 +1518,8 @@ function validatePublishWorkflows(ci, release, failures) {
   );
   requireValue(
     failures,
-    normalizedExpression(stable?.if) === "${{ github.event.release.prerelease == false }}",
-    ".github/workflows/release.yaml: stable publish condition must reject prereleases",
+    normalizedExpression(stable?.if) === RELEASE_EVENT_PUBLISH_CONDITION,
+    ".github/workflows/release.yaml: stable publish condition must require the release event and reject prereleases",
   );
   requireValue(
     failures,
@@ -1540,13 +1661,57 @@ function validatePublishWorkflows(ci, release, failures) {
   const resolveStep = stepByName(repair, "Resolve the requested stable release");
   requireValue(
     failures,
-    typeof resolveStep?.run === "string" &&
+    resolveStep?.id === "resolve" &&
+      typeof resolveStep?.run === "string" &&
       resolveStep.run.includes("releases/tags/") &&
       resolveStep.run.includes("GITHUB_OUTPUT") &&
       resolveStep.run.includes("revision=") &&
       resolveStep.run.includes("check-runs") &&
       resolveStep.run.includes("VERSION?ref="),
     ".github/workflows/release.yaml: manual publication must resolve and validate the requested stable release, including its own successful verification, before any registry access",
+  );
+  requireValue(
+    failures,
+    hasExactMapping(resolveStep?.env, {
+      GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}",
+      RELEASE_TAG: "${{ inputs.release_tag }}",
+    }),
+    ".github/workflows/release.yaml: manual publication resolution step must read its token and tag from the environment",
+  );
+  // Static shape cannot separate an enforced refusal from a described one, so the
+  // guards are matched against text that excludes comments and a nearby exit is
+  // required. That is a heuristic; `scripts/validate-delivery.test.mjs` executes
+  // the real step with controlled `gh`/`git` responses and requires each refusal to
+  // stop it with no revision output, which is the evidence that a refusal happens.
+  const resolveExecutable = executableShell(resolveStep?.run);
+  requireValue(
+    failures,
+    typeof resolveStep?.run === "string" &&
+      RESOLUTION_REFUSAL_FRAGMENTS.every((fragment) => resolveExecutable.includes(fragment)),
+    ".github/workflows/release.yaml: manual publication must refuse non-canonical tags, missing stable releases and mismatched versions before any registry access",
+  );
+  const resolutionExits = executableExitLines(resolveStep?.run);
+  requireValue(
+    failures,
+    typeof resolveStep?.run === "string" &&
+      RESOLUTION_REFUSAL_FRAGMENTS.every((fragment) =>
+        refusesAfter(resolveExecutable, fragment, resolutionExits),
+      ),
+    ".github/workflows/release.yaml: manual publication must stop the resolution step when it refuses a release, not continue to publication",
+  );
+  requireValue(
+    failures,
+    typeof resolveStep?.run === "string" &&
+      resolveExecutable.includes(RESOLUTION_CONTEXT_FRAGMENT),
+    ".github/workflows/release.yaml: manual publication must verify every required context on the release commit",
+  );
+  requireValue(
+    failures,
+    typeof resolveStep?.run === "string" &&
+      resolveExecutable.includes(
+        'select(.name == \\"verification / $context\\" and .app.slug == \\"github-actions\\")',
+      ),
+    ".github/workflows/release.yaml: manual publication must bind each verification check to the GitHub Actions application",
   );
   const repairCheckouts = repairSteps.filter((step) =>
     String(step.uses ?? "").startsWith("actions/checkout@"),
@@ -1555,31 +1720,59 @@ function validatePublishWorkflows(ci, release, failures) {
   const trustedCheckout = repairCheckouts.find((step) => step.with?.path !== undefined);
   requireValue(
     failures,
-    releaseCheckout?.with?.ref === "${{ steps.resolve.outputs.revision }}" &&
+    repairCheckouts.length === 2 &&
+      releaseCheckout?.with?.ref === "${{ steps.resolve.outputs.revision }}" &&
+      releaseCheckout?.with?.["fetch-depth"] === 0 &&
       releaseCheckout?.with?.["persist-credentials"] === false,
-    ".github/workflows/release.yaml: manual publication must check out the resolved release commit without persisted credentials",
+    ".github/workflows/release.yaml: manual publication must check out the resolved release commit with complete history and without persisted credentials",
   );
   requireValue(
     failures,
     trustedCheckout?.with?.ref === "${{ github.sha }}" &&
-      typeof trustedCheckout?.with?.path === "string" &&
-      trustedCheckout.with.path.length > 0,
-    ".github/workflows/release.yaml: manual publication must obtain the publisher from the trusted dispatch revision",
+      trustedCheckout?.with?.path === TRUSTED_PUBLISHER_PATH &&
+      trustedCheckout?.with?.["fetch-depth"] === 1 &&
+      trustedCheckout?.with?.["persist-credentials"] === false,
+    ".github/workflows/release.yaml: manual publication must obtain the publisher from the trusted dispatch revision at its own path without persisted credentials",
+  );
+  const stagingStep = stepByName(repair, "Stage the trusted publisher");
+  requireValue(
+    failures,
+    typeof stagingStep?.run === "string" &&
+      JSON.stringify(executableStatements(stagingStep.run)) ===
+        JSON.stringify(TRUSTED_PUBLISHER_STAGING_STATEMENTS),
+    ".github/workflows/release.yaml: manual publication must stage the trusted publisher outside the workspace and remove its checkout",
   );
   const repairPublisher = stepByName(repair, RELEASE_PUBLICATION_STEP_NAME);
   requireValue(
     failures,
     typeof repairPublisher?.run === "string" &&
-      repairPublisher.run.includes("release-publication.mjs") &&
+      repairPublisher.run.includes('"$RUNNER_TEMP/release-publication.mjs"') &&
       repairPublisher.run !== RELEASE_PUBLICATION_COMMAND,
     ".github/workflows/release.yaml: manual publication must run the trusted publisher copy",
   );
   requireValue(
     failures,
-    repairPublisher?.env?.GITHUB_SHA === "${{ steps.resolve.outputs.revision }}" &&
-      repairPublisher?.env?.RELEASE_TAG === "${{ inputs.release_tag }}" &&
+    repairPublisher?.run === TRUSTED_PUBLICATION_COMMAND,
+    ".github/workflows/release.yaml: manual publication must run exactly the trusted publisher invocation",
+  );
+  requireValue(
+    failures,
+    typeof repairPublisher?.run === "string" &&
+      repairPublisher.run.includes('GITHUB_SHA="${{ steps.resolve.outputs.revision }}"'),
+    ".github/workflows/release.yaml: manual publication must override the reserved revision variable in its command",
+  );
+  requireValue(
+    failures,
+    !Object.hasOwn(repairPublisher?.env ?? {}, "GITHUB_SHA"),
+    ".github/workflows/release.yaml: manual publication must not declare the reserved revision variable in its environment",
+  );
+  requireValue(
+    failures,
+    repairPublisher?.env?.RELEASE_TAG === "${{ inputs.release_tag }}" &&
       repairPublisher?.env?.RELEASE_PRERELEASE === "false" &&
       repairPublisher?.env?.RELEASE_DRAFT === "false" &&
+      repairPublisher?.env?.RELEASE_URL ===
+        "https://github.com/${{ github.repository }}/releases/tag/${{ inputs.release_tag }}" &&
       repairPublisher?.env?.IMAGE_NAME === "ghcr.io/${{ github.repository }}" &&
       repairPublisher?.env?.PUBLICATION_EVIDENCE_PATH === "release-publication-evidence.json",
     ".github/workflows/release.yaml: manual publication must pin the resolved stable release identity",
@@ -1598,6 +1791,45 @@ function validatePublishWorkflows(ci, release, failures) {
       repairEvidence?.if !== undefined &&
       repairEvidence?.with?.path === "release-publication-evidence.json",
     ".github/workflows/release.yaml: manual publication must upload its evidence under the approved action",
+  );
+  requireValue(
+    failures,
+    repairEvidence?.if ===
+      "${{ always() && hashFiles('release-publication-evidence.json') != '' }}" &&
+      repairEvidence?.with?.["if-no-files-found"] === "error",
+    ".github/workflows/release.yaml: manual publication evidence upload must fail when the evidence file is missing",
+  );
+  requireValue(
+    failures,
+    repairEvidence?.with?.["retention-days"] === 90,
+    ".github/workflows/release.yaml: manual publication evidence upload must keep the approved retention",
+  );
+  requireValue(
+    failures,
+    typeof repairEvidence?.with?.name === "string" &&
+      repairEvidence.with.name.includes("${{ github.run_id }}") &&
+      repairEvidence.with.name.includes("${{ github.run_attempt }}"),
+    ".github/workflows/release.yaml: manual publication evidence artifact names must be unique per run attempt",
+  );
+  // The staging step copies the publisher out of the trusted checkout, so it must
+  // run after that checkout exists and before anything needs the copy; a step that
+  // runs earlier cannot stage it at all.
+  const publicationOrder = [
+    resolveStep,
+    releaseCheckout,
+    trustedCheckout,
+    stagingStep,
+    repairPublisher,
+    repairEvidence,
+  ];
+  requireValue(
+    failures,
+    publicationOrder.every((step, index) => {
+      const position = repairSteps.indexOf(step);
+      if (position < 0 || index === 0) return position >= 0;
+      return position > repairSteps.indexOf(publicationOrder[index - 1]);
+    }),
+    ".github/workflows/release.yaml: manual publication must resolve, check out the release revision, stage the trusted publisher, publish and upload evidence in that order",
   );
 }
 

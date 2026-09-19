@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -489,13 +490,731 @@ test("the manual publication job pins the resolved release identity", (context) 
     const publisher = value.jobs.repair.steps.find(
       (step) => step.name === "Publish and verify stable image",
     );
-    publisher.env.GITHUB_SHA = "${{ github.sha }}";
+    publisher.env.RELEASE_TAG = "${{ github.event.release.tag_name }}";
     return value;
   });
 
   assert.match(
     validateDelivery(root).join("\n"),
     /manual publication must pin the resolved stable release identity/,
+  );
+});
+
+test("the manual publication job overrides the reserved revision variable in its command", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const publisher = value.jobs.repair.steps.find(
+      (step) => step.name === "Publish and verify stable image",
+    );
+    // A workflow `env:` entry cannot override the runner's reserved GITHUB_SHA,
+    // so this is exactly the shape that silently published the wrong revision.
+    publisher.env.GITHUB_SHA = "${{ steps.resolve.outputs.revision }}";
+    publisher.run = 'node "$RUNNER_TEMP/release-publication.mjs"';
+    return value;
+  });
+
+  const failures = validateDelivery(root).join("\n");
+  assert.match(
+    failures,
+    /manual publication must override the reserved revision variable in its command/,
+  );
+  assert.match(
+    failures,
+    /manual publication must not declare the reserved revision variable in its environment/,
+  );
+});
+
+test("the manual publication job keeps the resolution step's own identity and inputs", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const resolve = value.jobs.repair.steps.find((step) => step.id === "resolve");
+    delete resolve.env.GH_TOKEN;
+    delete resolve.env.RELEASE_TAG;
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication resolution step must read its token and tag from the environment/,
+  );
+});
+
+test("the manual publication job binds the release verification to the Actions application", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const resolve = value.jobs.repair.steps.find((step) => step.id === "resolve");
+    resolve.run = resolve.run.replace(' and .app.slug == \\"github-actions\\"', "");
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must bind each verification check to the GitHub Actions application/,
+  );
+});
+
+test("the manual publication job removes the trusted checkout before publishing", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const stage = value.jobs.repair.steps.find(
+      (step) => step.name === "Stage the trusted publisher",
+    );
+    stage.run = stage.run.replace("rm -rf trusted", "true");
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must stage the trusted publisher outside the workspace and remove its checkout/,
+  );
+});
+
+test("the manual publication job runs exactly the trusted publisher invocation", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const publisher = value.jobs.repair.steps.find(
+      (step) => step.name === "Publish and verify stable image",
+    );
+    // A substring match would accept this echo, which publishes nothing.
+    publisher.run = 'echo node "$RUNNER_TEMP/release-publication.mjs"';
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must run exactly the trusted publisher invocation/,
+  );
+});
+
+test("the manual publication job keeps its evidence upload contract", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const upload = value.jobs.repair.steps.find(
+      (step) => step.name === "Upload stable publication evidence",
+    );
+    upload.with["if-no-files-found"] = "warn";
+    delete upload.with["retention-days"];
+    return value;
+  });
+
+  const failures = validateDelivery(root).join("\n");
+  assert.match(
+    failures,
+    /manual publication evidence upload must fail when the evidence file is missing/,
+  );
+  assert.match(
+    failures,
+    /manual publication evidence upload must keep the approved retention/,
+  );
+});
+
+test("the manual publication job refuses a tag that disagrees with the released version", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const resolve = value.jobs.repair.steps.find((step) => step.id === "resolve");
+    resolve.run = resolve.run.replace('if [ "$version" != "${RELEASE_TAG#v}" ]', "if false");
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must refuse non-canonical tags, missing stable releases and mismatched versions/,
+  );
+});
+
+test("the manual publication job keeps complete history for the release checkout", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const release = value.jobs.repair.steps.find(
+      (step) => step.uses?.startsWith("actions/checkout@") && step.with?.path === undefined,
+    );
+    release.with["fetch-depth"] = 1;
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must check out the resolved release commit with complete history/,
+  );
+});
+
+const TRUSTED_CHECKOUT_FAILURE =
+  /manual publication must obtain the publisher from the trusted dispatch revision at its own path without persisted credentials/;
+
+function mutateTrustedCheckout(root, transform) {
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const trusted = value.jobs.repair.steps.find(
+      (step) => step.uses?.startsWith("actions/checkout@") && step.with?.path !== undefined,
+    );
+    transform(trusted);
+    return value;
+  });
+}
+
+test("the manual publication job keeps the trusted checkout at its own path", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateTrustedCheckout(root, (trusted) => {
+    trusted.with.path = "other";
+  });
+
+  assert.match(validateDelivery(root).join("\n"), TRUSTED_CHECKOUT_FAILURE);
+});
+
+test("the manual publication job keeps the trusted checkout without persisted credentials", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateTrustedCheckout(root, (trusted) => {
+    trusted.with["persist-credentials"] = true;
+  });
+
+  assert.match(validateDelivery(root).join("\n"), TRUSTED_CHECKOUT_FAILURE);
+});
+
+test("the manual publication job keeps the trusted checkout shallow", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateTrustedCheckout(root, (trusted) => {
+    trusted.with["fetch-depth"] = 0;
+  });
+
+  assert.match(validateDelivery(root).join("\n"), TRUSTED_CHECKOUT_FAILURE);
+});
+
+test("a commented staging command cannot satisfy the staging contract", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const stage = value.jobs.repair.steps.find(
+      (step) => step.name === "Stage the trusted publisher",
+    );
+    stage.run = stage.run
+      .split("\n")
+      .map((line) => `# ${line}`)
+      .join("\n");
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must stage the trusted publisher outside the workspace and remove its checkout/,
+  );
+});
+
+test("a copy hidden behind an operator comment cannot satisfy the staging contract", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const stage = value.jobs.repair.steps.find(
+      (step) => step.name === "Stage the trusted publisher",
+    );
+    // Bash starts a comment at any word beginning with `#`, including one that
+    // follows `;`, so this step copies nothing while still containing the text.
+    stage.run = stage.run.replace(
+      'cp trusted/scripts/release-publication.mjs "$RUNNER_TEMP/release-publication.mjs"',
+      'true;# cp trusted/scripts/release-publication.mjs "$RUNNER_TEMP/release-publication.mjs"',
+    );
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must stage the trusted publisher outside the workspace and remove its checkout/,
+  );
+});
+
+test("the manual publication job runs its steps in publication order", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const steps = value.jobs.repair.steps;
+    const stage = steps.find((step) => step.name === "Stage the trusted publisher");
+    steps.splice(steps.indexOf(stage), 1);
+    steps.unshift(stage);
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must resolve, check out the release revision, stage the trusted publisher, publish and upload evidence in that order/,
+  );
+});
+
+test("a resolution guard without its exit cannot satisfy the refusal contract", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const resolve = value.jobs.repair.steps.find((step) => step.id === "resolve");
+    resolve.run = resolve.run.replaceAll("exit 1", "true");
+    return value;
+  });
+
+  const failures = validateDelivery(root).join("\n");
+  assert.match(
+    failures,
+    /manual publication must stop the resolution step when it refuses a release/,
+  );
+});
+
+test("an exit hidden inside a string cannot satisfy the refusal contract", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const resolve = value.jobs.repair.steps.find((step) => step.id === "resolve");
+    // The text still contains `exit 1`, but it is now the argument of `:`, so the
+    // shell reads it as a string and the step continues after the refusal.
+    resolve.run = resolve.run.replaceAll("exit 1", ': "\n    exit 1\n    "');
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must stop the resolution step when it refuses a release/,
+  );
+});
+
+test("dropping a required context from the resolution loop is reported", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const resolve = value.jobs.repair.steps.find((step) => step.id === "resolve");
+    resolve.run = resolve.run.replace(" image;", ";");
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must verify every required context on the release commit/,
+  );
+});
+
+test("removing the canonical-tag refusal is reported", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const resolve = value.jobs.repair.steps.find((step) => step.id === "resolve");
+    resolve.run = resolve.run.replace(
+      'if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then',
+      "if false; then",
+    );
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must refuse non-canonical tags, missing stable releases and mismatched versions/,
+  );
+});
+
+test("removing the unresolvable-tag refusal is reported", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const resolve = value.jobs.repair.steps.find((step) => step.id === "resolve");
+    resolve.run = resolve.run.replace(
+      'echo "release tag could not be resolved to a commit"',
+      "true",
+    );
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must stop the resolution step when it refuses a release/,
+  );
+});
+
+test("removing the missing-context refusal is reported", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const resolve = value.jobs.repair.steps.find((step) => step.id === "resolve");
+    resolve.run = resolve.run.replace(
+      'echo "release commit lacks a successful verification / $context check"',
+      "true",
+    );
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must stop the resolution step when it refuses a release/,
+  );
+});
+
+test("removing one resolution refusal guard is reported", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const resolve = value.jobs.repair.steps.find((step) => step.id === "resolve");
+    resolve.run = resolve.run.replace(
+      'if [ "$version" != "${RELEASE_TAG#v}" ]; then',
+      "if false; then",
+    );
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must refuse non-canonical tags, missing stable releases and mismatched versions/,
+  );
+});
+
+test("the manual publication job keeps the resolution step identity", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const resolve = value.jobs.repair.steps.find((step) => step.id === "resolve");
+    delete resolve.id;
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must resolve and validate the requested stable release/,
+  );
+});
+
+test("the manual publication job keeps the release URL for its evidence", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const publisher = value.jobs.repair.steps.find(
+      (step) => step.name === "Publish and verify stable image",
+    );
+    delete publisher.env.RELEASE_URL;
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication must pin the resolved stable release identity/,
+  );
+});
+
+test("evidence artifact names must stay unique per run attempt", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    const upload = value.jobs.repair.steps.find(
+      (step) => step.name === "Upload stable publication evidence",
+    );
+    upload.with.name = "stable-publication-evidence";
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /manual publication evidence artifact names must be unique per run attempt/,
+  );
+});
+
+const GH_STUB = `#!/usr/bin/env bash
+set -euo pipefail
+case "$*" in
+  *"/releases/tags/"*) printf '%s\\n' "\${STUB_RELEASE:-stable}" ;;
+  *"/contents/VERSION"*) printf '%s\\n' "\${STUB_VERSION:-0.5.0}" ;;
+  *"/check-runs"*)
+    for context in documentation python unit integration contract browser image; do
+      case "$*" in
+        *"verification / $context"*)
+          upper="$(printf '%s' "$context" | tr '[:lower:]' '[:upper:]')"
+          variable="STUB_CONTEXT_\${upper}"
+          printf '%s\\n' "\${!variable:-success}"
+          exit 0
+          ;;
+      esac
+    done
+    printf '%s\\n' "\${STUB_CHECK:-success}"
+    ;;
+  *) printf '%s\\n' "" ;;
+esac
+`;
+
+// `git ls-remote` prints "<sha>\\t<ref>"; the step cuts the first field, so an
+// empty revision reproduces an unresolvable tag.
+const GIT_STUB = `#!/usr/bin/env bash
+set -euo pipefail
+if [ "\${1:-}" = "ls-remote" ]; then
+  printf '%s\\t%s\\n' "\${STUB_REVISION-0000000000000000000000000000000000000000}" "refs/tags/v0.5.0^{}"
+fi
+`;
+
+// Executes the real resolution step with controlled git and gh responses, so a
+// refusal is observed as a stopped step with no revision output rather than as
+// shell text that merely looks like a refusal.
+function runResolutionStep(root, options = {}) {
+  const parsed = YAML.parse(
+    fs.readFileSync(path.join(root, ".github/workflows/release.yaml"), "utf8"),
+  );
+  const resolve = parsed.jobs.repair.steps.find((step) => step.id === "resolve");
+  const script = (options.script ?? resolve.run).replaceAll(
+    "${{ github.repository }}",
+    "hametovbr/media-finder",
+  );
+  assert.doesNotMatch(script, /\$\{\{/, "the resolution step must not be executed with unresolved expressions");
+  const workdir = fs.mkdtempSync(path.join(os.tmpdir(), "media-finder-resolve-"));
+  const bin = path.join(workdir, "bin");
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, "gh"), GH_STUB, { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, "git"), GIT_STUB, { mode: 0o755 });
+  const scriptPath = path.join(workdir, "resolve.sh");
+  fs.writeFileSync(scriptPath, script, "utf8");
+  const outputPath = path.join(workdir, "github-output");
+  fs.writeFileSync(outputPath, "", "utf8");
+  const result = spawnSync("bash", [scriptPath], {
+    cwd: workdir,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      GITHUB_OUTPUT: outputPath,
+      GH_TOKEN: "stub-token",
+      RELEASE_TAG: "v0.5.0",
+      STUB_REVISION: "c91b44a0000000000000000000000000000000aa",
+      ...options.environment,
+    },
+  });
+  const output = fs.readFileSync(outputPath, "utf8");
+  fs.rmSync(workdir, { recursive: true, force: true });
+  return { status: result.status, output, stdout: result.stdout, stderr: result.stderr };
+}
+
+// Executes the real staging step against a workspace that mirrors the manual
+// entry point: the release checkout is the workspace and the trusted publisher
+// arrives in a nested checkout that must not survive.
+function runStagingStep(root, options = {}) {
+  const parsed = YAML.parse(
+    fs.readFileSync(path.join(root, ".github/workflows/release.yaml"), "utf8"),
+  );
+  const stage = parsed.jobs.repair.steps.find(
+    (step) => step.name === "Stage the trusted publisher",
+  );
+  const script = (options.script ?? stage.run).replaceAll(
+    "${{ github.repository }}",
+    "hametovbr/media-finder",
+  );
+  assert.doesNotMatch(script, /\$\{\{/, "the staging step must not be executed with unresolved expressions");
+  const workdir = fs.mkdtempSync(path.join(os.tmpdir(), "media-finder-stage-"));
+  const workspace = path.join(workdir, "workspace");
+  const runnerTemp = path.join(workdir, "runner-temp");
+  fs.mkdirSync(path.join(workspace, "trusted", "scripts"), { recursive: true });
+  fs.mkdirSync(runnerTemp, { recursive: true });
+  fs.writeFileSync(path.join(workspace, "VERSION"), "0.5.0\n", "utf8");
+  fs.writeFileSync(
+    path.join(workspace, "trusted", "scripts", "release-publication.mjs"),
+    "trusted publisher\n",
+    "utf8",
+  );
+  const git = (...args) =>
+    spawnSync("git", args, { cwd: workspace, encoding: "utf8", env: process.env });
+  git("init", "-q", ".");
+  git("config", "user.email", "review@example.invalid");
+  git("config", "user.name", "review");
+  git("add", "VERSION");
+  git("commit", "-qm", "release");
+  const headBefore = git("rev-parse", "HEAD").stdout.trim();
+  const scriptPath = path.join(workdir, "stage.sh");
+  fs.writeFileSync(scriptPath, script, "utf8");
+  const result = spawnSync("bash", [scriptPath], {
+    cwd: workspace,
+    encoding: "utf8",
+    env: { ...process.env, RUNNER_TEMP: runnerTemp },
+  });
+  const stagedPath = path.join(runnerTemp, "release-publication.mjs");
+  const staged = fs.existsSync(stagedPath) ? fs.readFileSync(stagedPath, "utf8") : null;
+  const residue = fs.existsSync(path.join(workspace, "trusted"));
+  const headAfter = git("rev-parse", "HEAD").stdout.trim();
+  fs.rmSync(workdir, { recursive: true, force: true });
+  return { status: result.status, staged, residue, headBefore, headAfter, stderr: result.stderr };
+}
+
+test("the real staging step copies the trusted publisher out and removes its checkout", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const result = runStagingStep(root);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.staged, "trusted publisher\n");
+  assert.equal(result.residue, false, "the trusted checkout must not survive staging");
+  assert.equal(result.headAfter, result.headBefore);
+});
+
+test("a staging step whose copy is commented out stages nothing", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const parsed = YAML.parse(
+    fs.readFileSync(path.join(root, ".github/workflows/release.yaml"), "utf8"),
+  );
+  const original = parsed.jobs.repair.steps.find(
+    (step) => step.name === "Stage the trusted publisher",
+  ).run;
+
+  // The control shows the same fixture stages the publisher when the copy really
+  // runs, so the commented result below is caused by the comment and not by the
+  // fixture failing for an unrelated reason.
+  const control = runStagingStep(root, { script: original });
+  assert.equal(control.staged, "trusted publisher\n");
+
+  // The step still exits successfully, which is why the validator compares the
+  // whole command list instead of searching it for the copy text.
+  const result = runStagingStep(root, {
+    script: original.replace(
+      'cp trusted/scripts/release-publication.mjs "$RUNNER_TEMP/release-publication.mjs"',
+      'true;# cp trusted/scripts/release-publication.mjs "$RUNNER_TEMP/release-publication.mjs"',
+    ),
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.staged, null);
+});
+
+test("the real resolution step publishes the resolved revision for a valid request", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const result = runResolutionStep(root);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.output, /^revision=c91b44a0[0-9a-f]{32}$/m);
+});
+
+// Each case names the diagnostic it must produce, so a refusal cannot satisfy the
+// test by stopping for an unrelated reason.
+for (const [name, environment, diagnostic] of [
+  [
+    "a tag that is not canonical",
+    { RELEASE_TAG: "0.5.0" },
+    "release_tag must be a canonical vX.Y.Z tag",
+  ],
+  [
+    "a tag without a stable release",
+    { STUB_RELEASE: "other" },
+    "release_tag must name an existing published non-prerelease release",
+  ],
+  [
+    "a tag the repository cannot resolve",
+    { STUB_REVISION: "" },
+    "release tag could not be resolved to a commit",
+  ],
+  [
+    "a version that disagrees with the tag",
+    { STUB_VERSION: "0.4.0" },
+    "release tag does not equal the version at",
+  ],
+  [
+    "a release commit whose 'image' context failed",
+    { STUB_CONTEXT_IMAGE: "failure" },
+    "release commit lacks a successful verification / image check",
+  ],
+]) {
+  test(`the real resolution step refuses ${name}`, (context) => {
+    const root = copyDeliveryFixture();
+    context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+    const result = runResolutionStep(root, { environment });
+
+    assert.notEqual(result.status, 0, `expected a refusal, got:\n${result.stdout}`);
+    assert.equal(result.output, "", "a refused request must not publish a revision");
+    assert.ok(
+      result.stdout.includes(diagnostic),
+      `expected the refusal to name "${diagnostic}", got:\n${result.stdout}`,
+    );
+  });
+}
+
+test("the real resolution step requires every verification context", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  for (const name of [
+    "documentation",
+    "python",
+    "unit",
+    "integration",
+    "contract",
+    "browser",
+    "image",
+  ]) {
+    const result = runResolutionStep(root, {
+      environment: { [`STUB_CONTEXT_${name.toUpperCase()}`]: "failure" },
+    });
+    assert.notEqual(result.status, 0, `a failed ${name} context must refuse the release`);
+    assert.equal(result.output, "", `a failed ${name} context must not publish a revision`);
+    assert.ok(
+      result.stdout.includes(
+        `release commit lacks a successful verification / ${name} check`,
+      ),
+      `a failed ${name} context must name itself in its diagnostic, got:\n${result.stdout}`,
+    );
+  }
+
+  // Dropping one context from the step's own list is invisible to a harness that
+  // answers every context identically, so the stubs answer per context.
+  const parsed = YAML.parse(
+    fs.readFileSync(path.join(root, ".github/workflows/release.yaml"), "utf8"),
+  );
+  const script = parsed.jobs.repair.steps
+    .find((step) => step.id === "resolve")
+    .run.replace(" image;", ";");
+
+  const reduced = runResolutionStep(root, {
+    script,
+    environment: { STUB_CONTEXT_IMAGE: "failure" },
+  });
+
+  assert.equal(reduced.status, 0, "the harness must expose a dropped context");
+  assert.match(reduced.output, /^revision=/m);
+});
+
+test("a resolution step whose exits were removed no longer refuses", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const parsed = YAML.parse(
+    fs.readFileSync(path.join(root, ".github/workflows/release.yaml"), "utf8"),
+  );
+  const original = parsed.jobs.repair.steps.find((step) => step.id === "resolve").run;
+  const environment = { STUB_CONTEXT_DOCUMENTATION: "failure" };
+
+  // The control keeps this test honest: the fixture must be refused by the shipped
+  // step, otherwise a valid request would make the mutated result meaningless.
+  const control = runResolutionStep(root, { script: original, environment });
+  assert.notEqual(control.status, 0, `the control fixture must be refused:\n${control.stdout}`);
+  assert.equal(control.output, "");
+
+  // Without the exits the same invalid request reaches the end of the step, which
+  // is exactly what the static guard assertions exist to prevent.
+  const result = runResolutionStep(root, {
+    script: original.replaceAll("exit 1", "true"),
+    environment,
+  });
+
+  assert.equal(result.status, 0);
+  assert.match(result.output, /^revision=/m);
+});
+
+test("the release-event publication job does not run on manual dispatch", (context) => {
+  const root = copyDeliveryFixture();
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  mutateYaml(root, ".github/workflows/release.yaml", (value) => {
+    // GitHub coerces a missing prerelease to null, and `null == false` is true,
+    // so this condition alone lets a manual dispatch into the release-event job.
+    value.jobs.publish.if = "${{ github.event.release.prerelease == false }}";
+    return value;
+  });
+
+  assert.match(
+    validateDelivery(root).join("\n"),
+    /stable publish condition must require the release event/,
   );
 });
 

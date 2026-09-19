@@ -363,13 +363,17 @@ test("the Docker adapter builds one immutable tag and retags by digest", async (
     "--label",
     `org.opencontainers.image.revision=${REVISION}`,
     "--provenance=mode=max",
-    "--cache-from",
-    "type=gha",
-    "--cache-to",
-    "type=gha,mode=max",
     "--push",
     ".",
   ]);
+  // A release build must not depend on the Actions cache service: the cache
+  // backend reads runtime-only environment that a repair run does not supply,
+  // and layers shared across revisions make the published image unreproducible.
+  assert.equal(
+    calls[0][1].some((argument) => /^(--cache-from|--cache-to|--cache-to=)/.test(argument)),
+    false,
+    "the release build must not request an Actions cache backend",
+  );
   assert.deepEqual(calls[1][1], [
     "buildx",
     "imagetools",
