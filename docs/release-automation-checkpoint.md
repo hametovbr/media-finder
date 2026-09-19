@@ -120,7 +120,8 @@ Gate results reproduced on the delivery branch head:
 | `uv run mypy` | passed (100 source files) |
 | `uv run pytest` (sandbox-observed) | 628 passed |
 
-Hosted evidence for the final delivery head (run `35448425645`, pull request #36):
+Hosted evidence for the delivery branch (run `35448425645`, head `706cacc`,
+pull request #36):
 all seven required contexts passed — `documentation`, `python`, `unit`,
 `integration`, `contract`, `browser`, `image` — which covers wheel isolation and
 production-image smoke. The downloadable browser evidence was inspected on this
@@ -131,6 +132,13 @@ head: `provenance.json` records `pullRequest.headSha`
 directories with 208 capture PNGs plus the Playwright report assets. The producing
 checkout, not the head, is the synthetic pull-request merge commit `190a92a2…`,
 which is expected for a pull-request run.
+
+The run identifiers recorded here and above are GitHub Actions runs of this
+repository, not repository artifacts: they are re-checkable with
+`gh run view <id>` and `gh pr checks 36`. The authoritative state for the current
+head is always the pull request's own check results, because every head change
+starts a fresh run and branch protection requires all seven contexts with strict
+freshness.
 
 Authenticated security verification, captured on this candidate:
 
@@ -170,9 +178,10 @@ archived task list states that in each case.
 Synchronization and archive (5.1) are complete. The remaining gates are:
 
 - **Delivery (5.2).** Pull request #36 on `feat/automated-stable-release` carries
-  the final head with all seven required checks successful. It still needs a
-  passing exact-head review and a protected squash merge with confirmed
-  `main`/edge provenance, so merge remains **NO** at the time of writing.
+  the delivery branch head, and every head on this branch has had all seven
+  required checks successful. It still needs a passing exact-head review and a
+  protected squash merge with confirmed `main`/edge provenance, so merge remains
+  **NO** at the time of writing.
 - **4.5.** Disposable-repository validation of App-created PR, `main` and Release
   event propagation needs separate access authorization and a disposable
   validation repository. It is a recorded prerequisite of activation.
@@ -206,11 +215,17 @@ owner and completed this change.
 
 ### Review findings
 
-Review round 4 raised two Important findings, both resolved in the follow-up
-commit recorded here: the authenticated `pnpm security:verify` result is now
-captured in this document instead of being asserted without evidence and
-contradicted elsewhere, and this handoff record now matches the committed and
-archived state instead of describing an uncommitted candidate awaiting archive.
+Review round 1 returned `needs_revision` with one Important finding — the stale-base
+replacement being performed across a same-version re-dispatch rather than in the
+discovering run needed an explicit recorded authorization. That is now recorded in
+the planning artifacts and described under "Required design clarification", and the
+same round's five Minor findings were fixed.
+
+Review round 4 raised two further Important findings, both resolved in the
+follow-up commit recorded here: the authenticated `pnpm security:verify` result is
+now captured in this document instead of being asserted without evidence and
+contradicted elsewhere, and this handoff record matches the committed and archived
+state instead of describing an uncommitted candidate awaiting archive.
 
 Review finding N1 (Minor) is also resolved. The two stale docblocks in
 `scripts/release-automation.mjs` and the misleading comment on the legacy
@@ -220,19 +235,27 @@ summary, so the assertion is discriminating instead of passing through an
 unmapped-code fallback. The underlying behavior was never wrong; only the
 documentation and the strength of the assertion were.
 
+Review round 5 raised two Minor record-reconciliation findings, both resolved:
+the archived task list now states the inspected browser evidence as observed and
+no longer attributes it to the delivery head, and this document describes the
+branch as a small set of logically separated commits without fixing a review-round
+count. Round 6 confirmed both closures and reported the head-reference and
+task-list wording corrected in the same follow-up.
+
 ## Verification limits
 
 Focused and local checks for the implemented portions do not replace the
 whole-change, host and live gates. Independent wheel builds, production-image
 smoke, the hosted browser evidence and `pnpm security:verify` are no longer
-outstanding: they were obtained for the final delivery head and are recorded
+outstanding: they were obtained on this delivery branch and are recorded
 above. Evidence that remains unavailable: the App installation token (issuance,
 exact permissions and repository scope), the authenticated `main`-branch
 protection read, live App-created PR/`main`/Release event propagation, and GHCR
 manifest validation for a published stable release. Disposable
 validation-repository access is a separate prerequisite.
 
-Synchronization and archive are complete, and the seven required checks passed for
-the final delivery head. The exact-head review and the protected merge, the
+Synchronization and archive are complete, and the seven required checks have
+passed for every head on this delivery branch. The exact-head review and the
+protected merge, the
 disposable-repository validation recorded in 4.5, and activation remain
 incomplete. No product release is part of this record.
